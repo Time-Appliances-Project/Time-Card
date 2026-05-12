@@ -107,24 +107,7 @@ Atomic clock examples:
 
 <p align="center">Figure 2. Atomic Clock Examples</p>
 
-OCXO examples:
-* [SiT5711](https://www.sitime.com/products/stratum-3e-ocxos/sit5711)
-<img width="555" alt="SiTime-SiT5711" src="https://www.sitime.com/sites/default/files/styles/original_image/public/products/9x7mm-MEMS-OCXO-%28Angled%29.png.webp?itok=0K1N8hG3">
 
-* [DT-5151](https://www.taitien.com/ti-products/ultra-high-precision-disciplined-oscillator-dt-5151-series)
-<img width="555" alt="taitien-dt-5151" src="https://github.com/opencomputeproject/Time-Appliance-Project/blob/master/Time-Card/images/DT-5151.png">
-
-* ROD2522S2 from Rakon, PPS disciplined oscillator
-
-* Taitien PN: NJ-10M-075 , Stratum 3E oscillator footprint compatible with ROD2522S2
-
-TCXO examples:
-* [SiT5356](https://www.sitime.com/products/super-tcxo/sit5356)
-<img width="555" alt="SiT5356" src="https://www.sitime.com/sites/default/files/styles/original_image/public/products/Elite-10-Pin-Ceramic-package-3D-top%26bottom-small.png.webp?itok=E7VIydYc">
-
-* SiT5501 Super-TCXO
-
-* Taitien PN: M0166-T-001-3 , footprint compatible with SiT5501 family
 
 ## Bridge
 
