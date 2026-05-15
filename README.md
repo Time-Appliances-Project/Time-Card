@@ -97,10 +97,8 @@ Atomic clock examples:
 
 <p align="center">
 <img width="666" alt="microchip-mac-sa5x" src="https://user-images.githubusercontent.com/1751211/132626512-3fded23e-dcad-4325-ba4a-0825a9191dce.png">
-<img width="666" alt="microchip-ln-csac" src="https://github.com/opencomputeproject/Time-Appliance-Project/blob/master/Time-Card/images/lncsac.png">
 <img width="666" alt="orolia-mro-50" src="https://user-images.githubusercontent.com/1751211/132625857-12b92625-4d08-4ae7-be18-f8ff6b79b49d.png">
 <img width="555" alt="microchip-mac-sa4x" src="https://user-images.githubusercontent.com/1751211/132625863-4a053483-61bf-4617-9bbe-95c464014563.png">
-<img width="555" alt="taitien-dta-100" src="https://github.com/opencomputeproject/Time-Appliance-Project/blob/master/Time-Card/images/DTA-100.png">
    
 </p>
 
