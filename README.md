@@ -117,13 +117,15 @@ Here is one of the examples of hardware implementations.
 * FPGA is responsible for most of the functionality
 * Exposed /dev/phc and /dev/pps are read by open source software such as ptp4l and chronyd
 
-<a id="Figure-3">![Time Card - Block Diagram](https://raw.githubusercontent.com/opencomputeproject/Time-Appliance-Project/master/Time-Card/images/idea.png)</a>
+<img width="1536" height="864" alt="idea" src="https://github.com/user-attachments/assets/47cd1b4a-8841-4b3f-8b43-d4568c7b8021" />
 
 <p align="center">Figure 3. Time Card Block Diagram</p>
 
-<a id="Figure-4.1">![Bridge Block Diagram](https://raw.githubusercontent.com/opencomputeproject/Time-Appliance-Project/master/Time-Card/images/block1.png)</a>
-<a id="Figure-4.2">![Bridge Block Diagram](https://raw.githubusercontent.com/opencomputeproject/Time-Appliance-Project/master/Time-Card/images/block2.png)</a>
-<a id="Figure-4.3">![Bridge Block Diagram](https://raw.githubusercontent.com/opencomputeproject/Time-Appliance-Project/master/Time-Card/images/block3.png)</a>
+<img width="1536" height="1183" alt="block1" src="https://github.com/user-attachments/assets/17fe3fc1-3143-4383-9593-61649fe109ed" />
+
+<img width="1536" height="880" alt="block2" src="https://github.com/user-attachments/assets/78ae3161-fc01-4a5d-89b7-2f9a511b97b1" />
+
+<img width="1536" height="680" alt="block3" src="https://github.com/user-attachments/assets/8c2dd9e9-e808-4851-9160-7dddd7ecde35" />
 
 <p align="center">Figure 4. Bridge Block Diagram</p>
 
