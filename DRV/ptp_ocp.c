@@ -26,6 +26,21 @@
 #include <linux/crc16.h>
 #include <linux/timekeeping.h>
 
+#include <linux/version.h>
+
+/* Compatibility for kernel API changes; see DRV/README.md. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0)
+#define timer_delete_sync(t) timer_delete_sync(t)
+#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)
+#define timer_container_of(var, timer, field) from_timer(var, timer, field)
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+#define OCP_BIN_ATTR_CONST const
+#else
+#define OCP_BIN_ATTR_CONST
+#endif
+
 /*---------------------------------------------------------------------------*/
 #ifndef MRO50_IOCTL_H
 #define MRO50_IOCTL_H
@@ -1677,7 +1692,15 @@ ptp_ocp_syncdevicetime(ktime_t *device_time,
 	*device_time = t1;
 
 #if IS_ENABLED(CONFIG_X86_TSC) && !defined(CONFIG_UML)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+	*system_counterval = (struct system_counterval_t) {
+		.cycles = ptm_master_time,
+		.cs_id = CSID_X86_ART,
+		.use_nsecs = true,
+	};
+#else
 	*system_counterval = convert_art_ns_to_tsc(ptm_master_time);
+#endif
 #else
 	*system_counterval = (struct system_counterval_t) { };
 #endif
@@ -1867,7 +1890,7 @@ ptp_ocp_utc_distribute(struct ptp_ocp *bp, u32 val)
 static void
 ptp_ocp_watchdog(struct timer_list *t)
 {
-	struct ptp_ocp *bp = from_timer(bp, t, watchdog);
+	struct ptp_ocp *bp = timer_container_of(bp, t, watchdog);
 	unsigned long flags;
 	u32 status, utc_offset;
 
@@ -2146,7 +2169,11 @@ fail:
 }
 
 static int
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+ptp_ocp_firstchild(struct device *dev, const void *data)
+#else
 ptp_ocp_firstchild(struct device *dev, void *data)
+#endif
 {
 	return 1;
 }
@@ -4618,7 +4645,7 @@ out:
 
 static ssize_t
 config_read(struct file *filp, struct kobject *kobj,
-	    struct bin_attribute *bin_attr, char *buf,
+	    OCP_BIN_ATTR_CONST struct bin_attribute *bin_attr, char *buf,
 	    loff_t off, size_t count)
 {
 	struct ptp_ocp *bp = dev_get_drvdata(kobj_to_dev(kobj));
@@ -4640,7 +4667,7 @@ config_read(struct file *filp, struct kobject *kobj,
 
 static ssize_t
 config_write(struct file *filp, struct kobject *kobj,
-	     struct bin_attribute *bin_attr, char *buf,
+	     OCP_BIN_ATTR_CONST struct bin_attribute *bin_attr, char *buf,
 	     loff_t off, size_t count)
 {
 	struct ptp_ocp *bp = dev_get_drvdata(kobj_to_dev(kobj));
@@ -4663,7 +4690,7 @@ static BIN_ATTR_RW(config, OCP_CONFIG_SIZE);
 
 static ssize_t
 disciplining_config_read(struct file *filp, struct kobject *kobj,
-	    struct bin_attribute *bin_attr, char *buf,
+	    OCP_BIN_ATTR_CONST struct bin_attribute *bin_attr, char *buf,
 	    loff_t off, size_t count)
 {
 	struct ptp_ocp *bp = dev_get_drvdata(kobj_to_dev(kobj));
@@ -4698,7 +4725,7 @@ out:
 
 static ssize_t
 disciplining_config_write(struct file *filp, struct kobject *kobj,
-	     struct bin_attribute *bin_attr, char *buf,
+	     OCP_BIN_ATTR_CONST struct bin_attribute *bin_attr, char *buf,
 	     loff_t off, size_t count)
 {
 	struct ptp_ocp *bp = dev_get_drvdata(kobj_to_dev(kobj));
@@ -4726,7 +4753,7 @@ static BIN_ATTR_RW(disciplining_config, OCP_ART_CONFIG_SIZE);
 
 static ssize_t
 temperature_table_read(struct file *filp, struct kobject *kobj,
-	    struct bin_attribute *bin_attr, char *buf,
+	    OCP_BIN_ATTR_CONST struct bin_attribute *bin_attr, char *buf,
 	    loff_t off, size_t count)
 {
 	struct ptp_ocp *bp = dev_get_drvdata(kobj_to_dev(kobj));
@@ -4761,7 +4788,7 @@ out:
 
 static ssize_t
 temperature_table_write(struct file *filp, struct kobject *kobj,
-	     struct bin_attribute *bin_attr, char *buf,
+	     OCP_BIN_ATTR_CONST struct bin_attribute *bin_attr, char *buf,
 	     loff_t off, size_t count)
 {
 	struct ptp_ocp *bp = dev_get_drvdata(kobj_to_dev(kobj));
@@ -4787,7 +4814,7 @@ temperature_table_write(struct file *filp, struct kobject *kobj,
 }
 static BIN_ATTR_RW(temperature_table, OCP_ART_TEMP_TABLE_SIZE);
 
-static struct bin_attribute *bin_timecard_attrs[] = {
+static OCP_BIN_ATTR_CONST struct bin_attribute *OCP_BIN_ATTR_CONST bin_timecard_attrs[] = {
         &bin_attr_config,
         NULL,
 };
@@ -4853,7 +4880,7 @@ static struct attribute *art_timecard_attrs[] = {
 	NULL,
 };
 
-static struct bin_attribute *bin_art_timecard_attrs[] = {
+static OCP_BIN_ATTR_CONST struct bin_attribute *OCP_BIN_ATTR_CONST bin_art_timecard_attrs[] = {
 		&bin_attr_disciplining_config,
 		&bin_attr_temperature_table,
 		NULL,
@@ -5426,7 +5453,11 @@ ptp_ocp_complete(struct ptp_ocp *bp)
 
 	pps = pps_lookup_dev(bp->ptp);
 	if (pps)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+		ptp_ocp_symlink(bp, &pps->dev, "pps");
+#else
 		ptp_ocp_symlink(bp, pps->dev, "pps");
+#endif
 
 	if (bp->mro50.name)
 		ptp_ocp_symlink(bp, bp->mro50.this_device, "mro50");
@@ -5580,7 +5611,7 @@ ptp_ocp_detach(struct ptp_ocp *bp)
 	ptp_ocp_debugfs_remove_device(bp);
 	ptp_ocp_detach_sysfs(bp);
 	if (timer_pending(&bp->watchdog))
-		del_timer_sync(&bp->watchdog);
+		timer_delete_sync(&bp->watchdog);
 	if (bp->ts0)
 		ptp_ocp_unregister_ext(bp->ts0);
 	if (bp->ts1)

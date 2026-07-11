@@ -7,6 +7,39 @@ Kernel 5.12+ is recommended
 Make sure vt-d option is enabled in BIOS.   
 Run the remake followed by modprobe ptp_ocp
 
+## Modern kernels (6.x and later)
+
+`ptp_ocp.c` carries version guards so it builds from 5.x up to current
+kernels (verified against 7.0). The guarded APIs are: the PTM
+cross-timestamp interface (`system_counterval_t.use_nsecs` with
+`CSID_X86_ART` replaces `convert_art_ns_to_tsc()` on >= 6.10), timer APIs
+(`timer_delete_sync`, `timer_container_of`), const-ified
+`struct bin_attribute` callbacks and groups, the const
+`device_find_child()` match signature, and the embedded PPS device.
+
+### PTM (Precision Time Measurement)
+
+With the LitePCIe-with-PTM gateware (release `TimeCardPTM_V31` or later)
+the driver enables PCIe PTM at probe and implements `getcrosststamp()`
+through hardware PTM dialogs, so `PTP_SYS_OFFSET_PRECISE` works and
+`phc2sys`/`chrony` pick it up automatically — this removes the PCIe
+read-asymmetry from PHC comparisons. The root port above the card must
+advertise the PTM Root capability. Verify after boot:
+
+```
+lspci -vvv -s <card> | grep -A3 "Precision Time"   # Requester+ ... Enabled+
+dmesg | grep "PTM enabled"
+```
+
+### Flashing note (spi-xilinx)
+
+Updating the gateware via `devlink dev flash` needs the spi-xilinx fix in
+`0002-spi-xilinx-Inhibit-transmitter-modern-kernels.patch` (a rebase of
+the original 0001 patch, which no longer applies to current kernels).
+Without it, erases succeed but page-program writes time out and the flash
+chip locks up mid-update. Build the patched `spi-xilinx.ko` and install it
+under `/lib/modules/$(uname -r)/updates/` before flashing.
+
 ## Outcome
 ```
 $ ls -g /sys/class/timecard/ocp0/

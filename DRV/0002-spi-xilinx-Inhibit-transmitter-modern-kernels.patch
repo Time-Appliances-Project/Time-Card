@@ -1,0 +1,103 @@
+From: Jonathan Lemon <jonathan.lemon@gmail.com>
+Subject: [PATCH] spi: xilinx: Inhibit transmitter while filling TX FIFO (kernels >= 6.x rebase)
+
+This is the same fix as 0001-spi-xilinx-Inhibit-transmitter-while-
+filling-TX-FIFO.patch, rebased onto the current spi-xilinx driver
+(verified against v7.0). The original hunks no longer apply because
+the driver was converted to the spi_controller API.
+
+Without this fix, flashing the Time Card over devlink fails: erase
+cycles complete but page-program writes time out ("Connection timed
+out" from flashcp/mtd), because the transmitter clocks out the first
+address bytes repeatedly while the TX FIFO is still being filled,
+locking up the flash chip. With the fix, erase/write/verify of the
+full factory image succeeds.
+
+Apply from the kernel source tree root:
+    patch -p1 < 0002-spi-xilinx-Inhibit-transmitter-modern-kernels.patch
+or build the patched file as an out-of-tree module (obj-m := spi-xilinx.o)
+and install it under /lib/modules/$(uname -r)/updates/.
+
+--- a/drivers/spi/spi-xilinx.c	2026-07-11 00:17:40.448808201 -0700
++++ b/drivers/spi/spi-xilinx.c	2026-07-11 00:17:40.450509079 -0700
+@@ -179,7 +179,8 @@
+ 	/* Disable the transmitter, enable Manual Target Select Assertion,
+ 	 * put SPI controller into host mode, and enable it */
+ 	xspi->write_fn(XSPI_CR_MANUAL_SSELECT |	XSPI_CR_MASTER_MODE |
+-		XSPI_CR_ENABLE | XSPI_CR_TXFIFO_RESET |	XSPI_CR_RXFIFO_RESET,
++		XSPI_CR_ENABLE | XSPI_CR_TXFIFO_RESET |	XSPI_CR_RXFIFO_RESET |
++		XSPI_CR_TRANS_INHIBIT,
+ 		regs_base + XSPI_CR_OFFSET);
+ }
+ 
+@@ -235,12 +236,23 @@
+ 	return 0;
+ }
+ 
++static void xilinx_spi_inhibit_master(struct xilinx_spi *xspi, bool inhibit)
++{
++	u16 cr;
++
++	cr = xspi->read_fn(xspi->regs + XSPI_CR_OFFSET);
++	if (inhibit)
++		cr |= XSPI_CR_TRANS_INHIBIT;
++	else
++		cr &= ~XSPI_CR_TRANS_INHIBIT;
++	xspi->write_fn(cr, xspi->regs + XSPI_CR_OFFSET);
++}
++
+ static int xilinx_spi_txrx_bufs(struct spi_device *spi, struct spi_transfer *t)
+ {
+ 	struct xilinx_spi *xspi = spi_controller_get_devdata(spi->controller);
+ 	int remaining_words;	/* the number of words left to transfer */
+ 	bool use_irq = false;
+-	u16 cr = 0;
+ 
+ 	/* We get here with transmitter inhibited */
+ 
+@@ -253,10 +265,6 @@
+ 		u32 isr;
+ 
+ 		use_irq = true;
+-		/* Inhibit irq to avoid spurious irqs on tx_empty*/
+-		cr = xspi->read_fn(xspi->regs + XSPI_CR_OFFSET);
+-		xspi->write_fn(cr | XSPI_CR_TRANS_INHIBIT,
+-			       xspi->regs + XSPI_CR_OFFSET);
+ 		/* ACK old irqs (if any) */
+ 		isr = xspi->read_fn(xspi->regs + XIPIF_V123B_IISR_OFFSET);
+ 		if (isr)
+@@ -282,9 +290,9 @@
+ 		/* Start the transfer by not inhibiting the transmitter any
+ 		 * longer
+ 		 */
++		xilinx_spi_inhibit_master(xspi, false);
+ 
+ 		if (use_irq) {
+-			xspi->write_fn(cr, xspi->regs + XSPI_CR_OFFSET);
+ 			wait_for_completion(&xspi->done);
+ 			/* A transmit has just completed. Process received data
+ 			 * and check for more data to transmit. Always inhibit
+@@ -292,8 +300,7 @@
+ 			 * register/FIFO, or make sure it is stopped if we're
+ 			 * done.
+ 			 */
+-			xspi->write_fn(cr | XSPI_CR_TRANS_INHIBIT,
+-				       xspi->regs + XSPI_CR_OFFSET);
++			xilinx_spi_inhibit_master(xspi, true);
+ 			sr = XSPI_SR_TX_EMPTY_MASK;
+ 		} else
+ 			sr = xspi->read_fn(xspi->regs + XSPI_SR_OFFSET);
+@@ -327,10 +334,10 @@
+ 		remaining_words -= n_words;
+ 	}
+ 
+-	if (use_irq) {
++	if (use_irq)
+ 		xspi->write_fn(0, xspi->regs + XIPIF_V123B_DGIER_OFFSET);
+-		xspi->write_fn(cr, xspi->regs + XSPI_CR_OFFSET);
+-	}
++
++	xilinx_spi_inhibit_master(xspi, true);
+ 
+ 	return t->len;
+ }
