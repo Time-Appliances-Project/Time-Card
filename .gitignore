@@ -23,11 +23,16 @@ Project\ Outputs*/
 
 
 ### Driver ###
-Time-Card/DRV/*.cmd
-Time-Card/DRV/*.o
-Time-Card/DRV/*.mod
-Time-Card/DRV/*.ko
-Time-Card/DRV/*.mod.c
-Time-Card/DRV/*.order
-Time-Card/DRV/*.symvers
+DRV/Linux/*.cmd
+DRV/Linux/*.o
+DRV/Linux/*.mod
+DRV/Linux/*.ko
+DRV/Linux/*.mod.c
+DRV/Linux/*.order
+DRV/Linux/*.symvers
 *.pyc
+
+# Windows WDK build output
+DRV/Windows/x64/
+DRV/Windows/out/
+DRV/Windows/*.log

@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Copyright (c) 2021 Open Compute Project
+# Copyright [2023] Hewlett Packard Enterprise Development LP
+# SPDX-License-Identifier: BSD-3-Clause
+
+set -euo pipefail
+
+usage()
+{
+	cat <<'EOF'
+Usage: ./remake [build|install|clean]
+
+  build    Build ptp_ocp.ko for the running kernel (default).
+  install  Build and install under /lib/modules/<kernel>/updates/.
+  clean    Remove kernel-module build output.
+
+Environment overrides:
+  KVER=<release>   Kernel release (default: uname -r)
+  KDIR=<path>      Kernel build tree (default: /lib/modules/$KVER/build)
+EOF
+}
+
+action=${1:-build}
+case "$action" in
+	build|install|clean) ;;
+	-h|--help|help)
+		usage
+		exit 0
+		;;
+	*)
+		echo "Unknown action: $action" >&2
+		usage >&2
+		exit 2
+		;;
+esac
+
+KVER=${KVER:-$(uname -r)}
+
+if [[ -z ${KDIR:-} ]]; then
+	if [[ -d ./ksrc ]]; then
+		KDIR=$PWD/ksrc
+	elif [[ -d /lib/modules/$KVER/build ]]; then
+		KDIR=/lib/modules/$KVER/build
+	elif [[ -d /usr/src/kernels/$KVER ]]; then
+		KDIR=/usr/src/kernels/$KVER
+	elif [[ -d /usr/src/linux-headers-$KVER ]]; then
+		KDIR=/usr/src/linux-headers-$KVER
+	elif [[ -d /usr/src/linux-${KVER%-default} ]]; then
+		KDIR=/usr/src/linux-${KVER%-default}
+	else
+		echo "Could not locate the build tree for kernel $KVER." >&2
+		echo "Install matching kernel headers or set KDIR=/path/to/kernel/build." >&2
+		exit 1
+	fi
+fi
+
+if [[ ! -f $KDIR/Makefile ]]; then
+	echo "KDIR is not a kernel build tree: $KDIR" >&2
+	exit 1
+fi
+
+if [[ $action == clean ]]; then
+	make -C "$KDIR" M="$PWD" clean
+	exit 0
+fi
+
+echo "Building ptp_ocp.ko for $KVER using $KDIR"
+make -C "$KDIR" M="$PWD" modules
+
+if [[ $action != install ]]; then
+	exit 0
+fi
+
+if (( EUID != 0 )); then
+	echo "The install action must run as root (for example: sudo ./remake install)." >&2
+	exit 1
+fi
+
+destination=/lib/modules/$KVER/updates/ptp_ocp.ko
+echo "Installing $destination"
+install -D -m 0644 ptp_ocp.ko "$destination"
+depmod -a "$KVER"
+
+echo "Installed successfully. Load with: modprobe ptp_ocp"
