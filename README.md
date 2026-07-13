@@ -175,7 +175,7 @@ Individual | Main Contribution
 ---------------- | -------------
 [Mike Lambeta](https://github.com/AlphaBetaPhi)     | Layout and Schematic Design
 [Oleg Obleukhov](https://github.com/leoleovich)   | Open Time Server Software
-[Jonathan Lemon](https://github.com/jlemon)   | Inital Linux Driver
+[Jonathan Lemon](https://github.com/jlemon)   | Initial Linux Driver
 [Thomas Schaub](https://github.com/thschaub)    | FPGA Design and Code
 Joyce Hsu        | Logo Design
 [Armando Pinales](https://github.com/armando-jp)  | RCB Boards
