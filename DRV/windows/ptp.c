@@ -1,63 +1,110 @@
-/*++
-Module Name:
-    ptp.c
-
-Abstract:
-    High-precision time reading and adjusting logic for TimeCard.
---*/
+/* SPDX-License-Identifier: BSD-3-Clause */
+/* OCP TimeCard PHC access, ported from the Linux ptp_ocp driver. */
 
 #include "timecard.h"
 
 NTSTATUS
-TimeCardGetTime(
-    _In_  PDEVICE_CONTEXT DeviceContext,
-    _Out_ PTIMECARD_TIME  Time
-)
+TimeCardGetTime(PDEVICE_CONTEXT context, TIMECARD_TIME *time)
 {
-    NTSTATUS status = STATUS_SUCCESS;
-    UINT32 ctrl;
-    INT i;
+    ULONG ctrl = 0;
+    ULONG i;
+    NTSTATUS status = STATUS_IO_TIMEOUT;
 
-    WdfWaitLockAcquire(DeviceContext->RegLock, NULL);
+    if (!context->HardwareReady || context->Regs == NULL)
+        return STATUS_DEVICE_NOT_READY;
 
-    // 1. Request time read
-    ctrl = OCP_CTRL_READ_TIME_REQ | OCP_CTRL_ENABLE;
-    WRITE_REGISTER_ULONG(&DeviceContext->Regs->Ctrl, ctrl);
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    WRITE_REGISTER_ULONG((PULONG)&context->Regs->Ctrl,
+                         OCP_CTRL_READ_TIME_REQ | OCP_CTRL_ENABLE);
 
-    // 2. Poll for completion (up to 100 iterations as in Linux driver)
-    for (i = 0; i < 100; i++) {
-        ctrl = READ_REGISTER_ULONG(&DeviceContext->Regs->Ctrl);
-        if (ctrl & OCP_CTRL_READ_TIME_DONE) {
+    for (i = 0; i < 100; ++i) {
+        ctrl = READ_REGISTER_ULONG((PULONG)&context->Regs->Ctrl);
+        if ((ctrl & OCP_CTRL_READ_TIME_DONE) != 0) {
+            status = STATUS_SUCCESS;
             break;
         }
-        KeStallExecutionProcessor(1); // Small delay
+        KeStallExecutionProcessor(1);
     }
 
-    if (ctrl & OCP_CTRL_READ_TIME_DONE) {
-        Time->Nanoseconds = READ_REGISTER_ULONG(&DeviceContext->Regs->TimeNs);
-        Time->Seconds = READ_REGISTER_ULONG(&DeviceContext->Regs->TimeSec);
-    } else {
-        status = STATUS_IO_TIMEOUT;
-    }
+    time->Nanoseconds = READ_REGISTER_ULONG((PULONG)&context->Regs->TimeNs);
+    time->Seconds = READ_REGISTER_ULONG((PULONG)&context->Regs->TimeSec);
+    time->Reserved = 0;
+    WdfWaitLockRelease(context->RegisterLock);
 
-    WdfWaitLockRelease(DeviceContext->RegLock);
-
+    if (time->Nanoseconds >= 1000000000u)
+        return STATUS_DEVICE_DATA_ERROR;
     return status;
 }
 
 NTSTATUS
-TimeCardSetTime(
-    _In_ PDEVICE_CONTEXT DeviceContext,
-    _In_ PTIMECARD_TIME  Time
-)
+TimeCardGetCrossTimestamp(PDEVICE_CONTEXT context,
+                          TIMECARD_CROSSTIMESTAMP *timestamp)
 {
-    WdfWaitLockAcquire(DeviceContext->RegLock, NULL);
+    LARGE_INTEGER before;
+    LARGE_INTEGER after;
+    NTSTATUS status;
 
-    WRITE_REGISTER_ULONG(&DeviceContext->Regs->AdjustNs, (UINT32)Time->Nanoseconds);
-    WRITE_REGISTER_ULONG(&DeviceContext->Regs->AdjustSec, (UINT32)Time->Seconds);
-    WRITE_REGISTER_ULONG(&DeviceContext->Regs->Ctrl, OCP_CTRL_ADJUST_TIME | OCP_CTRL_ENABLE);
+    KeQuerySystemTimePrecise(&before);
+    status = TimeCardGetTime(context, &timestamp->CardTime);
+    KeQuerySystemTimePrecise(&after);
+    timestamp->SystemTimeBefore100ns = (unsigned __int64)before.QuadPart;
+    timestamp->SystemTimeAfter100ns = (unsigned __int64)after.QuadPart;
+    return status;
+}
 
-    WdfWaitLockRelease(DeviceContext->RegLock);
+NTSTATUS
+TimeCardSetTime(PDEVICE_CONTEXT context, const TIMECARD_TIME *time)
+{
+    ULONG select;
 
+    if (!context->HardwareReady || context->Regs == NULL)
+        return STATUS_DEVICE_NOT_READY;
+    if (time->Seconds > MAXULONG || time->Nanoseconds >= 1000000000u)
+        return STATUS_INVALID_PARAMETER;
+
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    select = READ_REGISTER_ULONG((PULONG)&context->Regs->Select);
+
+    WRITE_REGISTER_ULONG((PULONG)&context->Regs->Select,
+                         OCP_SELECT_CLOCK_REG);
+    WRITE_REGISTER_ULONG((PULONG)&context->Regs->AdjustNs,
+                         time->Nanoseconds);
+    WRITE_REGISTER_ULONG((PULONG)&context->Regs->AdjustSec,
+                         (ULONG)time->Seconds);
+    WRITE_REGISTER_ULONG((PULONG)&context->Regs->Ctrl,
+                         OCP_CTRL_ADJUST_TIME | OCP_CTRL_ENABLE);
+
+    /* Reads report the selected source in bits 31:16; writes consume 15:0. */
+    WRITE_REGISTER_ULONG((PULONG)&context->Regs->Select, select >> 16);
+    WdfWaitLockRelease(context->RegisterLock);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+TimeCardGetInfo(PDEVICE_CONTEXT context, TIMECARD_INFO *info)
+{
+    if (!context->HardwareReady || context->Regs == NULL ||
+        context->Tod == NULL)
+        return STATUS_DEVICE_NOT_READY;
+
+    RtlZeroMemory(info, sizeof(*info));
+    info->AbiVersion = TIMECARD_ABI_VERSION;
+    info->DriverVersion = 0x00010003u;
+    info->Layout = context->Layout;
+    info->InterruptMessages = context->InterruptMessages;
+    info->BarLength = context->Bar0Length;
+    info->ClockOffset = context->ClockOffset;
+
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    info->ClockVersion = READ_REGISTER_ULONG((PULONG)&context->Regs->Version);
+    info->ClockStatus = READ_REGISTER_ULONG((PULONG)&context->Regs->Status);
+    info->ClockSelect = READ_REGISTER_ULONG((PULONG)&context->Regs->Select);
+    info->TodVersion = READ_REGISTER_ULONG((PULONG)&context->Tod->Version);
+    info->TodStatus = READ_REGISTER_ULONG((PULONG)&context->Tod->Status);
+    info->UtcStatus = READ_REGISTER_ULONG((PULONG)&context->Tod->UtcStatus);
+    info->Leap = READ_REGISTER_ULONG((PULONG)&context->Tod->Leap);
+    info->GnssStatus = READ_REGISTER_ULONG((PULONG)&context->Tod->GnssStatus);
+    info->Satellites = READ_REGISTER_ULONG((PULONG)&context->Tod->NumSat);
+    WdfWaitLockRelease(context->RegisterLock);
     return STATUS_SUCCESS;
 }

@@ -1,141 +1,151 @@
-/*++
-Module Name:
-    timecard.h
-
-Abstract:
-    Header file for the TimeCard Windows Driver.
-    Contains register definitions and device context.
---*/
+/* SPDX-License-Identifier: BSD-3-Clause */
+/* Internal declarations for the OCP TimeCard Windows KMDF driver. */
 
 #pragma once
 
 #include <ntddk.h>
 #include <wdf.h>
-#include <initguid.h>
 
-//
-// PCI IDs
-//
-#define PCI_VENDOR_ID_FACEBOOK   0x1d9b
-#define PCI_VENDOR_ID_CELESTICA  0x18d4
-#define PCI_VENDOR_ID_OROLIA     0x1ad7
+#include "include/timecard_ioctl.h"
 
-#define PCI_DEVICE_ID_FACEBOOK_TIMECARD  0x0400
-#define PCI_DEVICE_ID_CELESTICA_TIMECARD 0x1008
-#define PCI_DEVICE_ID_OROLIA_ARTCARD     0xa000
+/* Private setup class used by the controller and its raw child PDOs. */
+extern const GUID GUID_DEVCLASS_TIMECARD;
 
-//
-// Register Offsets (from ptp_ocp.c rev1)
-//
-#define TIMECARD_REG_OFFSET         0x01000000
-#define TIMECARD_TOD_OFFSET         0x01050000
-#define TIMECARD_I2C_CTRL_OFFSET    0x00150000
-#define TIMECARD_UART_GNSS_OFFSET   (0x00160000 + 0x1000)
-#define TIMECARD_UART_GNSS2_OFFSET  (0x00170000 + 0x1000)
-#define TIMECARD_UART_MAC_OFFSET    (0x00180000 + 0x1000)
-#define TIMECARD_UART_NMEA_OFFSET   (0x00190000 + 0x1000)
+#define TIMECARD_CLOCK_OFFSET_MSI       0x01000000u
+#define TIMECARD_TOD_OFFSET_MSI         0x01050000u
+#define TIMECARD_UART_GNSS_OFFSET_MSI   0x00161000u
+#define TIMECARD_UART_GNSS2_OFFSET_MSI  0x00171000u
+#define TIMECARD_UART_MAC_OFFSET_MSI    0x00181000u
+#define TIMECARD_UART_NMEA_OFFSET_MSI   0x00191000u
 
-//
-// OCP Core Registers
-//
+#define TIMECARD_CLOCK_OFFSET_MSIX      0x03000000u
+#define TIMECARD_TOD_OFFSET_MSIX        0x03050000u
+#define TIMECARD_UART_GNSS_OFFSET_MSIX  0x02161000u
+#define TIMECARD_UART_GNSS2_OFFSET_MSIX 0x02171000u
+#define TIMECARD_UART_MAC_OFFSET_MSIX   0x02181000u
+#define TIMECARD_UART_NMEA_OFFSET_MSIX  0x02191000u
+
+#define TIMECARD_REGISTER_WINDOW_SIZE   0x00010000u
+#define TIMECARD_UART_CLOCK_HZ          50000000u
+#define TIMECARD_SUBSYSTEM_COUNT        11u
+
 typedef struct _OCP_REG {
-    UINT32 Ctrl;
-    UINT32 Status;
-    UINT32 Select;
-    UINT32 Version;
-    UINT32 TimeNs;
-    UINT32 TimeSec;
-    UINT32 Reserved0[2];
-    UINT32 AdjustNs;
-    UINT32 AdjustSec;
-    UINT32 Reserved1[2];
-    UINT32 OffsetNs;
-    UINT32 OffsetWindowNs;
-    UINT32 Reserved2[2];
-    UINT32 DriftNs;
-    UINT32 DriftWindowNs;
-    UINT32 Reserved3[6];
-    UINT32 ServoOffsetP;
-    UINT32 ServoOffsetI;
-    UINT32 ServoDriftP;
-    UINT32 ServoDriftI;
-    UINT32 StatusOffset;
-    UINT32 StatusDrift;
+    ULONG Ctrl;
+    ULONG Status;
+    ULONG Select;
+    ULONG Version;
+    ULONG TimeNs;
+    ULONG TimeSec;
+    ULONG Reserved0[2];
+    ULONG AdjustNs;
+    ULONG AdjustSec;
+    ULONG Reserved1[2];
+    ULONG OffsetNs;
+    ULONG OffsetWindowNs;
+    ULONG Reserved2[2];
+    ULONG DriftNs;
+    ULONG DriftWindowNs;
+    ULONG Reserved3[6];
+    ULONG ServoOffsetP;
+    ULONG ServoOffsetI;
+    ULONG ServoDriftP;
+    ULONG ServoDriftI;
+    ULONG StatusOffset;
+    ULONG StatusDrift;
 } OCP_REG, *POCP_REG;
 
-#define OCP_CTRL_ENABLE         0x00000001
-#define OCP_CTRL_ADJUST_TIME    0x00000002
-#define OCP_CTRL_READ_TIME_REQ  0x40000000
-#define OCP_CTRL_READ_TIME_DONE 0x80000000
+#define OCP_CTRL_ENABLE          (1u << 0)
+#define OCP_CTRL_ADJUST_TIME     (1u << 1)
+#define OCP_CTRL_READ_TIME_REQ   (1u << 30)
+#define OCP_CTRL_READ_TIME_DONE  (1u << 31)
+#define OCP_SELECT_CLOCK_REG     0xfeu
 
-//
-// TOD (Time of Day) Registers
-//
 typedef struct _TOD_REG {
-    UINT32 Ctrl;
-    UINT32 Status;
-    UINT32 UartPolarity;
-    UINT32 Version;
-    UINT32 AdjSec;
-    UINT32 Reserved0[3];
-    UINT32 UartBaud;
-    UINT32 Reserved1[3];
-    UINT32 UtcStatus;
-    UINT32 Leap;
-    UINT32 Reserved2[2];
-    UINT32 GnssStatus;
-    UINT32 NumSat;
+    ULONG Ctrl;
+    ULONG Status;
+    ULONG UartPolarity;
+    ULONG Version;
+    ULONG AdjSec;
+    ULONG Reserved0[3];
+    ULONG UartBaud;
+    ULONG Reserved1[3];
+    ULONG UtcStatus;
+    ULONG Leap;
+    ULONG Reserved2[2];
+    ULONG GnssStatus;
+    ULONG NumSat;
 } TOD_REG, *PTOD_REG;
 
-//
-// Device Context
-//
 typedef struct _DEVICE_CONTEXT {
     WDFDEVICE Device;
-    
-    // Mapped BAR 0
-    PVOID Bar0Base;
+    volatile UCHAR *Bar0Base;
     ULONG Bar0Length;
-
-    // Register pointers
-    POCP_REG Regs;
-    PTOD_REG Tod;
-
-    // Serialization
-    WDFWAITLOCK RegLock;
-
+    volatile OCP_REG *Regs;
+    volatile TOD_REG *Tod;
+    volatile UCHAR *Uart[TIMECARD_UART_COUNT];
+    ULONG ClockOffset;
+    ULONG TodOffset;
+    ULONG InterruptMessages;
+    ULONG Layout;
+    BOOLEAN HardwareReady;
+    BOOLEAN HierarchyCreated;
+    WDFDEVICE ChildDevices[TIMECARD_SUBSYSTEM_COUNT];
+    WDFWAITLOCK RegisterLock;
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, DeviceGetContext)
 
-//
-// Child Device Context (Serial)
-//
-typedef struct _SERIAL_PORT_CONTEXT {
-    WDFDEVICE Parent;
-    ULONG Offset;
-    PCWSTR Name;
-} SERIAL_PORT_CONTEXT, *PSERIAL_PORT_CONTEXT;
+typedef enum _TIMECARD_SUBSYSTEM {
+    TimeCardSubsystemPhc = 0,
+    TimeCardSubsystemTod,
+    TimeCardSubsystemGnss,
+    TimeCardSubsystemGnss2,
+    TimeCardSubsystemAtomicClock,
+    TimeCardSubsystemNmea,
+    TimeCardSubsystemSma,
+    TimeCardSubsystemTimingIo,
+    TimeCardSubsystemI2c,
+    TimeCardSubsystemFlash,
+    TimeCardSubsystemPtm,
+    TimeCardSubsystemCount
+} TIMECARD_SUBSYSTEM;
 
-WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(SERIAL_PORT_CONTEXT, SerialPortGetContext)
+typedef struct _TIMECARD_CHILD_CONTEXT {
+    TIMECARD_SUBSYSTEM Subsystem;
+} TIMECARD_CHILD_CONTEXT, *PTIMECARD_CHILD_CONTEXT;
 
-//
-// Prototypes
-//
-EVT_WDF_DRIVER_DEVICE_ADD DeviceEvtDeviceAdd;
-EVT_WDF_DEVICE_PREPARE_HARDWARE DeviceEvtPrepareHardware;
-EVT_WDF_DEVICE_RELEASE_HARDWARE DeviceEvtReleaseHardware;
-EVT_WDF_DEVICE_D0_ENTRY DeviceEvtD0Entry;
-EVT_WDF_DEVICE_D0_EXIT DeviceEvtD0Exit;
-EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL DeviceEvtIoDeviceControl;
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(TIMECARD_CHILD_CONTEXT,
+                                   TimeCardChildGetContext)
 
-NTSTATUS TimeCardEnumerateSerialPorts(_In_ PDEVICE_CONTEXT DeviceContext);
+DRIVER_INITIALIZE DriverEntry;
+EVT_WDF_DRIVER_DEVICE_ADD TimeCardEvtDeviceAdd;
+EVT_WDF_DEVICE_PREPARE_HARDWARE TimeCardEvtPrepareHardware;
+EVT_WDF_DEVICE_RELEASE_HARDWARE TimeCardEvtReleaseHardware;
+EVT_WDF_DEVICE_D0_ENTRY TimeCardEvtD0Entry;
+EVT_WDF_DEVICE_D0_EXIT TimeCardEvtD0Exit;
+EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL TimeCardEvtIoDeviceControl;
 
-// IOCTL Definitions
-#define IOCTL_TIMECARD_GET_TIME \
-    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
+NTSTATUS TimeCardCreateSubsystemDevices(PDEVICE_CONTEXT context);
+NTSTATUS TimeCardGetHierarchySetting(PDEVICE_CONTEXT context,
+                                     PBOOLEAN enabled);
+NTSTATUS TimeCardControlHierarchy(
+    PDEVICE_CONTEXT context,
+    const TIMECARD_HIERARCHY_CONTROL *request,
+    TIMECARD_HIERARCHY_CONTROL *response);
 
-typedef struct _TIMECARD_TIME {
-    UINT64 Seconds;
-    UINT32 Nanoseconds;
-} TIMECARD_TIME, *PTIMECARD_TIME;
+NTSTATUS TimeCardGetTime(PDEVICE_CONTEXT context, TIMECARD_TIME *time);
+NTSTATUS TimeCardGetCrossTimestamp(PDEVICE_CONTEXT context,
+                                   TIMECARD_CROSSTIMESTAMP *timestamp);
+NTSTATUS TimeCardSetTime(PDEVICE_CONTEXT context,
+                         const TIMECARD_TIME *time);
+NTSTATUS TimeCardGetInfo(PDEVICE_CONTEXT context, TIMECARD_INFO *info);
+
+NTSTATUS TimeCardUartConfigure(PDEVICE_CONTEXT context,
+                               const TIMECARD_UART_CONFIG *config);
+NTSTATUS TimeCardUartRead(PDEVICE_CONTEXT context,
+                          const TIMECARD_UART_READ_REQUEST *request,
+                          TIMECARD_UART_TRANSFER *transfer);
+NTSTATUS TimeCardUartWrite(PDEVICE_CONTEXT context,
+                           const TIMECARD_UART_TRANSFER *transfer,
+                           ULONG inputLength,
+                           TIMECARD_UART_RESULT *result);

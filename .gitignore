@@ -31,3 +31,8 @@ Time-Card/DRV/*.mod.c
 Time-Card/DRV/*.order
 Time-Card/DRV/*.symvers
 *.pyc
+
+# Windows WDK build output
+DRV/windows/x64/
+DRV/windows/out/
+DRV/windows/*.log

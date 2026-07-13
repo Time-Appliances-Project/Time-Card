@@ -1,55 +1,84 @@
 #!/usr/bin/env bash
 # Copyright (c) 2021 Open Compute Project
 # Copyright [2023] Hewlett Packard Enterprise Development LP
-#     Modified: added SLE support to the remake shell script with supporting docs
+# SPDX-License-Identifier: BSD-3-Clause
+
 set -euo pipefail
 
-DIST="$(awk -F= '/^NAME/{print tolower($2)}' /etc/os-release|awk 'gsub(/[" ]/,x) + 1')"
+usage()
+{
+	cat <<'EOF'
+Usage: ./remake [build|install|clean]
 
-KVER=$(uname -r)
-default_install=1
+  build    Build ptp_ocp.ko for the running kernel (default).
+  install  Build and install under /lib/modules/<kernel>/updates/.
+  clean    Remove kernel-module build output.
 
-if [ "$*" == "install" ]; then
-    INSTALL=1
-fi
+Environment overrides:
+  KVER=<release>   Kernel release (default: uname -r)
+  KDIR=<path>      Kernel build tree (default: /lib/modules/$KVER/build)
+EOF
+}
 
-case "$DIST" in
-    debian*|ubuntu)
-        KDIR=/usr/src/linux-${KVER}
-        ;;
-    centos*)
-        KDIR=/usr/src/kernels/${KVER}
-        ;;
-    oraclelinux*)
-        KDIR=/usr/src/kernels/${KVER}
-        ;;
-    sle*)
-        KDIR=/usr/src/linux-${KVER%-default}
-        # In SUSE Linux Enterprise products, loading unsupported modules is disabled by default
-        # at present, this driver is not supported by SUSE, but does work once compiled and loaded in unsupported mode
-        if ! grep -q 'allow_unsupported_modules 1' /etc/modprobe.d/10-unsupported-modules.conf \
-            || ! [ -f /etc/modprobe.d/10-unsupported-modules.conf ]; then
-
-            >&2 echo "$DIST requires allow_unsupported_modules to be set for this driver"
-            exit 1
-        fi
-        ;;
+action=${1:-build}
+case "$action" in
+	build|install|clean) ;;
+	-h|--help|help)
+		usage
+		exit 0
+		;;
+	*)
+		echo "Unknown action: $action" >&2
+		usage >&2
+		exit 2
+		;;
 esac
 
-if [ -e ./ksrc ]; then
-    KDIR=./ksrc
-    default_install=0
+KVER=${KVER:-$(uname -r)}
+
+if [[ -z ${KDIR:-} ]]; then
+	if [[ -d ./ksrc ]]; then
+		KDIR=$PWD/ksrc
+	elif [[ -d /lib/modules/$KVER/build ]]; then
+		KDIR=/lib/modules/$KVER/build
+	elif [[ -d /usr/src/kernels/$KVER ]]; then
+		KDIR=/usr/src/kernels/$KVER
+	elif [[ -d /usr/src/linux-headers-$KVER ]]; then
+		KDIR=/usr/src/linux-headers-$KVER
+	elif [[ -d /usr/src/linux-${KVER%-default} ]]; then
+		KDIR=/usr/src/linux-${KVER%-default}
+	else
+		echo "Could not locate the build tree for kernel $KVER." >&2
+		echo "Install matching kernel headers or set KDIR=/path/to/kernel/build." >&2
+		exit 1
+	fi
 fi
 
-if [ ! -d "${KDIR:-}" ]; then
-    echo "Could not locate kernel source for distribution '$DIST'"
-    exit 1
+if [[ ! -f $KDIR/Makefile ]]; then
+	echo "KDIR is not a kernel build tree: $KDIR" >&2
+	exit 1
 fi
 
-make -C "${KDIR}" M="${PWD}"
-
-if [ "${INSTALL:-$default_install}" == 1 ]; then
-    echo "installing module"
-    ln -sf "${PWD}"/ptp_ocp.ko /lib/modules/"${KVER}"
-    depmod -a
+if [[ $action == clean ]]; then
+	make -C "$KDIR" M="$PWD" clean
+	exit 0
 fi
+
+echo "Building ptp_ocp.ko for $KVER using $KDIR"
+make -C "$KDIR" M="$PWD" modules
+
+if [[ $action != install ]]; then
+	exit 0
+fi
+
+if (( EUID != 0 )); then
+	echo "The install action must run as root (for example: sudo ./remake install)." >&2
+	exit 1
+fi
+
+destination=/lib/modules/$KVER/updates/ptp_ocp.ko
+echo "Installing $destination"
+install -D -m 0644 ptp_ocp.ko "$destination"
+depmod -a "$KVER"
+
+echo "Installed successfully. Load with: modprobe ptp_ocp"

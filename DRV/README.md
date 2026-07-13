@@ -90,20 +90,124 @@ Now, one can use standard `linuxptp` tools such as `phc2sys` or `ts2phc` to copy
 
 ## Windows Driver
 
-The Windows driver is a KMDF-based driver that provides similar functionality to the Linux version.
+The experimental Windows driver in `windows/` is a KMDF driver for the Meta
+OCP TimeCard (`PCI\\VEN_1D9B&DEV_0400`). Windows does not provide a PHC class
+equivalent to Linux `/dev/ptpN`, so applications use the driver's versioned
+IOCTL ABI through `timecardctl.exe`.
 
 ### Features
-*   **PTP Support**: High-precision time reading via IOCTL.
-*   **Serial Ports**: Automatically enumerates the 4 UARTs (GNSS, MAC, NMEA) as standard Windows COM ports.
-*   **Configuration**: Supports board configuration and SMA mapping through a custom interface.
 
-### Instruction
-1.  **Enable Test-Signing**: `bcdedit /set testsigning on` (Required for non-production signed drivers).
-2.  **Install**: Right-click `windows/timecard.inf` and select **Install**.
-3.  **Verify**: Open **Device Manager** and check for "TimeCard High Precision Clock" under "System devices" and the corresponding COM ports under "Ports (COM & LPT)".
+* **PHC access**: read, set, and system-bracketed cross-timestamp IOCTLs.
+* **Status**: FPGA/TOD version, synchronization, clock source, UTC/leap, and
+  GNSS status registers.
+* **Serial access**: polled access to the GNSS, GNSS2, MAC, and NMEA 16550
+  UARTs. These are raw TimeCard IOCTL ports, not Windows COM ports.
+* **Gateware layouts**: MSI and MSI-X/LitePCIe resource maps matching
+  `ptp_ocp.c`.
+* **Device hierarchy**: a KMDF bus model enumerates the PHC, GNSS/TOD engine,
+  four UART functions, SMA/timing I/O, I2C, FPGA/SPI flash, and PCIe PTM as
+  healthy raw child devices owned by the controller. INF null-driver matches
+  assign each raw PDO to the Time Card class without loading another driver.
+  Each raw PDO receives an explicit administrator/SYSTEM security descriptor,
+  and hierarchy failure is fail-open so it cannot block the controller from
+  starting.
+* **Packaging**: a WDK desktop-driver project, INF validation, test signing,
+  install helper, and verification helper.
+* **Device Manager class and icon**: a dedicated **Time Card** category and a
+  multi-resolution Time Card icon shared by the controller and child devices.
+
+### Build and install
+
+Use an x64 Visual Studio developer prompt with the Windows Driver Kit:
+
+```bat
+cd DRV\windows
+build.cmd
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+`install.ps1` must run as Administrator. It enables Windows test-signing and
+stages the WDK test-signed package. Secure Boot must be off. Reboot, then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File verify.ps1
+```
+
+The verification checks Device Manager state and exercises both the status and
+PHC read paths against the installed card.
+
+Subsystem enumeration is deliberately disabled on first install. On a machine
+currently using the known-good `oem222.inf`, the guarded deployment helper
+stages the new package, restarts only the Time Card PCI device, verifies PHC and
+GNSS UART access, and automatically rolls back on failure:
+
+```powershell
+cd DRV\windows
+powershell -ExecutionPolicy Bypass -File .\deploy-safe.ps1
+```
+
+No system reboot is performed. After the controller passes those checks,
+enable the hierarchy live without making it a boot setting:
+
+```powershell
+timecardctl hierarchy-enable
+```
+
+Confirm every child device is healthy, then persist the setting:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File verify.ps1 -ExpectHierarchy
+timecardctl hierarchy-persist
+```
+
+`hierarchy-disable` clears persistence; existing child nodes disappear after
+the parent device is restarted. Child creation is always fail-open, so a child
+error cannot fail the controller's `AddDevice` path.
+
+### Recovery from the legacy experimental class
+
+The first experimental raw-PDO package used class GUID
+`{49842651-EF23-47D4-BDF6-017A675C87AD}` and failed `AddDevice` with
+`STATUS_INVALID_SECURITY_DESCR`. Keep the card disconnected and remove that
+package from an Administrator shell:
+
+```powershell
+cd DRV\windows
+.\rollback.ps1
+```
+
+`rollback.ps1` validates that legacy class GUID before removal because Windows
+can reuse an `oemNNN.inf` published name for a later safe package. The fixed
+hierarchy uses a fresh setup-class GUID, auto-names every secured raw PDO,
+assigns every child an explicit SYSTEM/Administrators SDDL, and treats child
+enumeration failure as non-fatal to the controller.
 
 ### Outcome
-Once installed, you can use standard serial tools (like PuTTY or Teraterm) to communicate with the GNSS/Atomic clock on the card. High-precision time synchronization applications can use the provided IOCTL interface.
+
+Device Manager's **Devices by type** view lists **OCP Time Card Controller**
+and its subsystem devices in the dedicated **Time Card** category. **Devices
+by connection** shows the subsystem PDOs nested under the PCI controller.
+Windows does not support an arbitrary mixed-class folder in the default view;
+future UART-to-COM or I2C class drivers would remain nested in the connection
+view while appearing under their standard classes in the type view.
+
+![Time Card controller and subsystem devices in Windows Device Manager](windows/assets/device-manager-time-card.png)
+
+The subsystem nodes currently describe and group the hardware functions; PHC,
+status, and raw UART operations continue through the controller IOCTL ABI. The
+control tool supports:
+
+```text
+timecardctl status
+timecardctl get
+timecardctl set-system
+timecardctl uart-config 0 115200
+timecardctl uart-read 0 256 1000
+```
+
+Ports are `0=GNSS`, `1=GNSS2`, `2=MAC`, and `3=NMEA`. Kernel debugging and a
+production EV/attestation-signed catalog are recommended before deploying the
+Windows driver outside a development machine.
 
 ## Driver is included in the mainstream Linux Kernel
 * Initial primitive version ([5.2](https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git/commit/?id=a7e1abad13f3f0366ee625831fecda2b603cdc17))

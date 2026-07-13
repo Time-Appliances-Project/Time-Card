@@ -1,67 +1,123 @@
-;
-; timecard.inf
-;
-; Installation file for the TimeCard Windows Driver.
-;
+; SPDX-License-Identifier: BSD-3-Clause
+; OCP TimeCard Windows KMDF driver (x64, Windows 10 2004 and newer).
 
 [Version]
 Signature   = "$WINDOWS NT$"
-Class       = System
-ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
-Provider    = %ManufacturerName%
+Class       = TimeCard
+ClassGuid   = {B5415088-5EE1-4D3A-8519-C3487370E0BF}
+Provider    = %ProviderName%
 CatalogFile = timecard.cat
-DriverVer   = 03/22/2026,1.0.0.0
+DriverVer   = 07/12/2026,1.3.0.0
 PnpLockdown = 1
+
+[ClassInstall32]
+AddReg = TimeCard_Class.AddReg
+
+[TimeCard_Class.AddReg]
+HKR, , , 0, %TimeCardClassName%
+; The icon is embedded in the driver so the category and raw child PDOs use
+; the same Time Card artwork. Icon provides a stock fallback for old shells.
+HKR, , Icon, , "-20"
+HKR, , IconPath, 0x00010000, "%13%\timecard.sys,-101"
 
 [DestinationDirs]
 DefaultDestDir = 13
 
 [SourceDisksNames]
-1 = %DiskName%,,,
+1 = %DiskName%
 
 [SourceDisksFiles]
-timecard.sys = 1,,
-
-;*****************************************
-; Install Section
-;*****************************************
+timecard.sys = 1
+timecard.ico = 1
 
 [Manufacturer]
-%ManufacturerName% = Standard,NT$ARCH$
+%ProviderName% = Standard,NTamd64.10.0...19041
 
-[Standard.NT$ARCH$]
-%TimeCard.DeviceDesc% = TimeCard_Device, PCI\VEN_1D9B&DEV_0400
-%TimeCard.DeviceDesc% = TimeCard_Device, PCI\VEN_18D4&DEV_1008
-%TimeCard.DeviceDesc% = TimeCard_Device, PCI\VEN_1AD7&DEV_A000
+[Standard.NTamd64.10.0...19041]
+%MetaTimeCard.DeviceDesc% = TimeCard_Device, PCI\VEN_1D9B&DEV_0400
+%Phc.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\PHC
+%Tod.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\TOD
+%Gnss.DeviceDesc%         = TimeCard_Subsystem, TIMECARD\UART_GNSS
+%Gnss2.DeviceDesc%        = TimeCard_Subsystem, TIMECARD\UART_GNSS2
+%AtomicClock.DeviceDesc%  = TimeCard_Subsystem, TIMECARD\UART_MAC
+%Nmea.DeviceDesc%         = TimeCard_Subsystem, TIMECARD\UART_NMEA
+%Sma.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\SMA
+%TimingIo.DeviceDesc%     = TimeCard_Subsystem, TIMECARD\TIMING_IO
+%I2c.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\I2C
+%Flash.DeviceDesc%        = TimeCard_Subsystem, TIMECARD\FLASH
+%Ptm.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\PTM
 
 [TimeCard_Device.NT]
-CopyFiles = File_Copy
+CopyFiles = TimeCard_CopyFiles
+AddProperty = TimeCard_DeviceIcon
 
-[File_Copy]
+[TimeCard_CopyFiles]
 timecard.sys
+timecard.ico
 
-;-------------- Service installation
+[TimeCard_DeviceIcon]
+DeviceIcon,,,,"%13%\timecard.ico"
+
+[TimeCard_Device.NT.HW]
+AddReg = TimeCard_Device.NT.AddReg, TimeCard_MSI.AddReg, TimeCard_Hierarchy.AddReg
+
+[TimeCard_Device.NT.AddReg]
+HKR, , DeviceCharacteristics, 0x10001, 0x0100
+; Raw clock adjustment and UART access are limited to Administrators/SYSTEM.
+HKR, , Security, , "D:P(A;;GA;;;SY)(A;;GA;;;BA)"
+
+[TimeCard_MSI.AddReg]
+; Modern gateware exposes one MSI-X vector per function. The driver currently
+; polls PHC/UART registers but requests the vectors because MSI-X selects the
+; matching BAR layout in LitePCIe gateware, as it does in Linux ptp_ocp.
+HKR, "Interrupt Management\MessageSignaledInterruptProperties", MSISupported, 0x10001, 1
+HKR, "Interrupt Management\MessageSignaledInterruptProperties", MessageNumberLimit, 0x10001, 64
+
+[TimeCard_Hierarchy.AddReg]
+; Fail closed on first install. The elevated control tool enables child PDOs
+; live and persists this value only after their health has been verified.
+HKR, , EnableSubsystemDevices, 0x00010003, 0
+
 [TimeCard_Device.NT.Services]
-AddService = timecard,%SPSVCINST_ASSOCSERVICE%, TimeCard_Service_Inst
+AddService = timecard, %SPSVCINST_ASSOCSERVICE%, TimeCard_Service_Inst
 
-; -------------- TimeCard driver install sections
 [TimeCard_Service_Inst]
-DisplayName    = %TimeCard.SVCDESC%
-ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
-StartType      = 3               ; SERVICE_DEMAND_START
-ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+DisplayName    = %ServiceName%
+ServiceType    = 1
+StartType      = 3
+ErrorControl   = 1
 ServiceBinary  = %13%\timecard.sys
 
-; --- WDF Coinstaller installation ------
 [TimeCard_Device.NT.Wdf]
-KmdfService =  timecard, timecard_wdfsect
+KmdfService = timecard, TimeCard_WdfSect
 
-[timecard_wdfsect]
-KmdfLibraryVersion = $KMDFVERSION$
+[TimeCard_WdfSect]
+KmdfLibraryVersion = 1.33
+
+; The controller bus driver owns these functions in raw mode. Matching each
+; hardware ID to a null service gives every child its Time Card setup class,
+; localized description, and device-specific icon without a second driver.
+[TimeCard_Subsystem.NT]
+AddProperty = TimeCard_DeviceIcon
+
+[TimeCard_Subsystem.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
 
 [Strings]
-SPSVCINST_ASSOCSERVICE = 0x00000002
-ManufacturerName       = "Open Compute Project"
-DiskName               = "TimeCard Installation Disk"
-TimeCard.DeviceDesc    = "TimeCard High Precision Clock"
-TimeCard.SVCDESC       = "TimeCard Service"
+SPSVCINST_ASSOCSERVICE       = 0x00000002
+ProviderName                 = "Open Compute Project"
+DiskName                     = "OCP TimeCard Installation Disk"
+ServiceName                  = "OCP TimeCard Driver"
+TimeCardClassName            = "Time Card"
+MetaTimeCard.DeviceDesc      = "OCP Time Card Controller"
+Phc.DeviceDesc               = "Time Card Precision Hardware Clock (PHC)"
+Tod.DeviceDesc               = "Time Card GNSS Time-of-Day Engine"
+Gnss.DeviceDesc              = "Time Card GNSS Receiver (UART)"
+Gnss2.DeviceDesc             = "Time Card Secondary GNSS Receiver (UART)"
+AtomicClock.DeviceDesc       = "Time Card Atomic Clock (UART)"
+Nmea.DeviceDesc              = "Time Card NMEA Output (UART)"
+Sma.DeviceDesc               = "Time Card SMA Inputs and Outputs"
+TimingIo.DeviceDesc          = "Time Card Timestamp and Signal Generators"
+I2c.DeviceDesc               = "Time Card I2C Controller"
+Flash.DeviceDesc             = "Time Card FPGA Firmware and SPI Flash"
+Ptm.DeviceDesc               = "Time Card PCIe Precision Time Measurement (PTM)"
