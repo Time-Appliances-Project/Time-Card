@@ -12,7 +12,8 @@ Linux `/dev/ptpN`, so applications use the versioned IOCTL ABI through
   status reporting.
 - Polled access to the GNSS, GNSS2, atomic-clock, and NMEA 16550 UARTs.
 - MSI and MSI-X/LitePCIe BAR layouts matching the Linux `ptp_ocp` driver.
-- A dedicated **Time Card** Device Manager class with a custom icon.
+- A dedicated **Time Card** Device Manager class with custom controller and
+  subsystem icons.
 - Raw child devices for the PHC, TOD/GNSS engine, four UARTs, SMA and timing
   I/O, I2C, FPGA/SPI flash, and PCIe PTM.
 
@@ -35,14 +36,23 @@ build.cmd
 Build output is written to:
 
 - `x64\Release\timecard\` - driver package (`timecard.inf`, `timecard.sys`,
-  `timecard.cat`, and `timecard.ico`).
+  `timecard.cat`, the controller icon, and subsystem icons).
 - `out\timecardctl.exe` - command-line control tool.
 
-The project uses WDK test signing for development builds.
+The default Release build is unsigned and ready for Microsoft production
+signing. Use `build.cmd test` only for a local development package. To create
+the HLK driver folder and an attestation CAB, see
+[PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
 
 ## Install
 
-Secure Boot must be disabled before a locally test-signed kernel driver can
+For local development only, build a test-signed package first:
+
+```bat
+build.cmd test
+```
+
+Secure Boot must be disabled before that locally test-signed kernel driver can
 load. From an Administrator PowerShell prompt:
 
 ```powershell
@@ -100,7 +110,14 @@ Device Manager's **Devices by type** view lists the controller and its
 subsystems in the dedicated **Time Card** category. **Devices by connection**
 shows the subsystem PDOs nested under the PCI controller.
 
-![Time Card controller and subsystem devices in Windows Device Manager](assets/device-manager-time-card.png)
+Each subsystem has a compact blue, gold, and white icon matched to its
+function. The OCP Time Card Controller uses the green clock artwork, while
+the Time Card category retains the original card artwork.
 
-Production deployment requires an EV/attestation-signed catalog. The included
-WDK certificate is suitable only for development and test systems.
+![Time Card subsystem icons](assets/subsystem-icon-sheet.png)
+
+![OCP Time Card controller and subsystem icons in Windows Device Manager](assets/device-manager-time-card.png)
+
+Production deployment requires the package returned by Microsoft Hardware Dev
+Center. The repository does not contain a private signing key or a WDK test
+certificate.

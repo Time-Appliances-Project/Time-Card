@@ -3,6 +3,14 @@ rem Build the OCP TimeCard Windows driver and control tool.
 setlocal
 cd /d "%~dp0"
 
+set "SIGNMODE=Off"
+if /i "%~1"=="test" set "SIGNMODE=TestSign"
+if /i "%~1"=="release" set "SIGNMODE=Off"
+if not "%~1"=="" if /i not "%~1"=="test" if /i not "%~1"=="release" (
+    echo usage: build.cmd [release^|test]
+    exit /b 2
+)
+
 set "MSBUILD=msbuild"
 if defined VSINSTALLDIR if exist "%VSINSTALLDIR%MSBuild\Current\Bin\amd64\MSBuild.exe" set "MSBUILD=%VSINSTALLDIR%MSBuild\Current\Bin\amd64\MSBuild.exe"
 
@@ -12,8 +20,8 @@ if errorlevel 1 if not exist "%MSBUILD%" (
     exit /b 1
 )
 
-echo === Building timecard.sys ===
-"%MSBUILD%" timecard.vcxproj /p:Configuration=Release /p:Platform=x64 /nologo /v:m
+echo === Building timecard.sys ^(%SIGNMODE%^) ===
+"%MSBUILD%" timecard.vcxproj /p:Configuration=Release /p:Platform=x64 /p:SignMode=%SIGNMODE% /nologo /v:m
 if errorlevel 1 exit /b 1
 
 echo === Building timecardctl.exe ===
