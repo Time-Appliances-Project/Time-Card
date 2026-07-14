@@ -373,6 +373,62 @@ namespace TimeCardControlCenter
             }
         }
 
+        private async void SetSystemFromClock_Click(object sender,
+                                                     RoutedEventArgs e)
+        {
+            if (!EnsureConnected())
+                return;
+            try
+            {
+                DateTime cardUtc = await Task.Run(
+                    () => client.GetEstimatedClockTimeUtc());
+                if (cardUtc.Year < 2020 || cardUtc.Year > 2100)
+                {
+                    MessageBox.Show(this,
+                        "The Time Card PHC currently reports " +
+                        cardUtc.ToString("yyyy-MM-dd HH:mm:ss.fff 'UTC'",
+                            CultureInfo.InvariantCulture) +
+                        ". Set the PHC from Windows or establish GNSS time before using it to set Windows.",
+                        "Time Card UTC is not plausible", MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                    return;
+                }
+
+                string synchronizationWarning = lastSnapshot != null &&
+                    !lastSnapshot.IsClockSynchronized ?
+                    "\n\nThe PHC is not currently reporting synchronization." :
+                    string.Empty;
+                MessageBoxResult confirmation = MessageBox.Show(this,
+                    "Set Windows system time from the Time Card PHC?\n\n" +
+                    "Time Card: " + cardUtc.ToString(
+                        "yyyy-MM-dd HH:mm:ss.fff 'UTC'",
+                        CultureInfo.InvariantCulture) + "\n" +
+                    "Windows:   " + DateTime.UtcNow.ToString(
+                        "yyyy-MM-dd HH:mm:ss.fff 'UTC'",
+                        CultureInfo.InvariantCulture) +
+                    synchronizationWarning +
+                    "\n\nThis changes the system clock immediately.",
+                    "Confirm Windows time synchronization",
+                    MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (confirmation != MessageBoxResult.Yes)
+                    return;
+
+                DateTime appliedUtc = await Task.Run(
+                    () => client.SetSystemClockFromTimeCard());
+                Log("Windows UTC set from the Time Card PHC at " +
+                    appliedUtc.ToString("yyyy-MM-dd HH:mm:ss.fff 'UTC'",
+                        CultureInfo.InvariantCulture) + ".");
+                await RefreshSnapshotAsync(false);
+            }
+            catch (Exception ex)
+            {
+                Log("Windows time synchronization failed: " + ex.Message);
+                MessageBox.Show(this, ex.Message,
+                    "Unable to set Windows from the Time Card",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private async void ApplyClockSource_Click(object sender, RoutedEventArgs e)
         {
             if (!EnsureConnected())

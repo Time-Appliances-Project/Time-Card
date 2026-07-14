@@ -21,7 +21,8 @@ it does not shell out to `timecardctl` or scrape Device Manager.
   constellation counts, and average carrier-to-noise level. Compatible
   configuration-database receivers expose navigation rate and platform model,
   constellation selection, TP1 timing, and UART 1 message-rate controls.
-- One-shot PHC synchronization from Windows UTC.
+- Guarded one-shot synchronization in both directions between Windows UTC and
+  the Time Card PHC.
 - Polled UART configuration, monitoring, text/hex display, and text or binary
   transmission for GNSS, GNSS2, atomic-clock, and NMEA ports.
 - FPGA NMEA sentence-generator enable, baud, and polarity configuration with
@@ -118,6 +119,16 @@ external PPS, PTP, RTC, DCF77, register-controlled, or external-selector mode.
 The values and register semantics match the Linux `clock_source` attribute.
 Every change requires confirmation because selecting an unavailable source can
 remove PHC synchronization. Time-of-Day/GNSS is the normal Time Card setting.
+
+## Clock synchronization
+
+The **Overview** workspace provides both synchronization directions. **Sync
+from Windows** writes the current Windows UTC value to the PHC. **Sync from
+Time Card** reads a fresh bracketed PHC cross-timestamp and sets Windows UTC
+from the card after explicit confirmation. The second operation requires
+administrator privileges and is blocked when the PHC date is outside 2020 to
+2100, preventing an uninitialized clock such as 1970 from replacing a valid
+system time. Windows accepts this one-shot value at millisecond resolution.
 
 ## u-blox GNSS configuration
 

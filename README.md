@@ -172,8 +172,8 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
 * CAD files for the custom PCIe bracket 
 
 The Windows Control Center provides live timing telemetry and guarded controls
-for the PHC, GNSS, atomic clock, UART/NMEA, SMA routing, I2C, and subsystem
-hierarchy.
+for the PHC, bidirectional PHC/Windows clock synchronization, GNSS, atomic
+clock, UART/NMEA, SMA routing, I2C, and subsystem hierarchy.
 
 ![OCP Time Card Control Center](DRV/Windows/assets/timecard-control-center.png)
 
