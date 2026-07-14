@@ -7,7 +7,7 @@ Class       = TimeCard
 ClassGuid   = {B5415088-5EE1-4D3A-8519-C3487370E0BF}
 Provider    = %ProviderName%
 CatalogFile = timecard.cat
-DriverVer   = 07/12/2026,1.3.0.0
+DriverVer   = 07/13/2026,1.6.0.0
 PnpLockdown = 1
 
 [ClassInstall32]
@@ -15,8 +15,8 @@ AddReg = TimeCard_Class.AddReg
 
 [TimeCard_Class.AddReg]
 HKR, , , 0, %TimeCardClassName%
-; The icon is embedded in the driver so the category and raw child PDOs use
-; the same Time Card artwork. Icon provides a stock fallback for old shells.
+; Keep the original OCP card artwork for the Time Card category.
+; The controller and raw child PDOs select device-specific icons below.
 HKR, , Icon, , "-20"
 HKR, , IconPath, 0x00010000, "%13%\timecard.sys,-101"
 
@@ -29,31 +29,55 @@ DefaultDestDir = 13
 [SourceDisksFiles]
 timecard.sys = 1
 timecard.ico = 1
+timecard-phc.ico = 1
+timecard-tod.ico = 1
+timecard-gnss.ico = 1
+timecard-gnss2.ico = 1
+timecard-atomic.ico = 1
+timecard-nmea.ico = 1
+timecard-sma.ico = 1
+timecard-timing.ico = 1
+timecard-i2c.ico = 1
+timecard-flash.ico = 1
+timecard-ptm.ico = 1
 
 [Manufacturer]
 %ProviderName% = Standard,NTamd64.10.0...19041
 
 [Standard.NTamd64.10.0...19041]
 %MetaTimeCard.DeviceDesc% = TimeCard_Device, PCI\VEN_1D9B&DEV_0400
-%Phc.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\PHC
-%Tod.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\TOD
-%Gnss.DeviceDesc%         = TimeCard_Subsystem, TIMECARD\UART_GNSS
-%Gnss2.DeviceDesc%        = TimeCard_Subsystem, TIMECARD\UART_GNSS2
-%AtomicClock.DeviceDesc%  = TimeCard_Subsystem, TIMECARD\UART_MAC
-%Nmea.DeviceDesc%         = TimeCard_Subsystem, TIMECARD\UART_NMEA
-%Sma.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\SMA
-%TimingIo.DeviceDesc%     = TimeCard_Subsystem, TIMECARD\TIMING_IO
-%I2c.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\I2C
-%Flash.DeviceDesc%        = TimeCard_Subsystem, TIMECARD\FLASH
-%Ptm.DeviceDesc%          = TimeCard_Subsystem, TIMECARD\PTM
+%Phc.DeviceDesc%          = TimeCard_Phc, TIMECARD\PHC
+%Tod.DeviceDesc%          = TimeCard_Tod, TIMECARD\TOD
+%Gnss.DeviceDesc%         = TimeCard_Gnss, TIMECARD\UART_GNSS
+%Gnss2.DeviceDesc%        = TimeCard_Gnss2, TIMECARD\UART_GNSS2
+%AtomicClock.DeviceDesc%  = TimeCard_AtomicClock, TIMECARD\UART_MAC
+%Nmea.DeviceDesc%         = TimeCard_Nmea, TIMECARD\UART_NMEA
+%Sma.DeviceDesc%          = TimeCard_Sma, TIMECARD\SMA
+%TimingIo.DeviceDesc%     = TimeCard_TimingIo, TIMECARD\TIMING_IO
+%I2c.DeviceDesc%          = TimeCard_I2c, TIMECARD\I2C
+%Flash.DeviceDesc%        = TimeCard_Flash, TIMECARD\FLASH
+%Ptm.DeviceDesc%          = TimeCard_Ptm, TIMECARD\PTM
 
 [TimeCard_Device.NT]
-CopyFiles = TimeCard_CopyFiles
+CopyFiles = TimeCard_CopyFiles, TimeCard_SubsystemIcons
 AddProperty = TimeCard_DeviceIcon
 
 [TimeCard_CopyFiles]
 timecard.sys
 timecard.ico
+
+[TimeCard_SubsystemIcons]
+timecard-phc.ico
+timecard-tod.ico
+timecard-gnss.ico
+timecard-gnss2.ico
+timecard-atomic.ico
+timecard-nmea.ico
+timecard-sma.ico
+timecard-timing.ico
+timecard-i2c.ico
+timecard-flash.ico
+timecard-ptm.ico
 
 [TimeCard_DeviceIcon]
 DeviceIcon,,,,"%13%\timecard.ico"
@@ -94,14 +118,117 @@ KmdfService = timecard, TimeCard_WdfSect
 [TimeCard_WdfSect]
 KmdfLibraryVersion = 1.33
 
-; The controller bus driver owns these functions in raw mode. Matching each
-; hardware ID to a null service gives every child its Time Card setup class,
-; localized description, and device-specific icon without a second driver.
-[TimeCard_Subsystem.NT]
-AddProperty = TimeCard_DeviceIcon
+; The controller bus driver owns these functions in raw mode. Each child uses
+; a null service and a device-specific icon without loading a second driver.
+[TimeCard_Phc.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_PhcIcon
 
-[TimeCard_Subsystem.NT.Services]
+[TimeCard_Phc.NT.Services]
 AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_Tod.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_TodIcon
+
+[TimeCard_Tod.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_Gnss.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_GnssIcon
+
+[TimeCard_Gnss.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_Gnss2.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_Gnss2Icon
+
+[TimeCard_Gnss2.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_AtomicClock.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_AtomicIcon
+
+[TimeCard_AtomicClock.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_Nmea.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_NmeaIcon
+
+[TimeCard_Nmea.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_Sma.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_SmaIcon
+
+[TimeCard_Sma.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_TimingIo.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_TimingIcon
+
+[TimeCard_TimingIo.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_I2c.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_I2cIcon
+
+[TimeCard_I2c.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_Flash.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_FlashIcon
+
+[TimeCard_Flash.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_Ptm.NT]
+CopyFiles = TimeCard_SubsystemIcons
+AddProperty = TimeCard_PtmIcon
+
+[TimeCard_Ptm.NT.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%
+
+[TimeCard_PhcIcon]
+DeviceIcon,,,,"%13%\timecard-phc.ico"
+
+[TimeCard_TodIcon]
+DeviceIcon,,,,"%13%\timecard-tod.ico"
+
+[TimeCard_GnssIcon]
+DeviceIcon,,,,"%13%\timecard-gnss.ico"
+
+[TimeCard_Gnss2Icon]
+DeviceIcon,,,,"%13%\timecard-gnss2.ico"
+
+[TimeCard_AtomicIcon]
+DeviceIcon,,,,"%13%\timecard-atomic.ico"
+
+[TimeCard_NmeaIcon]
+DeviceIcon,,,,"%13%\timecard-nmea.ico"
+
+[TimeCard_SmaIcon]
+DeviceIcon,,,,"%13%\timecard-sma.ico"
+
+[TimeCard_TimingIcon]
+DeviceIcon,,,,"%13%\timecard-timing.ico"
+
+[TimeCard_I2cIcon]
+DeviceIcon,,,,"%13%\timecard-i2c.ico"
+
+[TimeCard_FlashIcon]
+DeviceIcon,,,,"%13%\timecard-flash.ico"
+
+[TimeCard_PtmIcon]
+DeviceIcon,,,,"%13%\timecard-ptm.ico"
 
 [Strings]
 SPSVCINST_ASSOCSERVICE       = 0x00000002

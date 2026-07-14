@@ -35,4 +35,5 @@ DRV/Linux/*.symvers
 # Windows WDK build output
 DRV/Windows/x64/
 DRV/Windows/out/
+DRV/Windows/submission/
 DRV/Windows/*.log

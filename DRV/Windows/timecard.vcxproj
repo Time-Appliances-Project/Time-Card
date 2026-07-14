@@ -45,7 +45,7 @@
   <PropertyGroup>
     <EnableInf2cat>true</EnableInf2cat>
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
-    <SignMode>TestSign</SignMode>
+    <SignMode>Off</SignMode>
     <TimeStampServer />
     <TargetName>timecard</TargetName>
   </PropertyGroup>
@@ -70,13 +70,39 @@
     <ClInclude Include="include\timecard_ioctl.h" />
   </ItemGroup>
   <ItemGroup>
-    <Inf Include="timecard.inf" />
+    <Inf Include="timecard.inf">
+      <SpecifyDriverVerDirectiveDate>false</SpecifyDriverVerDirectiveDate>
+      <SpecifyDriverVerDirectiveVersion>false</SpecifyDriverVerDirectiveVersion>
+    </Inf>
     <None Include="timecard.ico" />
+    <None Include="timecard-class.ico" />
+    <None Include="timecard-atomic.ico" />
+    <None Include="timecard-flash.ico" />
+    <None Include="timecard-gnss.ico" />
+    <None Include="timecard-gnss2.ico" />
+    <None Include="timecard-i2c.ico" />
+    <None Include="timecard-nmea.ico" />
+    <None Include="timecard-phc.ico" />
+    <None Include="timecard-ptm.ico" />
+    <None Include="timecard-sma.ico" />
+    <None Include="timecard-timing.ico" />
+    <None Include="timecard-tod.ico" />
     <ResourceCompile Include="timecard.rc" />
   </ItemGroup>
   <ItemGroup>
     <FilesToPackage Include="$(TargetPath)" />
     <FilesToPackage Include="timecard.ico" />
+    <FilesToPackage Include="timecard-atomic.ico" />
+    <FilesToPackage Include="timecard-flash.ico" />
+    <FilesToPackage Include="timecard-gnss.ico" />
+    <FilesToPackage Include="timecard-gnss2.ico" />
+    <FilesToPackage Include="timecard-i2c.ico" />
+    <FilesToPackage Include="timecard-nmea.ico" />
+    <FilesToPackage Include="timecard-phc.ico" />
+    <FilesToPackage Include="timecard-ptm.ico" />
+    <FilesToPackage Include="timecard-sma.ico" />
+    <FilesToPackage Include="timecard-timing.ico" />
+    <FilesToPackage Include="timecard-tod.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
