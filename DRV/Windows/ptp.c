@@ -80,6 +80,39 @@ TimeCardSetTime(PDEVICE_CONTEXT context, const TIMECARD_TIME *time)
     return STATUS_SUCCESS;
 }
 
+static BOOLEAN
+TimeCardClockSourceValid(ULONG source)
+{
+    return source <= TIMECARD_CLOCK_SOURCE_DCF ||
+           source == TIMECARD_CLOCK_SOURCE_REGS ||
+           source == TIMECARD_CLOCK_SOURCE_EXT;
+}
+
+NTSTATUS
+TimeCardSetClockSource(PDEVICE_CONTEXT context,
+                       const TIMECARD_CLOCK_SOURCE_CONTROL *request,
+                       TIMECARD_CLOCK_SOURCE_CONTROL *response)
+{
+    ULONG active;
+
+    if (!context->HardwareReady || context->Regs == NULL)
+        return STATUS_DEVICE_NOT_READY;
+    if (request->Size < sizeof(*request) ||
+        !TimeCardClockSourceValid(request->Source))
+        return STATUS_INVALID_PARAMETER;
+
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    WRITE_REGISTER_ULONG((PULONG)&context->Regs->Select, request->Source);
+    active = READ_REGISTER_ULONG((PULONG)&context->Regs->Select) >> 16;
+    WdfWaitLockRelease(context->RegisterLock);
+
+    RtlZeroMemory(response, sizeof(*response));
+    response->Size = sizeof(*response);
+    response->Source = request->Source;
+    response->ActiveSource = active;
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS
 TimeCardGetInfo(PDEVICE_CONTEXT context, TIMECARD_INFO *info)
 {
@@ -89,7 +122,7 @@ TimeCardGetInfo(PDEVICE_CONTEXT context, TIMECARD_INFO *info)
 
     RtlZeroMemory(info, sizeof(*info));
     info->AbiVersion = TIMECARD_ABI_VERSION;
-    info->DriverVersion = 0x00010006u;
+    info->DriverVersion = 0x00010009u;
     info->Layout = context->Layout;
     info->InterruptMessages = context->InterruptMessages;
     info->BarLength = context->Bar0Length;

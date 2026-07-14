@@ -41,6 +41,8 @@ static NTSTATUS
 TimeCardSelectLayout(PDEVICE_CONTEXT context)
 {
     ULONG uartOffsets[TIMECARD_UART_COUNT];
+    ULONG smaMap1Offset;
+    ULONG smaMap2Offset;
     BOOLEAN useMsix = context->InterruptMessages > 1;
     ULONG i;
 
@@ -48,18 +50,26 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
         context->Layout = TIMECARD_LAYOUT_MSIX;
         context->ClockOffset = TIMECARD_CLOCK_OFFSET_MSIX;
         context->TodOffset = TIMECARD_TOD_OFFSET_MSIX;
+        context->NmeaOutOffset = TIMECARD_NMEA_OUT_OFFSET_MSIX;
         uartOffsets[TIMECARD_UART_GNSS] = TIMECARD_UART_GNSS_OFFSET_MSIX;
         uartOffsets[TIMECARD_UART_GNSS2] = TIMECARD_UART_GNSS2_OFFSET_MSIX;
         uartOffsets[TIMECARD_UART_MAC] = TIMECARD_UART_MAC_OFFSET_MSIX;
         uartOffsets[TIMECARD_UART_NMEA] = TIMECARD_UART_NMEA_OFFSET_MSIX;
+        smaMap1Offset = TIMECARD_SMA_MAP1_OFFSET_MSIX;
+        smaMap2Offset = TIMECARD_SMA_MAP2_OFFSET_MSIX;
+        context->I2cOffset = TIMECARD_I2C_OFFSET_MSIX;
     } else {
         context->Layout = TIMECARD_LAYOUT_MSI;
         context->ClockOffset = TIMECARD_CLOCK_OFFSET_MSI;
         context->TodOffset = TIMECARD_TOD_OFFSET_MSI;
+        context->NmeaOutOffset = TIMECARD_NMEA_OUT_OFFSET_MSI;
         uartOffsets[TIMECARD_UART_GNSS] = TIMECARD_UART_GNSS_OFFSET_MSI;
         uartOffsets[TIMECARD_UART_GNSS2] = TIMECARD_UART_GNSS2_OFFSET_MSI;
         uartOffsets[TIMECARD_UART_MAC] = TIMECARD_UART_MAC_OFFSET_MSI;
         uartOffsets[TIMECARD_UART_NMEA] = TIMECARD_UART_NMEA_OFFSET_MSI;
+        smaMap1Offset = TIMECARD_SMA_MAP1_OFFSET_MSI;
+        smaMap2Offset = TIMECARD_SMA_MAP2_OFFSET_MSI;
+        context->I2cOffset = TIMECARD_I2C_OFFSET_MSI;
     }
 
     if (!TimeCardRangeFits(context->Bar0Length, context->ClockOffset,
@@ -78,6 +88,35 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
         if (!TimeCardRangeFits(context->Bar0Length, uartOffsets[i], 0x20u))
             return STATUS_DEVICE_CONFIGURATION_ERROR;
         context->Uart[i] = context->Bar0Base + uartOffsets[i];
+    }
+
+    /* SMA routing is optional and must never prevent the controller booting. */
+    context->SmaMap1 = NULL;
+    context->SmaMap2 = NULL;
+    context->NmeaOut = NULL;
+    context->I2c = NULL;
+    context->I2cKnownDeviceMask = 0;
+    if (TimeCardRangeFits(context->Bar0Length, smaMap1Offset,
+                          sizeof(TIMECARD_GPIO_REG)) &&
+        TimeCardRangeFits(context->Bar0Length, smaMap2Offset,
+                          sizeof(TIMECARD_GPIO_REG))) {
+        context->SmaMap1 = (volatile TIMECARD_GPIO_REG *)(
+            context->Bar0Base + smaMap1Offset);
+        context->SmaMap2 = (volatile TIMECARD_GPIO_REG *)(
+            context->Bar0Base + smaMap2Offset);
+    }
+
+    /* The FPGA NMEA sentence generator is optional on older images. */
+    if (TimeCardRangeFits(context->Bar0Length, context->NmeaOutOffset,
+                          sizeof(TOD_REG))) {
+        context->NmeaOut = (volatile TOD_REG *)(
+            context->Bar0Base + context->NmeaOutOffset);
+    }
+
+    /* I2C is optional and is only initialized when an I2C IOCTL is used. */
+    if (TimeCardRangeFits(context->Bar0Length, context->I2cOffset,
+                          TIMECARD_REGISTER_WINDOW_SIZE)) {
+        context->I2c = context->Bar0Base + context->I2cOffset;
     }
     return STATUS_SUCCESS;
 }
@@ -231,6 +270,10 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
     context->HardwareReady = FALSE;
     context->Regs = NULL;
     context->Tod = NULL;
+    context->NmeaOut = NULL;
+    context->SmaMap1 = NULL;
+    context->SmaMap2 = NULL;
+    context->I2c = NULL;
     for (i = 0; i < TIMECARD_UART_COUNT; ++i)
         context->Uart[i] = NULL;
     if (context->Bar0Base != NULL) {
@@ -244,8 +287,16 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
 NTSTATUS
 TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 {
-    UNREFERENCED_PARAMETER(device);
+    PDEVICE_CONTEXT context = DeviceGetContext(device);
+    NTSTATUS status;
+
     UNREFERENCED_PARAMETER(previousState);
+
+    status = TimeCardNmeaInitialize(context);
+    if (!NT_SUCCESS(status)) {
+        KdPrint(("timecard: NMEA output initialization unavailable, "
+                 "status 0x%08lx\n", status));
+    }
     return STATUS_SUCCESS;
 }
 

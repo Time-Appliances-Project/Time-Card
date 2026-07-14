@@ -166,8 +166,16 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
 
 * Bill of Materials (parts from Digikey)
 * Schematic and PCB of the time card
-* Driver (Kernel Module) CentOS 8
+* Linux Time Card driver in [`DRV/Linux`](DRV/Linux)
+* Windows KMDF driver, command-line tools, and Control Center in
+  [`DRV/Windows`](DRV/Windows)
 * CAD files for the custom PCIe bracket 
+
+The Windows Control Center provides live timing telemetry and guarded controls
+for the PHC, GNSS, atomic clock, UART/NMEA, SMA routing, I2C, and subsystem
+hierarchy.
+
+![OCP Time Card Control Center](DRV/Windows/assets/timecard-control-center.png)
 
 # Credits
 Hereby we would like to thank these individuals who helped with the initiative, archirecture, design, software development, hardware issue maintanance and upgrades.

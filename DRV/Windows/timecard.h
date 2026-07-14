@@ -13,6 +13,7 @@ extern const GUID GUID_DEVCLASS_TIMECARD;
 
 #define TIMECARD_CLOCK_OFFSET_MSI       0x01000000u
 #define TIMECARD_TOD_OFFSET_MSI         0x01050000u
+#define TIMECARD_NMEA_OUT_OFFSET_MSI    0x010b0000u
 #define TIMECARD_UART_GNSS_OFFSET_MSI   0x00161000u
 #define TIMECARD_UART_GNSS2_OFFSET_MSI  0x00171000u
 #define TIMECARD_UART_MAC_OFFSET_MSI    0x00181000u
@@ -20,10 +21,19 @@ extern const GUID GUID_DEVCLASS_TIMECARD;
 
 #define TIMECARD_CLOCK_OFFSET_MSIX      0x03000000u
 #define TIMECARD_TOD_OFFSET_MSIX        0x03050000u
+#define TIMECARD_NMEA_OUT_OFFSET_MSIX   0x030b0000u
 #define TIMECARD_UART_GNSS_OFFSET_MSIX  0x02161000u
 #define TIMECARD_UART_GNSS2_OFFSET_MSIX 0x02171000u
 #define TIMECARD_UART_MAC_OFFSET_MSIX   0x02181000u
 #define TIMECARD_UART_NMEA_OFFSET_MSIX  0x02191000u
+
+#define TIMECARD_SMA_MAP1_OFFSET_MSI    0x00140000u
+#define TIMECARD_SMA_MAP2_OFFSET_MSI    0x00220000u
+#define TIMECARD_SMA_MAP1_OFFSET_MSIX   0x02140000u
+#define TIMECARD_SMA_MAP2_OFFSET_MSIX   0x02220000u
+
+#define TIMECARD_I2C_OFFSET_MSI         0x00150000u
+#define TIMECARD_I2C_OFFSET_MSIX        0x02150000u
 
 #define TIMECARD_REGISTER_WINDOW_SIZE   0x00010000u
 #define TIMECARD_UART_CLOCK_HZ          50000000u
@@ -76,15 +86,29 @@ typedef struct _TOD_REG {
     ULONG NumSat;
 } TOD_REG, *PTOD_REG;
 
+typedef struct _TIMECARD_GPIO_REG {
+    ULONG Gpio1;
+    ULONG Reserved0;
+    ULONG Gpio2;
+    ULONG Reserved1;
+} TIMECARD_GPIO_REG, *PTIMECARD_GPIO_REG;
+
 typedef struct _DEVICE_CONTEXT {
     WDFDEVICE Device;
     volatile UCHAR *Bar0Base;
     ULONG Bar0Length;
     volatile OCP_REG *Regs;
     volatile TOD_REG *Tod;
+    volatile TOD_REG *NmeaOut;
+    volatile TIMECARD_GPIO_REG *SmaMap1;
+    volatile TIMECARD_GPIO_REG *SmaMap2;
+    volatile UCHAR *I2c;
     volatile UCHAR *Uart[TIMECARD_UART_COUNT];
     ULONG ClockOffset;
     ULONG TodOffset;
+    ULONG NmeaOutOffset;
+    ULONG I2cOffset;
+    ULONG I2cKnownDeviceMask;
     ULONG InterruptMessages;
     ULONG Layout;
     BOOLEAN HardwareReady;
@@ -139,6 +163,10 @@ NTSTATUS TimeCardGetCrossTimestamp(PDEVICE_CONTEXT context,
 NTSTATUS TimeCardSetTime(PDEVICE_CONTEXT context,
                          const TIMECARD_TIME *time);
 NTSTATUS TimeCardGetInfo(PDEVICE_CONTEXT context, TIMECARD_INFO *info);
+NTSTATUS TimeCardSetClockSource(
+    PDEVICE_CONTEXT context,
+    const TIMECARD_CLOCK_SOURCE_CONTROL *request,
+    TIMECARD_CLOCK_SOURCE_CONTROL *response);
 
 NTSTATUS TimeCardUartConfigure(PDEVICE_CONTEXT context,
                                const TIMECARD_UART_CONFIG *config);
@@ -149,3 +177,28 @@ NTSTATUS TimeCardUartWrite(PDEVICE_CONTEXT context,
                            const TIMECARD_UART_TRANSFER *transfer,
                            ULONG inputLength,
                            TIMECARD_UART_RESULT *result);
+
+NTSTATUS TimeCardSmaQuery(PDEVICE_CONTEXT context,
+                          ULONG connector,
+                          TIMECARD_SMA_CONTROL *control);
+NTSTATUS TimeCardSmaSet(PDEVICE_CONTEXT context,
+                        const TIMECARD_SMA_CONTROL *request,
+                        TIMECARD_SMA_CONTROL *response);
+
+NTSTATUS TimeCardI2cGetStatus(PDEVICE_CONTEXT context,
+                              TIMECARD_I2C_STATUS *status);
+NTSTATUS TimeCardI2cProbe(PDEVICE_CONTEXT context,
+                          ULONG address,
+                          TIMECARD_I2C_PROBE *probe);
+NTSTATUS TimeCardI2cRead(PDEVICE_CONTEXT context,
+                         const TIMECARD_I2C_READ_REQUEST *request,
+                         TIMECARD_I2C_TRANSFER *transfer);
+NTSTATUS TimeCardGetIdentity(PDEVICE_CONTEXT context,
+                             TIMECARD_IDENTITY *identity);
+
+NTSTATUS TimeCardNmeaInitialize(PDEVICE_CONTEXT context);
+NTSTATUS TimeCardNmeaQuery(PDEVICE_CONTEXT context,
+                           TIMECARD_NMEA_CONTROL *control);
+NTSTATUS TimeCardNmeaSet(PDEVICE_CONTEXT context,
+                         const TIMECARD_NMEA_CONTROL *request,
+                         TIMECARD_NMEA_CONTROL *response);
