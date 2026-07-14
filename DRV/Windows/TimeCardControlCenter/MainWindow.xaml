@@ -205,6 +205,8 @@
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button Content="Sync from Windows" Click="SetClock_Click" Margin="0,0,10,0" />
+                                    <Button Content="Sync from Time Card" Click="SetSystemFromClock_Click"
+                                            Style="{StaticResource SecondaryButton}" Margin="0,0,10,0" />
                                     <Button Content="Refresh now" Click="Refresh_Click" Style="{StaticResource SecondaryButton}" />
                                 </StackPanel>
                             </Grid>

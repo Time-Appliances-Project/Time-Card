@@ -236,8 +236,19 @@
                                     </Grid.ColumnDefinitions>
                                     <Border x:Name="Indicator" Width="4" Height="24" CornerRadius="2"
                                             Background="Transparent" HorizontalAlignment="Left" />
-                                    <TextBlock Grid.Column="1" Text="{TemplateBinding Content}" FontFamily="Segoe MDL2 Assets"
-                                               FontSize="18" VerticalAlignment="Center" Foreground="{TemplateBinding Foreground}" />
+                                    <TextBlock x:Name="NavGlyph" Grid.Column="1" Text="{TemplateBinding Content}"
+                                               FontFamily="Segoe MDL2 Assets" FontSize="18"
+                                               VerticalAlignment="Center" Foreground="{TemplateBinding Foreground}" />
+                                    <Grid x:Name="SmaNavGlyph" Grid.Column="1" Width="20" Height="20"
+                                          Visibility="Collapsed" HorizontalAlignment="Left"
+                                          VerticalAlignment="Center">
+                                        <Path Data="M 10,1 L 17.5,5.3 L 17.5,14.7 L 10,19 L 2.5,14.7 L 2.5,5.3 Z"
+                                              Stroke="{TemplateBinding Foreground}" StrokeThickness="1.5"
+                                              StrokeLineJoin="Round" />
+                                        <Ellipse Margin="4.5" Stroke="{TemplateBinding Foreground}"
+                                                 StrokeThickness="1.5" />
+                                        <Ellipse Margin="8" Fill="{TemplateBinding Foreground}" />
+                                    </Grid>
                                     <TextBlock Grid.Column="2" Text="{TemplateBinding ToolTip}" VerticalAlignment="Center"
                                                Foreground="{TemplateBinding Foreground}" />
                                 </Grid>
@@ -250,6 +261,10 @@
                                     <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
                                     <Setter TargetName="NavBorder" Property="Background" Value="#152A3D" />
                                     <Setter TargetName="Indicator" Property="Background" Value="{StaticResource AccentBrush}" />
+                                </Trigger>
+                                <Trigger Property="Tag" Value="Sma">
+                                    <Setter TargetName="NavGlyph" Property="Visibility" Value="Collapsed" />
+                                    <Setter TargetName="SmaNavGlyph" Property="Visibility" Value="Visible" />
                                 </Trigger>
                             </ControlTemplate.Triggers>
                         </ControlTemplate>

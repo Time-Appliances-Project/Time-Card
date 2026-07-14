@@ -81,6 +81,55 @@ namespace TimeCardControlCenter
             SendInput(IoctlSetTime, value);
         }
 
+        public DateTime GetEstimatedClockTimeUtc()
+        {
+            TimeCardCrossTimestampRaw timestamp =
+                GetOutput<TimeCardCrossTimestampRaw>(IoctlGetCrossTimestamp);
+            DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0,
+                DateTimeKind.Utc);
+            long cardTicks = checked(
+                (long)timestamp.CardTime.Seconds * TimeSpan.TicksPerSecond +
+                timestamp.CardTime.Nanoseconds / 100);
+            DateTime cardAtSample = epoch.AddTicks(cardTicks);
+            DateTime systemBefore = DateTime.FromFileTimeUtc(
+                (long)timestamp.SystemTimeBefore100ns);
+            DateTime systemAfter = DateTime.FromFileTimeUtc(
+                (long)timestamp.SystemTimeAfter100ns);
+            DateTime systemAtSample = systemBefore.AddTicks(
+                (systemAfter.Ticks - systemBefore.Ticks) / 2);
+            TimeSpan sampleAge = DateTime.UtcNow - systemAtSample;
+            if (sampleAge < TimeSpan.FromSeconds(-2) ||
+                sampleAge > TimeSpan.FromSeconds(10))
+                throw new InvalidOperationException(
+                    "The PHC cross-timestamp sample is too old to set Windows safely.");
+            return cardAtSample.Add(sampleAge);
+        }
+
+        public DateTime SetSystemClockFromTimeCard()
+        {
+            DateTime utc = GetEstimatedClockTimeUtc();
+            if (utc.Year < 2020 || utc.Year > 2100)
+                throw new InvalidOperationException(
+                    "The Time Card PHC does not contain a plausible UTC date. " +
+                    "Set the PHC from Windows or establish GNSS time first.");
+
+            NativeSystemTime systemTime = new NativeSystemTime
+            {
+                Year = (ushort)utc.Year,
+                Month = (ushort)utc.Month,
+                DayOfWeek = (ushort)utc.DayOfWeek,
+                Day = (ushort)utc.Day,
+                Hour = (ushort)utc.Hour,
+                Minute = (ushort)utc.Minute,
+                Second = (ushort)utc.Second,
+                Milliseconds = (ushort)utc.Millisecond
+            };
+            if (!SetSystemTime(ref systemTime))
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Windows rejected the Time Card UTC value.");
+            return utc;
+        }
+
         public uint SetClockSource(uint source)
         {
             TimeCardClockSourceRaw request = new TimeCardClockSourceRaw
@@ -623,6 +672,19 @@ namespace TimeCardControlCenter
             }
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeSystemTime
+        {
+            public ushort Year;
+            public ushort Month;
+            public ushort DayOfWeek;
+            public ushort Day;
+            public ushort Hour;
+            public ushort Minute;
+            public ushort Second;
+            public ushort Milliseconds;
+        }
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess,
             uint shareMode, IntPtr securityAttributes, uint creationDisposition,
@@ -633,5 +695,9 @@ namespace TimeCardControlCenter
         private static extern bool DeviceIoControl(SafeFileHandle device, uint controlCode,
             byte[] inputBuffer, int inputBufferSize, byte[] outputBuffer,
             int outputBufferSize, out int bytesReturned, IntPtr overlapped);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetSystemTime(ref NativeSystemTime systemTime);
     }
 }

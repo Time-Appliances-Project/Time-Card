@@ -55,7 +55,8 @@ and GNSS telemetry, clock control, direct u-blox receiver discovery and guarded
 GNSS configuration, a dedicated Microchip MAC-SA53 atomic-clock configuration
 workspace, UART monitoring and binary commands, SMA signal routing, I2C
 discovery and reads, subsystem hierarchy management, and engineering
-diagnostics.
+diagnostics. The Overview workspace includes guarded one-shot synchronization
+from Windows to the PHC and from the Time Card PHC back to Windows.
 
 ```powershell
 .\build-gui.cmd release
