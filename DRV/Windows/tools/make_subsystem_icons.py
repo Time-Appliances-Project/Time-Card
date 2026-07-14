@@ -277,12 +277,15 @@ def load_font(size: int) -> ImageFont.ImageFont:
 
 def main() -> None:
     windows_dir = Path(__file__).resolve().parents[1]
+    png_dir = windows_dir / "assets" / "subsystem-icons"
+    png_dir.mkdir(parents=True, exist_ok=True)
 
     rendered: list[tuple[str, str, Image.Image]] = []
     for name, (label, factory) in ICONS.items():
         high_resolution = add_glyph_outline(factory())
         image = high_resolution.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
         image.save(windows_dir / f"timecard-{name}.ico", "ICO", sizes=ICO_SIZES)
+        image.save(png_dir / f"timecard-{name}.png", "PNG", optimize=True)
         rendered.append((name, label, image))
 
     columns = 4

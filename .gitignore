@@ -36,4 +36,6 @@ DRV/Linux/*.symvers
 DRV/Windows/x64/
 DRV/Windows/out/
 DRV/Windows/submission/
+DRV/Windows/TimeCardControlCenter/bin/
+DRV/Windows/TimeCardControlCenter/obj/
 DRV/Windows/*.log

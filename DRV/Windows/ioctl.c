@@ -173,6 +173,188 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         break;
     }
 
+    case IOCTL_TIMECARD_SMA_QUERY:
+    {
+        TIMECARD_SMA_CONTROL *input;
+        TIMECARD_SMA_CONTROL requestValue;
+        TIMECARD_SMA_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardSmaQuery(context, requestValue.Connector,
+                                      output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_SMA_SET:
+    {
+        TIMECARD_SMA_CONTROL *input;
+        TIMECARD_SMA_CONTROL requestValue;
+        TIMECARD_SMA_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardSmaSet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_I2C_GET_STATUS:
+    {
+        TIMECARD_I2C_STATUS *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardI2cGetStatus(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_I2C_PROBE:
+    {
+        TIMECARD_I2C_PROBE *input;
+        TIMECARD_I2C_PROBE requestValue;
+        TIMECARD_I2C_PROBE *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (requestValue.Size < sizeof(requestValue)) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardI2cProbe(context, requestValue.Address,
+                                      output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_I2C_READ:
+    {
+        TIMECARD_I2C_READ_REQUEST *input;
+        TIMECARD_I2C_READ_REQUEST requestValue;
+        TIMECARD_I2C_TRANSFER *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardI2cRead(context, &requestValue, output);
+            if (NT_SUCCESS(status)) {
+                information = FIELD_OFFSET(TIMECARD_I2C_TRANSFER, Data) +
+                              output->Length;
+            }
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_CLOCK_SOURCE_SET:
+    {
+        TIMECARD_CLOCK_SOURCE_CONTROL *input;
+        TIMECARD_CLOCK_SOURCE_CONTROL requestValue;
+        TIMECARD_CLOCK_SOURCE_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardSetClockSource(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_NMEA_QUERY:
+    {
+        TIMECARD_NMEA_CONTROL *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardNmeaQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_NMEA_SET:
+    {
+        TIMECARD_NMEA_CONTROL *input;
+        TIMECARD_NMEA_CONTROL requestValue;
+        TIMECARD_NMEA_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardNmeaSet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_GET_IDENTITY:
+    {
+        TIMECARD_IDENTITY *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardGetIdentity(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
     default:
         status = STATUS_INVALID_DEVICE_REQUEST;
         break;

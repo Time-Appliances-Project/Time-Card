@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildToolsPath)\Microsoft.Common.props" Condition="Exists('$(MSBuildToolsPath)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{4AFA1A23-05A7-46F4-B431-49815DAB6DA2}</ProjectGuid>
+    <OutputType>WinExe</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>TimeCardControlCenter</RootNamespace>
+    <AssemblyName>TimeCardControlCenter</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <ProjectTypeGuids>{60dc8134-eba5-43b8-bcc9-bb4bc16c2548};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <WarningLevel>4</WarningLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <ApplicationIcon>..\assets\timecard-app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </ApplicationDefinition>
+    <Page Include="MainWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Compile Include="App.xaml.cs">
+      <DependentUpon>App.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="MainWindow.xaml.cs">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="Models.cs" />
+    <Compile Include="Sa53Client.cs" />
+    <Compile Include="TimeCardClient.cs" />
+    <Compile Include="UbloxClient.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="..\assets\timecard-app.ico"><Link>Assets\timecard-app.ico</Link></Resource>
+    <Resource Include="..\assets\timecard-app-icon.png"><Link>Assets\timecard-app-icon.png</Link></Resource>
+    <Resource Include="..\assets\ocp-timecard-controller-icon.png"><Link>Assets\ocp-timecard-controller.png</Link></Resource>
+    <Resource Include="..\assets\timecard-logo.png"><Link>Assets\timecard-logo.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-atomic.png"><Link>Assets\timecard-atomic.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-flash.png"><Link>Assets\timecard-flash.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-gnss.png"><Link>Assets\timecard-gnss.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-gnss2.png"><Link>Assets\timecard-gnss2.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-i2c.png"><Link>Assets\timecard-i2c.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-nmea.png"><Link>Assets\timecard-nmea.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-phc.png"><Link>Assets\timecard-phc.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-ptm.png"><Link>Assets\timecard-ptm.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-sma.png"><Link>Assets\timecard-sma.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-timing.png"><Link>Assets\timecard-timing.png</Link></Resource>
+    <Resource Include="..\assets\subsystem-icons\timecard-tod.png"><Link>Assets\timecard-tod.png</Link></Resource>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

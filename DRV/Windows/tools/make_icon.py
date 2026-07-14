@@ -102,6 +102,14 @@ def save_icon(image: Image.Image, destination: Path) -> None:
     )
 
 
+def make_app_icon(source_path: Path) -> Image.Image:
+    """Crop the detailed app artwork to a recognizable square taskbar mark."""
+    source = Image.open(source_path).convert("RGBA")
+    side = min(source.width, source.height)
+    source = source.crop((0, 0, side, side))
+    return source.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
+
+
 def main() -> None:
     windows_dir = Path(__file__).resolve().parents[1]
     assets_dir = windows_dir / "assets"
@@ -126,6 +134,10 @@ def main() -> None:
         optimize=True,
     )
     save_icon(controller_image, windows_dir / "timecard.ico")
+
+    app_image = make_app_icon(assets_dir / "timecard-logo.png")
+    app_image.save(assets_dir / "timecard-app-icon.png", "PNG", optimize=True)
+    save_icon(app_image, assets_dir / "timecard-app.ico")
 
 
 if __name__ == "__main__":
