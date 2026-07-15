@@ -19,8 +19,11 @@ Linux `/dev/ptpN`, so applications use the versioned IOCTL ABI through
   four frequency counters, including direct SMA input/output routing.
 - Guarded Xilinx AXI IIC controller access with status, address-only probes,
   7-bit bus discovery, bounded EEPROM/register reads, PCA9546A branch routing,
-  and dedicated IS32FL3207 LED updates. The known identity devices are the
-  board EEPROM at `0x50` and MAC EEPROM at `0x58`.
+  dedicated IS32FL3207 LED updates, open/short diagnostics, and a bounded
+  electrical test. The known identity devices are the board EEPROM at `0x50`
+  and MAC EEPROM at `0x58`.
+- Guarded one-shot telemetry for the BME280 environment sensor, three INA219
+  power monitors, and BNO055 nine-axis IMU on the sensor branch.
 - Guarded Xilinx SPI and SPI-NOR access for FPGA firmware query, 4 KiB erase,
   page programming, and bounded read-back. All offsets are relative to the
   FPGA image region at `0x00400000`; the configuration region is unreachable.
@@ -59,13 +62,14 @@ Build output is written to:
 
 ## Time Card Control Center
 
-The repository also includes a polished native Windows dashboard for live PHC
-and GNSS telemetry, clock control, direct u-blox receiver discovery and guarded
-GNSS configuration, a dedicated Microchip MAC-SA53 atomic-clock configuration
-workspace, UART monitoring and binary commands, SMA signal routing, I2C
-discovery and reads, subsystem hierarchy management, and engineering
-diagnostics. The Overview workspace includes guarded one-shot synchronization
-from Windows to the PHC and from the Time Card PHC back to Windows.
+The repository also includes a polished native Windows dashboard covering live
+PHC telemetry and clock synchronization, u-blox GNSS configuration and a sky
+map, Microchip MAC-SA53 atomic-clock control, multi-format UART monitoring,
+NMEA generation, SMA routing, timing generators and frequency counters,
+sensors and IMU telemetry, I2C mux and status-LED control, subsystem hierarchy,
+FPGA firmware updates, and engineering diagnostics. The application includes
+an animated, aspect-preserving Time Card identity, a polished splash screen,
+clear connection state, and one-click administrator restart when required.
 
 ```powershell
 .\build-gui.cmd release
@@ -76,11 +80,19 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-![OCP Time Card Control Center](assets/timecard-control-center.png)
+Driver **1.15.1 / ABI 8** is required for the complete feature set shown below.
 
-| Clock-source control | NMEA generator and UART | SMA signal routing |
+![Control Center overview](assets/timecard-control-center.png)
+
+| Precision clock | GNSS and sky map | Atomic clock |
 | --- | --- | --- |
-| ![Clock-source control](assets/timecard-control-center-clock.png) | ![NMEA generator and UART](assets/timecard-control-center-nmea.png) | ![SMA signal routing](assets/timecard-control-center-sma.png) |
+| ![Precision clock workspace](assets/timecard-control-center-clock.png) | ![GNSS workspace](assets/timecard-control-center-gnss.png) | ![Atomic clock workspace](assets/timecard-control-center-atomic.png) |
+| UART and NMEA | SMA connectors | Generators and frequency |
+| ![UART and NMEA workspace](assets/timecard-control-center-nmea.png) | ![SMA connector workspace](assets/timecard-control-center-sma.png) | ![Timing generator workspace](assets/timecard-control-center-timing.png) |
+| Sensors and IMU | I2C and status LEDs | Subsystem map |
+| ![Sensors and IMU workspace](assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](assets/timecard-control-center-i2c.png) | ![Subsystem workspace](assets/timecard-control-center-subsystems.png) |
+
+![FPGA SPI-flash firmware update workspace](assets/timecard-control-center-flash.png)
 
 The default Release build is unsigned and ready for Microsoft production
 signing. Use `build.cmd test` only for a local development package. To create

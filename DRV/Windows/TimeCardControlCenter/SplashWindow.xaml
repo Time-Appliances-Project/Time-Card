@@ -235,6 +235,11 @@
                                     </Border.Background>
                                 </Border>
                             </Border>
+
+                            <TextBlock Margin="0,14,0,0"
+                                       Text="&#x00A9; 2026 Ahmad Byagowi. All rights reserved."
+                                       Foreground="#587087" FontSize="10"
+                                       HorizontalAlignment="Left" />
                         </StackPanel>
                     </Grid>
                 </Grid>

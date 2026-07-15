@@ -171,11 +171,28 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
   [`DRV/Windows`](DRV/Windows)
 * CAD files for the custom PCIe bracket 
 
-The Windows Control Center provides live timing telemetry and guarded controls
-for the PHC, bidirectional PHC/Windows clock synchronization, GNSS, atomic
-clock, UART/NMEA, SMA routing, I2C, and subsystem hierarchy.
+The Windows package currently ships driver **1.15.1 / ABI 8** and a native
+Control Center that brings the complete Time Card into one application:
+
+* Precision-clock telemetry, detail-focused rolling offset graphs, clock-source
+  selection, and guarded synchronization in both directions.
+* Primary and secondary GNSS status, u-blox configuration, and a vendor-style
+  satellite sky map.
+* Atomic-clock control, multi-format UART consoles, and an FPGA NMEA generator.
+* SMA routing plus four PHC-aligned generators and four frequency counters.
+* Schematic-aware I2C routing, card identity, automatic/manual RGB status LEDs,
+  electrical diagnostics, live environmental sensors, power rails, and IMU.
+* Device hierarchy controls and guarded, verified FPGA SPI-flash updates.
+
+See the [Windows driver guide](DRV/Windows/README.md) and the
+[Control Center guide](DRV/Windows/TimeCardControlCenter/README.md) for build,
+installation, safety, and hardware details.
 
 ![OCP Time Card Control Center](DRV/Windows/assets/timecard-control-center.png)
+
+| GNSS receiver and sky map | Sensors and IMU | I2C routing and status LEDs |
+| --- | --- | --- |
+| ![GNSS receiver workspace](DRV/Windows/assets/timecard-control-center-gnss.png) | ![Sensors and IMU workspace](DRV/Windows/assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](DRV/Windows/assets/timecard-control-center-i2c.png) |
 
 # Credits
 Hereby we would like to thank these individuals who helped with the initiative, archirecture, design, software development, hardware issue maintanance and upgrades.
