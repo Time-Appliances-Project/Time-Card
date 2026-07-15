@@ -125,6 +125,36 @@ namespace TimeCardControlCenter
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardI2cMuxControlRaw
+    {
+        public uint Size;
+        public uint ChannelMask;
+        public uint Present;
+        public uint ControllerStatus;
+        public uint InterruptStatus;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardLedControlRaw
+    {
+        public uint Size;
+        public uint Led;
+        public uint Flags;
+        public uint Red;
+        public uint Green;
+        public uint Blue;
+        public uint GlobalCurrent;
+        public uint MuxChannelMask;
+        public uint ControllerStatus;
+        public uint InterruptStatus;
+        public uint Reserved0;
+        public uint Reserved1;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct TimeCardClockSourceRaw
     {
         public uint Size;
@@ -167,6 +197,79 @@ namespace TimeCardControlCenter
         public byte Serial5;
         public byte Reserved0;
         public byte Reserved1;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardSignalControlRaw
+    {
+        public uint Size;
+        public uint Generator;
+        public uint Flags;
+        public uint Status;
+        public uint Version;
+        public uint RepeatCount;
+        public uint StartNanoseconds;
+        public uint Reserved;
+        public ulong PeriodNanoseconds;
+        public ulong PulseNanoseconds;
+        public ulong PhaseNanoseconds;
+        public ulong StartSeconds;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardFrequencyControlRaw
+    {
+        public uint Size;
+        public uint Counter;
+        public uint Flags;
+        public uint IntegrationSeconds;
+        public uint FrequencyHz;
+        public uint Control;
+        public uint Status;
+        public uint Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardFlashStatusRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Offset;
+        public uint JedecId;
+        public uint CapacityBytes;
+        public uint FirmwareOffset;
+        public uint EraseSize;
+        public uint PageSize;
+        public uint ControllerStatus;
+        public uint FlashStatus;
+        public uint FifoDepth;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
+        public uint Reserved4;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardFlashRangeRaw
+    {
+        public uint Size;
+        public uint Offset;
+        public uint Length;
+        public uint Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardUartObserveRaw
+    {
+        public uint Size;
+        public uint Port;
+        public uint TimeoutMilliseconds;
+        public uint Flags;
+        public uint LineStatus;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
     }
 
     public enum SmaDirection : uint
@@ -267,6 +370,50 @@ namespace TimeCardControlCenter
         public uint InterruptStatus { get; private set; }
     }
 
+    public sealed class I2cMuxState
+    {
+        internal I2cMuxState(TimeCardI2cMuxControlRaw value)
+        {
+            ChannelMask = value.ChannelMask;
+            IsPresent = value.Present != 0;
+            ControllerStatus = value.ControllerStatus;
+            InterruptStatus = value.InterruptStatus;
+        }
+
+        public uint ChannelMask { get; private set; }
+        public bool IsPresent { get; private set; }
+        public uint ControllerStatus { get; private set; }
+        public uint InterruptStatus { get; private set; }
+    }
+
+    public sealed class BoardLedState
+    {
+        internal BoardLedState(TimeCardLedControlRaw value)
+        {
+            Led = value.Led;
+            IsPresent = (value.Flags & 1u) != 0;
+            IsEnabled = (value.Flags & 2u) != 0;
+            Red = (byte)value.Red;
+            Green = (byte)value.Green;
+            Blue = (byte)value.Blue;
+            GlobalCurrent = (byte)value.GlobalCurrent;
+            MuxChannelMask = value.MuxChannelMask;
+            ControllerStatus = value.ControllerStatus;
+            InterruptStatus = value.InterruptStatus;
+        }
+
+        public uint Led { get; private set; }
+        public bool IsPresent { get; private set; }
+        public bool IsEnabled { get; private set; }
+        public byte Red { get; private set; }
+        public byte Green { get; private set; }
+        public byte Blue { get; private set; }
+        public byte GlobalCurrent { get; private set; }
+        public uint MuxChannelMask { get; private set; }
+        public uint ControllerStatus { get; private set; }
+        public uint InterruptStatus { get; private set; }
+    }
+
     public sealed class NmeaOutputState
     {
         internal NmeaOutputState(TimeCardNmeaControlRaw value)
@@ -306,6 +453,124 @@ namespace TimeCardControlCenter
         public bool IsValid { get; private set; }
         public byte[] SerialBytes { get; private set; }
         public string SerialNumber { get; private set; }
+    }
+
+    public sealed class SignalGeneratorState
+    {
+        internal SignalGeneratorState(TimeCardSignalControlRaw value)
+        {
+            Generator = value.Generator;
+            IsPresent = (value.Flags & 1u) != 0;
+            IsEnabled = (value.Flags & 2u) != 0;
+            IsInverted = (value.Flags & 4u) != 0;
+            Status = value.Status;
+            Version = value.Version;
+            RepeatCount = value.RepeatCount;
+            PeriodNanoseconds = value.PeriodNanoseconds;
+            PulseNanoseconds = value.PulseNanoseconds;
+            PhaseNanoseconds = value.PhaseNanoseconds;
+            StartSeconds = value.StartSeconds;
+            StartNanoseconds = value.StartNanoseconds;
+        }
+
+        public uint Generator { get; private set; }
+        public bool IsPresent { get; private set; }
+        public bool IsEnabled { get; private set; }
+        public bool IsInverted { get; private set; }
+        public uint Status { get; private set; }
+        public uint Version { get; private set; }
+        public uint RepeatCount { get; private set; }
+        public ulong PeriodNanoseconds { get; private set; }
+        public ulong PulseNanoseconds { get; private set; }
+        public ulong PhaseNanoseconds { get; private set; }
+        public ulong StartSeconds { get; private set; }
+        public uint StartNanoseconds { get; private set; }
+        public double FrequencyHz
+        {
+            get { return PeriodNanoseconds == 0 ? 0 : 1000000000.0 / PeriodNanoseconds; }
+        }
+        public double DutyPercent
+        {
+            get { return PeriodNanoseconds == 0 ? 0 : PulseNanoseconds * 100.0 / PeriodNanoseconds; }
+        }
+    }
+
+    public sealed class FrequencyCounterState
+    {
+        internal FrequencyCounterState(TimeCardFrequencyControlRaw value)
+        {
+            Counter = value.Counter;
+            IsPresent = (value.Flags & 1u) != 0;
+            IsEnabled = (value.Flags & 2u) != 0;
+            IsValid = (value.Flags & 4u) != 0;
+            HasError = (value.Flags & 8u) != 0;
+            HasOverrun = (value.Flags & 16u) != 0;
+            IntegrationSeconds = value.IntegrationSeconds;
+            FrequencyHz = value.FrequencyHz;
+            Control = value.Control;
+            Status = value.Status;
+        }
+
+        public uint Counter { get; private set; }
+        public bool IsPresent { get; private set; }
+        public bool IsEnabled { get; private set; }
+        public bool IsValid { get; private set; }
+        public bool HasError { get; private set; }
+        public bool HasOverrun { get; private set; }
+        public uint IntegrationSeconds { get; private set; }
+        public uint FrequencyHz { get; private set; }
+        public uint Control { get; private set; }
+        public uint Status { get; private set; }
+    }
+
+    public sealed class FlashDeviceStatus
+    {
+        internal FlashDeviceStatus(TimeCardFlashStatusRaw value)
+        {
+            IsPresent = (value.Flags & 1u) != 0;
+            IsIdentified = (value.Flags & 2u) != 0;
+            IsSupported = (value.Flags & 4u) != 0;
+            UsesFourByteAddressing = (value.Flags & 8u) != 0;
+            ControllerOffset = value.Offset;
+            JedecId = value.JedecId;
+            CapacityBytes = value.CapacityBytes;
+            FirmwareOffset = value.FirmwareOffset;
+            EraseSize = value.EraseSize;
+            PageSize = value.PageSize;
+            ControllerStatus = value.ControllerStatus;
+            FlashStatus = value.FlashStatus;
+            FifoDepth = value.FifoDepth;
+        }
+
+        public bool IsPresent { get; private set; }
+        public bool IsIdentified { get; private set; }
+        public bool IsSupported { get; private set; }
+        public bool UsesFourByteAddressing { get; private set; }
+        public uint ControllerOffset { get; private set; }
+        public uint JedecId { get; private set; }
+        public uint CapacityBytes { get; private set; }
+        public uint FirmwareOffset { get; private set; }
+        public uint EraseSize { get; private set; }
+        public uint PageSize { get; private set; }
+        public uint ControllerStatus { get; private set; }
+        public uint FlashStatus { get; private set; }
+        public uint FifoDepth { get; private set; }
+    }
+
+    public sealed class UartObservation
+    {
+        internal UartObservation(TimeCardUartObserveRaw value)
+        {
+            Port = value.Port;
+            IsPresent = (value.Flags & 1u) != 0;
+            HasActivity = (value.Flags & 2u) != 0;
+            LineStatus = value.LineStatus;
+        }
+
+        public uint Port { get; private set; }
+        public bool IsPresent { get; private set; }
+        public bool HasActivity { get; private set; }
+        public uint LineStatus { get; private set; }
     }
 
     public sealed class TimeCardSnapshot

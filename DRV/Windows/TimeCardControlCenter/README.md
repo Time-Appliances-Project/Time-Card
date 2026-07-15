@@ -18,13 +18,16 @@ it does not shell out to `timecardctl` or scrape Device Manager.
 - Decoded GNSS fix and seen/locked satellite counts from the ToD engine.
 - Direct u-blox receiver discovery and UBX telemetry, including model,
   firmware/protocol, fix, UTC, position accuracy, visible/used satellites,
-  constellation counts, and average carrier-to-noise level. Compatible
+  constellation counts, average carrier-to-noise level, and a vendor-style
+  polar sky map with per-satellite elevation, azimuth, signal strength,
+  constellation, tracking quality, and solution-use state. Compatible
   configuration-database receivers expose navigation rate and platform model,
   constellation selection, TP1 timing, and UART 1 message-rate controls.
-- Guarded one-shot synchronization in both directions between Windows UTC and
+- Guarded one-shot synchronization in both directions between system UTC and
   the Time Card PHC.
-- Polled UART configuration, monitoring, text/hex display, and text or binary
-  transmission for GNSS, GNSS2, atomic-clock, and NMEA ports.
+- Polled UART configuration and monitoring with Auto, ASCII, hexadecimal,
+  decimal, and binary display modes, plus text or binary transmission for
+  GNSS, GNSS2, atomic-clock, and NMEA ports.
 - FPGA NMEA sentence-generator enable, baud, and polarity configuration with
   one-click synchronized UART monitoring.
 - A dedicated Microchip MAC-SA53 workspace with live identity, physics-lock,
@@ -34,12 +37,22 @@ it does not shell out to `timecardctl` or scrape Device Manager.
   thresholds, PPS quantization correction, and the time-of-day counter.
 - Four-connector SMA routing with input/output menus, named FPGA timing
   signals, fixed-direction detection, raw-map readback, and output warnings.
-- A read-only I2C workbench with AXI IIC health, known-device probing, full
-  7-bit discovery, a bounded EEPROM/register hex and ASCII reader, and the
+- A dedicated timing workspace for four PHC-aligned periodic signal generators
+  and four frequency counters, with frequency, duty, phase, polarity,
+  integration-window, and direct SMA routing controls.
+- A non-programming I2C workbench with AXI IIC health, known-device probing,
+  full 7-bit discovery, EEPROM/register presets and paging, adjustable timeout,
+  hex/ASCII/decimal/binary views, decoded transaction diagnostics, and the
   unique card serial from the 24MAC402 identity EEPROM.
 - Runtime and persistent Device Manager subsystem-hierarchy controls.
+- A guarded FPGA SPI-flash workspace with JEDEC/geometry discovery, OCPC
+  vendor/device/length/CRC validation, explicit raw-image warnings, protected
+  4 KiB erase and page programming, progress reporting, and full read-back
+  verification.
 - Copyable engineering diagnostics and an in-application session log.
-- A subsystem capability map using the same artwork as Device Manager.
+- A subsystem capability map using the same artwork as Device Manager, direct
+  links to NMEA and generator/frequency configuration, and a non-destructive
+  UART activity check that reports GNSS2 as `NOT PRESENT` when it is silent.
 
 ## Build
 
@@ -75,6 +88,7 @@ automation:
 TimeCardControlCenter.exe --page Clock
 TimeCardControlCenter.exe --page Uart --uart-port=3
 TimeCardControlCenter.exe --page Sma
+TimeCardControlCenter.exe --page Timing
 ```
 
 For repeatable documentation and visual regression checks, `--capture` renders
@@ -100,6 +114,10 @@ UART framing is currently 8N1. Reads and writes are limited to 256 bytes, and
 timeouts are clamped to five seconds. An idle read is treated as a normal
 zero-byte monitor sample rather than an application error.
 
+The display selector can automatically choose a readable representation or
+show every byte explicitly as ASCII, hexadecimal, decimal, or binary. Changing
+the selection re-renders the retained console history without another read.
+
 The UART selectors use an application-owned dark template so their selected
 values, editable baud field, and dropdown entries remain readable regardless
 of the active Windows theme.
@@ -123,12 +141,17 @@ remove PHC synchronization. Time-of-Day/GNSS is the normal Time Card setting.
 ## Clock synchronization
 
 The **Overview** workspace provides both synchronization directions. **Sync
-from Windows** writes the current Windows UTC value to the PHC. **Sync from
+from System Clock** writes the current system UTC value to the PHC. **Sync from
 Time Card** reads a fresh bracketed PHC cross-timestamp and sets Windows UTC
 from the card after explicit confirmation. The second operation requires
 administrator privileges and is blocked when the PHC date is outside 2020 to
 2100, preventing an uninitialized clock such as 1970 from replacing a valid
 system time. Windows accepts this one-shot value at millisecond resolution.
+
+The **Overview** and **Precision Clock** workspaces retain matching 60-second
+histories for measured system-clock offset and cross-timestamp sampling
+uncertainty. Offset plots remain centered on zero with a stable minimum
+vertical range and expand automatically when the measured offset grows.
 
 ## u-blox GNSS configuration
 
@@ -140,6 +163,13 @@ many other u-blox generations. The recommended RCB-F9T normally uses UART 0 at
 115,200 baud on the Time Card; the host baud selector can communicate with a
 receiver at another existing baud without changing the receiver's own port
 configuration.
+
+The satellite sky map decodes every repeated `UBX-NAV-SAT` block. It uses the
+standard north-up polar layout with zenith at the center and the horizon at the
+outer ring. Marker color identifies the constellation, marker size follows
+C/N₀, and a white outline identifies a satellite used in the navigation
+solution. The adjacent scrollable signal table exposes elevation, azimuth,
+C/N₀, and tracking quality for every reported satellite.
 
 Receivers supporting `UBX-CFG-VALGET` and `UBX-CFG-VALSET` expose four
 independently detected control groups:
@@ -198,24 +228,84 @@ Routing changes are immediate. Disconnect externally driven equipment before
 changing a connector to output. The application asks for confirmation before
 applying any output route.
 
+## Generators and frequency counters
+
+Driver 1.10 / ABI 5 exposes four bounded periodic-output modules and four
+frequency counters without permitting arbitrary MMIO. Each generator accepts
+a frequency, 1–99% duty cycle, phase in nanoseconds, and polarity. The driver
+converts these into period and pulse widths, schedules the next start against
+the PHC, and applies the same disable/program/enable sequence used by Linux
+`ptp_ocp`. A generator can be routed directly to any compatible SMA output.
+
+Each frequency counter accepts an integration window of 0 (disabled) or
+1–255 seconds. The workspace decodes valid, error, and overrun states and can
+route any front-panel SMA input to `FREQ1` through `FREQ4`.
+
 ## I2C workbench
 
 Driver ABI 3 adds bounded Xilinx AXI IIC status, address-only probe, and read
 operations using the register layout and transfer flow used by Linux
 `i2c-xiic`. The application recognizes the board 24C02 EEPROM at `0x50` and
 the 24MAC402 identity EEPROM at `0x58`, can scan all normal 7-bit addresses,
-and displays reads as hex plus ASCII. The six bytes at MAC EEPROM offset zero
-are formatted as the card's unique serial number, the same mapping used by
-Linux `ptp_ocp` and its `serialnum` attribute.
+and displays reads as hex plus ASCII, hex, ASCII, decimal, or binary. Presets,
+previous/next page navigation, a 50/100/250 ms timeout selector, copy, an ACK
+map, and decoded control/status/interrupt flags support bus diagnosis. The six
+bytes at MAC EEPROM offset zero are formatted as the card's unique serial
+number, the same mapping used by Linux `ptp_ocp` and its `serialnum` attribute.
 
 Reads support no subaddress or a one- or two-byte subaddress followed by a
 repeated start. Transfers are limited to 255 bytes and a bounded timeout.
-I2C data writes and EEPROM programming remain intentionally unavailable until
-they have been validated on hardware.
+Driver 1.11 fixes the repeated-start receive race by separating the subaddress
+and receive phases, servicing the AXI IIC receive watermark before interpreting
+its shared `TX_ERROR`/final-NACK bit, advancing the watermark across FIFO-sized
+chunks, and retrying once after controller reset for transient failures. Native
+Win32 error text and a post-failure controller snapshot are shown if a read
+still fails. The Control Center requires driver 1.11 or newer for reads and
+identifies older drivers before they can surface the misleading Windows CRC
+error; the current supported package is driver 1.13.
+
+Driver 1.13 / ABI 7 adds dedicated controls for the schematic's U27 PCA9546A
+at `0x70`. Channel 0 is the MAC-clock branch, channel 1 contains the onboard
+sensors and RGB LED driver, channel 2 is the analog/ADC expansion branch, and
+channel 3 is the DC expansion branch. The workspace shows the selected mask,
+offers safe single-branch shortcuts, annotates full scans with the expected
+BNO055, INA219, BME280, and IS32FL3207 addresses, and provides matching read
+presets.
+
+U26, the TMUX1072 near the MAC connector, is controlled by the physical
+`MACSER` DIP only; the select net is not routed to the FPGA. The workspace
+therefore explains that channel 0 also requires `MACSER=0` instead of exposing
+a non-functional software toggle.
+
+The IS32FL3207 at `0x6e` drives six common-anode RGB indicators: GNSS1 uses
+OUT1â€“3, GNSS2 OUT4â€“6, and IO1 through IO4 use OUT7â€“18 in groups of three.
+Manual RGB/current controls and automatic status mapping are available.
+Automatic mode uses green for a GNSS fix or configured SMA output, blue for an
+SMA input, amber for searching/unknown/disabled states, and red for missing or
+failed status. LED transactions temporarily select sensor channel 1 and then
+restore the user's PCA9546A mask. The driver caps global current at 128 and
+does not expose a general data-write or EEPROM-programming IOCTL.
+
+## FPGA SPI flash
+
+Driver 1.12 / ABI 6 exposes only the FPGA firmware portion of SPI-NOR. The
+configuration area below physical offset `0x00400000` cannot be addressed by
+the public IOCTLs. Erases are fixed to aligned 4 KiB sectors, programs cannot
+cross the reported 256-byte page boundary, and reads/programs are limited to
+256 bytes per request.
+
+The workspace accepts the `OCPC` wrapper used by Linux `ptp_ocp`; it verifies
+the PCI identity (`1D9B:0400`), declared payload length, and CRC16 before
+stripping the wrapper. Raw images are allowed only with a prominent warning
+and the same explicit acknowledgement as wrapped images. An update erases the
+required sectors, programs every page, then reads and compares every payload
+byte. Closing the application is blocked while this operation runs. Keep the
+card powered throughout and power-cycle it only after verification succeeds.
 
 ## Driver API roadmap
 
 The current ABI deliberately does not expose arbitrary register writes for
-SMA polarity/calibration, signal generators, I2C data writes, flash, or PTM.
+SMA polarity/calibration, I2C data writes, the protected flash configuration
+region, or PTM.
 Those controls should be enabled only after dedicated, validated kernel IOCTLs
 are added using the Linux driver behavior as the reference.

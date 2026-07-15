@@ -61,12 +61,14 @@
   <ItemGroup>
     <ClCompile Include="bus.c" />
     <ClCompile Include="driver.c" />
+    <ClCompile Include="flash.c" />
     <ClCompile Include="i2c.c" />
     <ClCompile Include="ioctl.c" />
     <ClCompile Include="nmea.c" />
     <ClCompile Include="ptp.c" />
     <ClCompile Include="serial.c" />
     <ClCompile Include="sma.c" />
+    <ClCompile Include="timing.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="timecard.h" />

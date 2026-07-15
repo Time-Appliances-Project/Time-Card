@@ -1,13 +1,14 @@
 <Window x:Class="TimeCardControlCenter.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:TimeCardControlCenter"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         Title="OCP Time Card Control Center"
         Width="1440" Height="900" MinWidth="1180" MinHeight="720"
         WindowStartupLocation="CenterScreen" WindowStyle="None"
         Background="#07111F" AllowsTransparency="False"
         Icon="Assets/timecard-app.ico"
-        Loaded="Window_Loaded" Closed="Window_Closed" StateChanged="Window_StateChanged">
+        Loaded="Window_Loaded" Closing="Window_Closing" Closed="Window_Closed" StateChanged="Window_StateChanged">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="7"
                             CornerRadius="16" GlassFrameThickness="0" />
@@ -56,6 +57,11 @@
             <Setter Property="Margin" Value="0,0,14,14" />
             <Setter Property="Padding" Value="18" />
             <Setter Property="MinHeight" Value="154" />
+        </Style>
+        <Style x:Key="MetricCard" TargetType="Border" BasedOn="{StaticResource Panel}">
+            <Setter Property="Margin" Value="0,0,14,0" />
+            <Setter Property="Padding" Value="16" />
+            <Setter Property="MinHeight" Value="82" />
         </Style>
     </Window.Resources>
 
@@ -141,12 +147,113 @@
                         </Grid.RowDefinitions>
                         <StackPanel>
                             <Border Margin="16,0,16,16" Background="#07111F" BorderBrush="{StaticResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="12" Padding="10,7">
-                                <Image Source="Assets/timecard-logo.png" Height="72" Stretch="Uniform" />
+                                    BorderThickness="1" CornerRadius="12" Padding="10,7" ToolTip="OCP Time Card">
+                                <Grid Height="72" ClipToBounds="True">
+                                    <Ellipse x:Name="LogoDepthShadow" Height="12" Margin="28,53,28,0"
+                                             VerticalAlignment="Top" Opacity="0.20" IsHitTestVisible="False"
+                                             RenderTransformOrigin="0.5,0.5">
+                                        <Ellipse.Fill>
+                                            <RadialGradientBrush>
+                                                <GradientStop Color="#8069C441" Offset="0" />
+                                                <GradientStop Color="#00335B76" Offset="1" />
+                                            </RadialGradientBrush>
+                                        </Ellipse.Fill>
+                                        <Ellipse.RenderTransform>
+                                            <ScaleTransform x:Name="LogoShadowScale" />
+                                        </Ellipse.RenderTransform>
+                                        <Ellipse.Effect><BlurEffect Radius="7" /></Ellipse.Effect>
+                                    </Ellipse>
+                                    <Viewport3D x:Name="AnimatedTimeCardLogo" ClipToBounds="True"
+                                                IsHitTestVisible="False" RenderOptions.EdgeMode="Aliased">
+                                        <Viewport3D.Camera>
+                                            <PerspectiveCamera Position="0,0,1.4" LookDirection="0,0,-1.4"
+                                                               UpDirection="0,1,0" FieldOfView="42" />
+                                        </Viewport3D.Camera>
+                                        <ModelVisual3D>
+                                            <ModelVisual3D.Content>
+                                                <Model3DGroup>
+                                                    <AmbientLight Color="#FFFFFFFF" />
+                                                    <GeometryModel3D>
+                                                        <GeometryModel3D.Geometry>
+                                                            <MeshGeometry3D
+                                        Positions="-0.285,-0.19,0  0.285,-0.19,0  0.285,0.19,0  -0.285,0.19,0"
+                                                                TextureCoordinates="0,1  1,1  1,0  0,0"
+                                                                TriangleIndices="0,1,2 0,2,3"
+                                                                Normals="0,0,1 0,0,1 0,0,1 0,0,1" />
+                                                        </GeometryModel3D.Geometry>
+                                                        <GeometryModel3D.Material>
+                                                            <DiffuseMaterial>
+                                                                <DiffuseMaterial.Brush>
+                                                                    <ImageBrush ImageSource="Assets/timecard-logo.png" Stretch="Fill" />
+                                                                </DiffuseMaterial.Brush>
+                                                            </DiffuseMaterial>
+                                                        </GeometryModel3D.Material>
+                                                        <GeometryModel3D.Transform>
+                                                            <Transform3DGroup>
+                                                                <RotateTransform3D>
+                                                                    <RotateTransform3D.Rotation>
+                                                                        <AxisAngleRotation3D x:Name="LogoPitch" Axis="1,0,0" Angle="-1.2" />
+                                                                    </RotateTransform3D.Rotation>
+                                                                </RotateTransform3D>
+                                                                <RotateTransform3D>
+                                                                    <RotateTransform3D.Rotation>
+                                                                        <AxisAngleRotation3D x:Name="LogoYaw" Axis="0,1,0" Angle="-3.2" />
+                                                                    </RotateTransform3D.Rotation>
+                                                                </RotateTransform3D>
+                                                                <RotateTransform3D>
+                                                                    <RotateTransform3D.Rotation>
+                                                                        <AxisAngleRotation3D x:Name="LogoRoll" Axis="0,0,1" Angle="-0.35" />
+                                                                    </RotateTransform3D.Rotation>
+                                                                </RotateTransform3D>
+                                                                <TranslateTransform3D x:Name="LogoFloat" OffsetY="-0.012" />
+                                                            </Transform3DGroup>
+                                                        </GeometryModel3D.Transform>
+                                                    </GeometryModel3D>
+                                                </Model3DGroup>
+                                            </ModelVisual3D.Content>
+                                        </ModelVisual3D>
+                                    </Viewport3D>
+                                </Grid>
+                                <Border.Triggers>
+                                    <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="LogoYaw" Storyboard.TargetProperty="Angle"
+                                                                 From="-3.2" To="3.2" Duration="0:0:5.8"
+                                                                 AutoReverse="True" RepeatBehavior="Forever"
+                                                                 AccelerationRatio="0.35" DecelerationRatio="0.35" />
+                                                <DoubleAnimation Storyboard.TargetName="LogoPitch" Storyboard.TargetProperty="Angle"
+                                                                 From="-1.2" To="1.6" Duration="0:0:4.7"
+                                                                 AutoReverse="True" RepeatBehavior="Forever"
+                                                                 AccelerationRatio="0.3" DecelerationRatio="0.3" />
+                                                <DoubleAnimation Storyboard.TargetName="LogoRoll" Storyboard.TargetProperty="Angle"
+                                                                 From="-0.35" To="0.35" Duration="0:0:7.1"
+                                                                 AutoReverse="True" RepeatBehavior="Forever"
+                                                                 AccelerationRatio="0.4" DecelerationRatio="0.4" />
+                                                <DoubleAnimation Storyboard.TargetName="LogoFloat" Storyboard.TargetProperty="OffsetY"
+                                                                 From="-0.012" To="0.018" Duration="0:0:3.9"
+                                                                 AutoReverse="True" RepeatBehavior="Forever"
+                                                                 AccelerationRatio="0.35" DecelerationRatio="0.35" />
+                                                <DoubleAnimation Storyboard.TargetName="LogoFloat" Storyboard.TargetProperty="OffsetZ"
+                                                                 From="0" To="0.018" Duration="0:0:5.8"
+                                                                 AutoReverse="True" RepeatBehavior="Forever"
+                                                                 AccelerationRatio="0.35" DecelerationRatio="0.35" />
+                                                <DoubleAnimation Storyboard.TargetName="LogoDepthShadow" Storyboard.TargetProperty="Opacity"
+                                                                 From="0.17" To="0.28" Duration="0:0:3.9"
+                                                                 AutoReverse="True" RepeatBehavior="Forever" />
+                                                <DoubleAnimation Storyboard.TargetName="LogoShadowScale" Storyboard.TargetProperty="ScaleX"
+                                                                 From="0.92" To="1.04" Duration="0:0:3.9"
+                                                                 AutoReverse="True" RepeatBehavior="Forever" />
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </EventTrigger>
+                                </Border.Triggers>
                             </Border>
                             <TextBlock Text="WORKSPACES" Style="{StaticResource Label}" Margin="26,0,0,10" />
                         </StackPanel>
-                        <StackPanel Grid.Row="1">
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                          <StackPanel>
                             <RadioButton x:Name="OverviewNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Overview"
                                          Content="&#xE80F;" ToolTip="Overview" IsChecked="True"
                                          Checked="Navigate_Checked" />
@@ -160,13 +267,16 @@
                                          Content="&#xE756;" ToolTip="UART Console" Checked="Navigate_Checked" />
                             <RadioButton x:Name="SmaNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Sma"
                                          Content="&#xE9CA;" ToolTip="SMA Connectors" Checked="Navigate_Checked" />
+                            <RadioButton x:Name="TimingNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Timing"
+                                         Content="&#xE9D2;" ToolTip="Generators &amp; Freq." Checked="Navigate_Checked" />
                             <RadioButton x:Name="I2cNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="I2c"
                                          Content="&#xE950;" ToolTip="I&#x00B2;C Bus" Checked="Navigate_Checked" />
                             <RadioButton x:Name="SubsystemsNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Subsystems"
                                          Content="&#xE713;" ToolTip="Subsystems" Checked="Navigate_Checked" />
                             <RadioButton x:Name="DiagnosticsNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Diagnostics"
                                          Content="&#xE9D9;" ToolTip="Diagnostics" Checked="Navigate_Checked" />
-                        </StackPanel>
+                          </StackPanel>
+                        </ScrollViewer>
                         <Border Grid.Row="2" Margin="14,0" Background="#0E1E2D" BorderBrush="{StaticResource BorderBrush}"
                                 BorderThickness="1" CornerRadius="12" Padding="14">
                             <StackPanel>
@@ -204,7 +314,7 @@
                                                Foreground="{StaticResource MutedBrush}" FontSize="13" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Button Content="Sync from Windows" Click="SetClock_Click" Margin="0,0,10,0" />
+                                    <Button Content="Sync from System Clock" Click="SetClock_Click" Margin="0,0,10,0" />
                                     <Button Content="Sync from Time Card" Click="SetSystemFromClock_Click"
                                             Style="{StaticResource SecondaryButton}" Margin="0,0,10,0" />
                                     <Button Content="Refresh now" Click="Refresh_Click" Style="{StaticResource SecondaryButton}" />
@@ -246,7 +356,7 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.65*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
                                 <Border Grid.Column="0" Style="{StaticResource Panel}" Margin="0,0,18,0">
                                     <Grid>
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                         <Grid>
                                             <TextBlock Text="Precision Hardware Clock" Style="{StaticResource SectionTitle}" />
                                             <Border Style="{StaticResource StatusChip}" HorizontalAlignment="Right">
@@ -259,17 +369,82 @@
                                         <Grid Grid.Row="2" Margin="0,16,0,0">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                             <StackPanel>
-                                                <TextBlock Text="OFFSET TO WINDOWS" Style="{StaticResource Label}" />
+                                                <TextBlock Text="OFFSET TO SYSTEM CLOCK" Style="{StaticResource Label}" />
                                                 <TextBlock x:Name="OffsetText" Text="—" FontFamily="Segoe UI Semibold" FontSize="17" Margin="0,5,0,0" />
                                             </StackPanel>
                                             <StackPanel Grid.Column="1">
-                                                <TextBlock Text="SAMPLE WINDOW" Style="{StaticResource Label}" />
-                                                <TextBlock x:Name="SamplingWindowText" Text="—" FontFamily="Segoe UI Semibold" FontSize="17" Margin="0,5,0,0" />
-                                            </StackPanel>
-                                            <StackPanel Grid.Column="2">
                                                 <TextBlock Text="SYSTEM UTC" Style="{StaticResource Label}" />
                                                 <TextBlock x:Name="SystemTimeText" Text="—" FontFamily="Segoe UI Semibold" FontSize="14" Margin="0,7,0,0" />
                                             </StackPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Text="SAMPLE WINDOW" Style="{StaticResource Label}" />
+                                                <TextBlock x:Name="SamplingWindowText" Text="—" FontFamily="Segoe UI Semibold" FontSize="17" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <Grid Grid.Row="3" Margin="0,24,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <Border Grid.Column="0" Margin="0,0,7,0" Padding="14,13,14,11"
+                                                    CornerRadius="12" Background="#091522"
+                                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="112" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <Grid>
+                                                        <TextBlock Text="OFFSET TO SYSTEM CLOCK" Style="{StaticResource Label}" />
+                                                        <TextBlock x:Name="OffsetHistoryValueText" Text="&#x2014;"
+                                                                   HorizontalAlignment="Right" Foreground="{StaticResource CyanBrush}"
+                                                                   FontFamily="Segoe UI Semibold" FontSize="12" />
+                                                    </Grid>
+                                                    <local:RollingTelemetryChart x:Name="OffsetHistoryChart" Grid.Row="1"
+                                                                                 Margin="0,11,0,8" Capacity="60"
+                                                                                 MinimumRange="10"
+                                                                                 LineBrush="{StaticResource CyanBrush}"
+                                                                                 AreaBrush="#204CC9F0"
+                                                                                 ToolTip="Rolling Time Card offset with detail-focused automatic vertical zoom" />
+                                                    <Grid Grid.Row="2">
+                                                        <TextBlock x:Name="OffsetHistoryScaleText" Text="WAITING FOR SAMPLES"
+                                                                   Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                                                        <TextBlock Text="ROLLING &#x00B7; 60 S" HorizontalAlignment="Right"
+                                                                   Foreground="#617A90" FontSize="9" />
+                                                    </Grid>
+                                                </Grid>
+                                            </Border>
+
+                                            <Border Grid.Column="1" Margin="7,0,0,0" Padding="14,13,14,11"
+                                                    CornerRadius="12" Background="#091522"
+                                                    BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="112" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <Grid>
+                                                        <TextBlock Text="SAMPLE WINDOW" Style="{StaticResource Label}" />
+                                                        <TextBlock x:Name="SamplingHistoryValueText" Text="&#x2014;"
+                                                                   HorizontalAlignment="Right" Foreground="{StaticResource GoldBrush}"
+                                                                   FontFamily="Segoe UI Semibold" FontSize="12" />
+                                                    </Grid>
+                                                    <local:RollingTelemetryChart x:Name="SamplingHistoryChart" Grid.Row="1"
+                                                                                 Margin="0,11,0,8" Capacity="60"
+                                                                                 LineBrush="{StaticResource GoldBrush}"
+                                                                                 AreaBrush="#20DAB539"
+                                                                                 ToolTip="Rolling cross-timestamp sample window" />
+                                                    <Grid Grid.Row="2">
+                                                        <TextBlock x:Name="SamplingHistoryScaleText" Text="WAITING FOR SAMPLES"
+                                                                   Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                                                        <TextBlock Text="ROLLING &#x00B7; 60 S" HorizontalAlignment="Right"
+                                                                   Foreground="#617A90" FontSize="9" />
+                                                    </Grid>
+                                                </Grid>
+                                            </Border>
                                         </Grid>
                                     </Grid>
                                 </Border>
@@ -311,16 +486,16 @@
                     <!-- CLOCK -->
                     <ScrollViewer x:Name="ClockPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                         <Grid Margin="32,28,32,34">
-                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <TextBlock Text="PRECISION HARDWARE CLOCK" Style="{StaticResource Eyebrow}" />
                                     <TextBlock Text="Clock control &amp; cross-timestamping" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
-                                    <TextBlock Text="Compare the card PHC to Windows UTC and perform an explicit one-shot synchronization."
+                                    <TextBlock Text="Compare the card PHC to system UTC and perform an explicit one-shot synchronization."
                                                Foreground="{StaticResource MutedBrush}" />
                                 </StackPanel>
-                                <Button Grid.Column="1" Content="Set PHC from Windows" Click="SetClock_Click" VerticalAlignment="Center" />
+                                <Button Grid.Column="1" Content="Sync from System Clock" Click="SetClock_Click" VerticalAlignment="Center" />
                             </Grid>
                             <Grid Grid.Row="1" Margin="0,26,0,20">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.6*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
@@ -340,6 +515,35 @@
                                                 <TextBlock x:Name="ClockOffsetText" Text="—" FontFamily="Segoe UI Semibold" FontSize="20" Margin="0,5,0,0" />
                                             </StackPanel>
                                         </Grid>
+                                        <Border Margin="0,22,0,0" Padding="14,12,14,10"
+                                                CornerRadius="12" Background="#091522"
+                                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="104" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <Grid>
+                                                    <TextBlock Text="MEASURED OFFSET HISTORY" Style="{StaticResource Label}" />
+                                                    <TextBlock x:Name="ClockOffsetHistoryValueText" Text="&#x2014;"
+                                                               HorizontalAlignment="Right" Foreground="{StaticResource CyanBrush}"
+                                                               FontFamily="Segoe UI Semibold" FontSize="12" />
+                                                </Grid>
+                                                <local:RollingTelemetryChart x:Name="ClockOffsetHistoryChart" Grid.Row="1"
+                                                                             Margin="0,10,0,8" Capacity="60"
+                                                                             MinimumRange="10"
+                                                                             LineBrush="{StaticResource CyanBrush}"
+                                                                             AreaBrush="#204CC9F0"
+                                                                             ToolTip="Rolling measured offset with detail-focused automatic vertical zoom" />
+                                                <Grid Grid.Row="2">
+                                                    <TextBlock x:Name="ClockOffsetHistoryScaleText" Text="WAITING FOR SAMPLES"
+                                                               Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                                                    <TextBlock Text="ROLLING &#x00B7; 60 S" HorizontalAlignment="Right"
+                                                               Foreground="#617A90" FontSize="9" />
+                                                </Grid>
+                                            </Grid>
+                                        </Border>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="1" Style="{StaticResource Panel}">
@@ -351,6 +555,34 @@
                                         <Separator Background="{StaticResource BorderBrush}" Margin="0,20" />
                                         <TextBlock Text="Sampling uncertainty" Style="{StaticResource Label}" />
                                         <TextBlock x:Name="ClockSamplingText" Text="—" FontSize="18" FontFamily="Segoe UI Semibold" Margin="0,6,0,0" />
+                                        <Border Margin="0,18,0,0" Padding="14,12,14,10"
+                                                CornerRadius="12" Background="#091522"
+                                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1">
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="104" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <Grid>
+                                                    <TextBlock Text="SAMPLING UNCERTAINTY HISTORY" Style="{StaticResource Label}" />
+                                                    <TextBlock x:Name="ClockSamplingHistoryValueText" Text="&#x2014;"
+                                                               HorizontalAlignment="Right" Foreground="{StaticResource GoldBrush}"
+                                                               FontFamily="Segoe UI Semibold" FontSize="12" />
+                                                </Grid>
+                                                <local:RollingTelemetryChart x:Name="ClockSamplingHistoryChart" Grid.Row="1"
+                                                                             Margin="0,10,0,8" Capacity="60"
+                                                                             LineBrush="{StaticResource GoldBrush}"
+                                                                             AreaBrush="#20DAB539"
+                                                                             ToolTip="Rolling cross-timestamp sampling uncertainty" />
+                                                <Grid Grid.Row="2">
+                                                    <TextBlock x:Name="ClockSamplingHistoryScaleText" Text="WAITING FOR SAMPLES"
+                                                               Foreground="{StaticResource MutedBrush}" FontSize="9" />
+                                                    <TextBlock Text="ROLLING &#x00B7; 60 S" HorizontalAlignment="Right"
+                                                               Foreground="#617A90" FontSize="9" />
+                                                </Grid>
+                                            </Grid>
+                                        </Border>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -408,7 +640,7 @@
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <StackPanel>
                                 <TextBlock Text="GNSS &amp; TIME-OF-DAY" Style="{StaticResource Eyebrow}" />
@@ -537,7 +769,57 @@
                                 </StackPanel></Border>
                             </UniformGrid>
 
-                            <Grid Grid.Row="5" Margin="0,18,0,0">
+                            <Border Grid.Row="5" Style="{StaticResource Panel}" Margin="0,18,0,0" Padding="18">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Satellite sky map" Style="{StaticResource SectionTitle}" />
+                                            <TextBlock Text="North-up polar view from UBX-NAV-SAT: zenith is centered and the horizon is the outer ring. Marker size follows C/N₀."
+                                                       Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="UbloxSkyMapStatusText" Grid.Column="1" Text="AWAITING UBX-NAV-SAT"
+                                                   Foreground="{StaticResource GoldBrush}" FontFamily="Segoe UI Semibold" FontSize="10"
+                                                   VerticalAlignment="Top" Margin="18,3,0,0" />
+                                    </Grid>
+                                    <Grid Grid.Row="1" Margin="0,16,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="1*" /><ColumnDefinition Width="330" /></Grid.ColumnDefinitions>
+                                        <Border Background="#07111F" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                                CornerRadius="12" Padding="10" MinHeight="430">
+                                            <Canvas x:Name="UbloxSkyMapCanvas" Height="408" Background="Transparent"
+                                                    SizeChanged="UbloxSkyMap_SizeChanged" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Margin="18,0,0,0">
+                                            <TextBlock Text="Signal summary" FontFamily="Segoe UI Semibold" FontSize="14" />
+                                            <TextBlock x:Name="UbloxSkyMapSummaryText" Text="Refresh the receiver to load satellite geometry."
+                                                       Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,12" />
+                                            <UniformGrid Columns="2" Margin="0,0,0,8">
+                                                <StackPanel Orientation="Horizontal" Margin="0,4"><Ellipse Width="9" Height="9" Fill="#69C441" Margin="0,0,7,0" /><TextBlock Text="GPS" FontSize="11" /></StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4"><Ellipse Width="9" Height="9" Fill="#4CC9F0" Margin="0,0,7,0" /><TextBlock Text="Galileo" FontSize="11" /></StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4"><Ellipse Width="9" Height="9" Fill="#DAB539" Margin="0,0,7,0" /><TextBlock Text="BeiDou" FontSize="11" /></StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4"><Ellipse Width="9" Height="9" Fill="#FF667A" Margin="0,0,7,0" /><TextBlock Text="GLONASS" FontSize="11" /></StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4"><Ellipse Width="9" Height="9" Fill="#50E3C2" Margin="0,0,7,0" /><TextBlock Text="SBAS" FontSize="11" /></StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4"><Ellipse Width="9" Height="9" Fill="#CB88FF" Margin="0,0,7,0" /><TextBlock Text="QZSS" FontSize="11" /></StackPanel>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4"><Ellipse Width="9" Height="9" Fill="#FF9E64" Margin="0,0,7,0" /><TextBlock Text="NavIC" FontSize="11" /></StackPanel>
+                                                <TextBlock Text="White ring = used" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,4" />
+                                            </UniformGrid>
+                                            <Grid Margin="0,5,0,6">
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="54" /><ColumnDefinition Width="90" /><ColumnDefinition Width="58" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="SV" Style="{StaticResource Label}" />
+                                                <TextBlock Grid.Column="1" Text="EL / AZ" Style="{StaticResource Label}" />
+                                                <TextBlock Grid.Column="2" Text="C/N₀" Style="{StaticResource Label}" />
+                                                <TextBlock Grid.Column="3" Text="SIGNAL" Style="{StaticResource Label}" />
+                                            </Grid>
+                                            <ScrollViewer Height="260" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                                <StackPanel x:Name="UbloxSatelliteListPanel" />
+                                            </ScrollViewer>
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <Grid Grid.Row="6" Margin="0,18,0,0">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
                                 <Border x:Name="UbloxRatePanel" Style="{StaticResource Panel}" Margin="0,0,18,0" IsEnabled="False">
                                     <StackPanel>
@@ -588,7 +870,7 @@
                                 </Border>
                             </Grid>
 
-                            <Grid Grid.Row="6" Margin="0,18,0,0">
+                            <Grid Grid.Row="7" Margin="0,18,0,0">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="0.8*" /></Grid.ColumnDefinitions>
                                 <Border x:Name="UbloxTimePulsePanel" Style="{StaticResource Panel}" Margin="0,0,18,0" IsEnabled="False">
                                     <StackPanel>
@@ -839,7 +1121,7 @@
                         <StackPanel>
                             <TextBlock Text="HARDWARE UART CONSOLE" Style="{StaticResource Eyebrow}" />
                             <TextBlock Text="Inspect, configure &amp; command serial devices" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
-                            <TextBlock Text="Lossless text or hexadecimal access to GNSS, secondary GNSS, atomic clock, and NMEA UARTs."
+                            <TextBlock Text="Inspect UART traffic as ASCII, hexadecimal, decimal, or binary data across all four hardware ports."
                                        Foreground="{StaticResource MutedBrush}" />
                         </StackPanel>
                         <Border Grid.Row="1" Style="{StaticResource Panel}" Margin="0,24,0,14" Padding="16">
@@ -863,7 +1145,15 @@
                                 <StackPanel Grid.Column="3" Margin="0,0,12,0"><TextBlock Text="TIMEOUT (MS)" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                     <TextBox x:Name="UartTimeoutTextBox" Text="1000" /></StackPanel>
                                 <StackPanel Grid.Column="4" Margin="0,0,12,0"><TextBlock Text="DISPLAY" Style="{StaticResource Label}" Margin="0,0,0,5" />
-                                    <ComboBox x:Name="UartFormatCombo" SelectedIndex="0"><ComboBoxItem>Auto</ComboBoxItem><ComboBoxItem>Text</ComboBoxItem><ComboBoxItem>Hex</ComboBoxItem></ComboBox></StackPanel>
+                                    <ComboBox x:Name="UartFormatCombo" SelectedIndex="0"
+                                              SelectionChanged="UartFormat_SelectionChanged"
+                                              ToolTip="Choose how each received and transmitted byte is displayed">
+                                        <ComboBoxItem Tag="Auto">Auto</ComboBoxItem>
+                                        <ComboBoxItem Tag="Ascii">ASCII</ComboBoxItem>
+                                        <ComboBoxItem Tag="Hex">Hexadecimal</ComboBoxItem>
+                                        <ComboBoxItem Tag="Decimal">Decimal</ComboBoxItem>
+                                        <ComboBoxItem Tag="Binary">Binary</ComboBoxItem>
+                                    </ComboBox></StackPanel>
                                 <Button Grid.Column="5" Content="Configure 8N1" Click="ConfigureUart_Click" VerticalAlignment="Bottom" />
                             </Grid>
                         </Border>
@@ -939,8 +1229,11 @@
                                     <TextBlock Text="Select connector direction and the FPGA timing signal routed to it."
                                                Foreground="{StaticResource MutedBrush}" />
                                 </StackPanel>
-                                <Button Grid.Column="1" Content="Refresh connector states" Click="RefreshSma_Click"
-                                        Style="{StaticResource SecondaryButton}" VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Content="Generators &amp; frequency" Click="OpenTiming_Click" Margin="0,0,10,0" />
+                                    <Button Content="Refresh connector states" Click="RefreshSma_Click"
+                                            Style="{StaticResource SecondaryButton}" />
+                                </StackPanel>
                             </Grid>
 
                             <Border Grid.Row="1" Background="#312919" BorderBrush="#6D5622" BorderThickness="1"
@@ -1049,100 +1342,296 @@
                         </Grid>
                     </ScrollViewer>
 
-                    <!-- I2C BUS -->
-                    <ScrollViewer x:Name="I2cPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                    <!-- SIGNAL GENERATORS AND FREQUENCY COUNTERS -->
+                    <ScrollViewer x:Name="TimingPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                         <Grid Margin="32,28,32,34">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="READ-ONLY I&#x00B2;C WORKBENCH" Style="{StaticResource Eyebrow}" />
-                                    <TextBlock Text="Inspect the Time Card's onboard I&#x00B2;C bus" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
-                                    <TextBlock Text="Discover devices and read EEPROM/register data through the Xilinx AXI IIC controller."
+                                    <TextBlock Text="SMA TIMING MODULES" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock Text="Generators &amp; frequency measurement" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
+                                    <TextBlock Text="Program the four periodic outputs and measure four external frequencies, with direct routing to the front-panel SMA connectors."
                                                Foreground="{StaticResource MutedBrush}" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Button x:Name="I2cRefreshButton" Content="Refresh bus" Click="RefreshI2c_Click" Margin="0,0,10,0" />
-                                    <Button x:Name="I2cScanButton" Content="Scan 7-bit bus" Click="ScanI2c_Click"
+                                    <Button Content="SMA routing" Click="OpenSma_Click" Margin="0,0,10,0" />
+                                    <Button Content="Refresh modules" Click="RefreshTiming_Click"
                                             Style="{StaticResource SecondaryButton}" />
                                 </StackPanel>
                             </Grid>
-
-                            <Border Grid.Row="1" Background="#142A29" BorderBrush="#28584F" BorderThickness="1"
-                                    CornerRadius="12" Padding="16,12" Margin="0,22,0,18">
+                            <Border Grid.Row="1" Background="#312919" BorderBrush="#6D5622" BorderThickness="1"
+                                    CornerRadius="12" Padding="16,12" Margin="0,22,0,22">
                                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <TextBlock Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource AccentBrush}"
+                                    <TextBlock Text="&#xE7BA;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource GoldBrush}"
                                                FontSize="18" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                    <TextBlock Grid.Column="1" Text="Safe read-only mode is active. Address probes and EEPROM-style reads are available; writes are locked until hardware validation is complete."
-                                               Foreground="#B9E8D8" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="2" Text="ABI 3" Foreground="{StaticResource AccentBrush}"
+                                    <TextBlock Grid.Column="1" Text="SMA output routing is immediate. Disconnect external sources before routing a generator to a connector. Counter integration time is 0 (off) or 1–255 seconds."
+                                               Foreground="#F0D994" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="ABI 5" Foreground="{StaticResource GoldBrush}"
                                                FontFamily="Segoe UI Semibold" Margin="16,0,0,0" VerticalAlignment="Center" />
                                 </Grid>
                             </Border>
 
+                            <StackPanel Grid.Row="2">
+                                <TextBlock Text="Signal generators" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="Frequency is converted to the nearest whole-nanosecond period. Phase is relative to the PHC-aligned period boundary."
+                                           Foreground="{StaticResource MutedBrush}" Margin="0,5,0,14" />
+                                <UniformGrid Columns="2">
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="286">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <Image Source="Assets/timecard-timing.png" Width="42" Height="42" />
+                                                <StackPanel Grid.Column="1" Margin="12,0"><TextBlock Text="Generator 1" Style="{StaticResource SectionTitle}" />
+                                                    <TextBlock x:Name="Generator1StatusText" Text="NOT QUERIED" Foreground="{StaticResource MutedBrush}" FontSize="10" /></StackPanel>
+                                                <CheckBox x:Name="Generator1EnabledCheckBox" Grid.Column="2" Content="Enabled" VerticalAlignment="Center" IsEnabled="False" />
+                                            </Grid>
+                                            <Grid Margin="0,16,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="1.35*" /><ColumnDefinition Width="0.65*" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0"><TextBlock Text="FREQUENCY (HZ)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator1FrequencyTextBox" Text="10000000" IsEnabled="False" /></StackPanel>
+                                                <StackPanel Grid.Column="1"><TextBlock Text="DUTY (%)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator1DutyTextBox" Text="50" IsEnabled="False" /></StackPanel>
+                                            </Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,12,0"><TextBlock Text="PHASE (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator1PhaseTextBox" Text="0" IsEnabled="False" /></StackPanel>
+                                                <CheckBox x:Name="Generator1InvertCheckBox" Grid.Column="1" Content="Invert polarity" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
+                                            </Grid>
+                                            <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <ComboBox x:Name="Generator1RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="Generator1DetailText" Text="Period — · Start —" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <Button x:Name="Generator1ApplyButton" Grid.Column="1" Tag="1" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="286">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <Image Source="Assets/timecard-timing.png" Width="42" Height="42" />
+                                                <StackPanel Grid.Column="1" Margin="12,0"><TextBlock Text="Generator 2" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Generator2StatusText" Text="NOT QUERIED" Foreground="{StaticResource MutedBrush}" FontSize="10" /></StackPanel>
+                                                <CheckBox x:Name="Generator2EnabledCheckBox" Grid.Column="2" Content="Enabled" VerticalAlignment="Center" IsEnabled="False" />
+                                            </Grid>
+                                            <Grid Margin="0,16,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="1.35*" /><ColumnDefinition Width="0.65*" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0"><TextBlock Text="FREQUENCY (HZ)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator2FrequencyTextBox" Text="10000000" IsEnabled="False" /></StackPanel>
+                                                <StackPanel Grid.Column="1"><TextBlock Text="DUTY (%)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator2DutyTextBox" Text="50" IsEnabled="False" /></StackPanel>
+                                            </Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,12,0"><TextBlock Text="PHASE (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator2PhaseTextBox" Text="0" IsEnabled="False" /></StackPanel>
+                                                <CheckBox x:Name="Generator2InvertCheckBox" Grid.Column="1" Content="Invert polarity" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
+                                            </Grid>
+                                            <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <ComboBox x:Name="Generator2RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="Generator2DetailText" Text="Period — · Start —" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <Button x:Name="Generator2ApplyButton" Grid.Column="1" Tag="2" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="286">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <Image Source="Assets/timecard-timing.png" Width="42" Height="42" />
+                                                <StackPanel Grid.Column="1" Margin="12,0"><TextBlock Text="Generator 3" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Generator3StatusText" Text="NOT QUERIED" Foreground="{StaticResource MutedBrush}" FontSize="10" /></StackPanel>
+                                                <CheckBox x:Name="Generator3EnabledCheckBox" Grid.Column="2" Content="Enabled" VerticalAlignment="Center" IsEnabled="False" />
+                                            </Grid>
+                                            <Grid Margin="0,16,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="1.35*" /><ColumnDefinition Width="0.65*" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0"><TextBlock Text="FREQUENCY (HZ)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator3FrequencyTextBox" Text="10000000" IsEnabled="False" /></StackPanel>
+                                                <StackPanel Grid.Column="1"><TextBlock Text="DUTY (%)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator3DutyTextBox" Text="50" IsEnabled="False" /></StackPanel>
+                                            </Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,12,0"><TextBlock Text="PHASE (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator3PhaseTextBox" Text="0" IsEnabled="False" /></StackPanel>
+                                                <CheckBox x:Name="Generator3InvertCheckBox" Grid.Column="1" Content="Invert polarity" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
+                                            </Grid>
+                                            <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <ComboBox x:Name="Generator3RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="Generator3DetailText" Text="Period — · Start —" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <Button x:Name="Generator3ApplyButton" Grid.Column="1" Tag="3" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="286">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <Image Source="Assets/timecard-timing.png" Width="42" Height="42" />
+                                                <StackPanel Grid.Column="1" Margin="12,0"><TextBlock Text="Generator 4" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Generator4StatusText" Text="NOT QUERIED" Foreground="{StaticResource MutedBrush}" FontSize="10" /></StackPanel>
+                                                <CheckBox x:Name="Generator4EnabledCheckBox" Grid.Column="2" Content="Enabled" VerticalAlignment="Center" IsEnabled="False" />
+                                            </Grid>
+                                            <Grid Margin="0,16,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="1.35*" /><ColumnDefinition Width="0.65*" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0"><TextBlock Text="FREQUENCY (HZ)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator4FrequencyTextBox" Text="10000000" IsEnabled="False" /></StackPanel>
+                                                <StackPanel Grid.Column="1"><TextBlock Text="DUTY (%)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator4DutyTextBox" Text="50" IsEnabled="False" /></StackPanel>
+                                            </Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,12,0"><TextBlock Text="PHASE (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator4PhaseTextBox" Text="0" IsEnabled="False" /></StackPanel>
+                                                <CheckBox x:Name="Generator4InvertCheckBox" Grid.Column="1" Content="Invert polarity" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
+                                            </Grid>
+                                            <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <ComboBox x:Name="Generator4RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="Generator4DetailText" Text="Period — · Start —" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <Button x:Name="Generator4ApplyButton" Grid.Column="1" Tag="4" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </UniformGrid>
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="3" Margin="0,12,0,0">
+                                <TextBlock Text="Frequency counters" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="Route an SMA input to a counter and choose its measurement window. Refresh after the integration interval to read a valid sample."
+                                           Foreground="{StaticResource MutedBrush}" Margin="0,5,0,14" />
+                                <UniformGrid Columns="2">
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="220">
+                                        <StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Frequency 1" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Frequency1StatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{StaticResource MutedBrush}" FontSize="10" /></Grid>
+                                            <TextBlock x:Name="Frequency1ValueText" Text="— Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="INTEGRATION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Frequency1SecondsTextBox" Text="1" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="ROUTE INPUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Frequency1RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox></StackPanel></Grid>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency1DetailText" Text="Control — · Status —" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency1ApplyButton" Grid.Column="1" Tag="1" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="220">
+                                        <StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Frequency 2" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Frequency2StatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{StaticResource MutedBrush}" FontSize="10" /></Grid>
+                                            <TextBlock x:Name="Frequency2ValueText" Text="— Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="INTEGRATION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Frequency2SecondsTextBox" Text="1" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="ROUTE INPUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Frequency2RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox></StackPanel></Grid>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency2DetailText" Text="Control — · Status —" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency2ApplyButton" Grid.Column="1" Tag="2" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="220">
+                                        <StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Frequency 3" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Frequency3StatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{StaticResource MutedBrush}" FontSize="10" /></Grid>
+                                            <TextBlock x:Name="Frequency3ValueText" Text="— Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="INTEGRATION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Frequency3SecondsTextBox" Text="1" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="ROUTE INPUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Frequency3RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox></StackPanel></Grid>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency3DetailText" Text="Control — · Status —" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency3ApplyButton" Grid.Column="1" Tag="3" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="220">
+                                        <StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Frequency 4" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Frequency4StatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{StaticResource MutedBrush}" FontSize="10" /></Grid>
+                                            <TextBlock x:Name="Frequency4ValueText" Text="— Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="INTEGRATION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Frequency4SecondsTextBox" Text="1" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="ROUTE INPUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Frequency4RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox></StackPanel></Grid>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency4DetailText" Text="Control — · Status —" Foreground="{StaticResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency4ApplyButton" Grid.Column="1" Tag="4" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </UniformGrid>
+                            </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+
+                    <!-- I2C BUS -->
+                    <ScrollViewer x:Name="I2cPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="32,28,32,34">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="I&#x00B2;C BUS LAB" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock Text="Route, inspect, and operate the Time Card's I&#x00B2;C fabric" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
+                                    <TextBlock Text="Control the PCA9546A branches, discover schematic-defined devices, and manage the six subsystem RGB indicators."
+                                               Foreground="{StaticResource MutedBrush}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button x:Name="I2cRefreshButton" Content="Refresh bus" Click="RefreshI2c_Click" Margin="0,0,10,0" />
+                                    <Button x:Name="I2cScanButton" Content="Scan 7-bit bus" Click="ScanI2c_Click" Style="{StaticResource SecondaryButton}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Grid.Row="1" Background="#142A29" BorderBrush="#28584F" BorderThickness="1" CornerRadius="12" Padding="16,12" Margin="0,22,0,18">
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="I2cModeIcon" Text="&#xE73E;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource AccentBrush}" FontSize="18" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                    <TextBlock x:Name="I2cSafetyBannerText" Grid.Column="1" Text="Guarded mode allows reads plus dedicated mux and status-LED operations. Arbitrary I&#x00B2;C writes remain blocked."
+                                               Foreground="#B9E8D8" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="I2cDriverBadgeText" Grid.Column="2" Text="ABI 7" Foreground="{StaticResource AccentBrush}" FontFamily="Segoe UI Semibold" Margin="16,0,0,0" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+
                             <UniformGrid Grid.Row="2" Columns="4" Margin="0,0,0,20">
-                                <Border Style="{StaticResource MetricPanel}"><StackPanel>
-                                    <TextBlock Text="CONTROLLER" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="I2cControllerStateText" Text="NOT QUERIED" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" />
-                                    <TextBlock x:Name="I2cControllerDetailText" Text="Waiting for ABI 3" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
-                                </StackPanel></Border>
-                                <Border Style="{StaticResource MetricPanel}"><StackPanel>
-                                    <TextBlock Text="BUS STATE" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="I2cBusStateText" Text="&#x2014;" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" />
-                                    <TextBlock x:Name="I2cBusDetailText" Text="No sample" Foreground="{StaticResource MutedBrush}" />
-                                </StackPanel></Border>
-                                <Border Style="{StaticResource MetricPanel}"><StackPanel>
-                                    <TextBlock Text="REGISTER WINDOW" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="I2cOffsetText" Text="&#x2014;" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" />
-                                    <TextBlock x:Name="I2cRegisterText" Text="CR &#x2014; &#x00B7; SR &#x2014;" Foreground="{StaticResource MutedBrush}" FontFamily="Consolas" />
-                                </StackPanel></Border>
-                                <Border Style="{StaticResource MetricPanel}"><StackPanel>
-                                    <TextBlock Text="DISCOVERED" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="I2cDeviceCountText" Text="&#x2014;" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" />
-                                    <TextBlock x:Name="I2cScanResultText" Text="Known devices not probed" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
-                                </StackPanel></Border>
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="CONTROLLER" Style="{StaticResource Label}" /><TextBlock x:Name="I2cControllerStateText" Text="NOT QUERIED" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cControllerDetailText" Text="Waiting for a driver sample" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="BUS STATE" Style="{StaticResource Label}" /><TextBlock x:Name="I2cBusStateText" Text="&#x2014;" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cBusDetailText" Text="No sample" Foreground="{StaticResource MutedBrush}" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="REGISTER WINDOW" Style="{StaticResource Label}" /><TextBlock x:Name="I2cOffsetText" Text="&#x2014;" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cRegisterText" Text="CR &#x2014; &#x00B7; SR &#x2014;" Foreground="{StaticResource MutedBrush}" FontFamily="Consolas" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="DISCOVERED" Style="{StaticResource Label}" /><TextBlock x:Name="I2cDeviceCountText" Text="&#x2014;" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cScanResultText" Text="Known devices not probed" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" /></StackPanel></Border>
                             </UniformGrid>
 
-                            <Grid Grid.Row="3">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="0.82*" /><ColumnDefinition Width="1.18*" /></Grid.ColumnDefinitions>
+                            <Grid Grid.Row="3" Margin="0,0,0,18">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="1.25*" /><ColumnDefinition Width="0.75*" /></Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
+                                    <StackPanel>
+                                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="PCA9546A downstream routing" Style="{StaticResource SectionTitle}" /><TextBlock Text="U27 &#x00B7; upstream address 0x70 &#x00B7; channels may be combined by the device" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0" /></StackPanel><TextBlock x:Name="I2cMuxStatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{StaticResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" VerticalAlignment="Center" /></Grid>
+                                        <WrapPanel Margin="0,16,0,14">
+                                            <Button Content="Disconnect all" Tag="0" Click="SelectI2cMux_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" />
+                                            <Button Content="CH0  MAC" Tag="1" Click="SelectI2cMux_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" />
+                                            <Button Content="CH1  Sensors" Tag="2" Click="SelectI2cMux_Click" Margin="0,0,8,8" />
+                                            <Button Content="CH2  AN/ADC" Tag="4" Click="SelectI2cMux_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" />
+                                            <Button Content="CH3  DC" Tag="8" Click="SelectI2cMux_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8" />
+                                        </WrapPanel>
+                                        <UniformGrid Columns="2">
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,0,8,8"><StackPanel><TextBlock Text="CH0  MAC CLOCK" FontFamily="Segoe UI Semibold" /><TextBlock Text="Atomic-clock connector I&#x00B2;C; also requires MACSER DIP = I&#x00B2;C." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" /></StackPanel></Border>
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="8,0,0,8"><StackPanel><TextBlock Text="CH1  SENSORS + LEDS" FontFamily="Segoe UI Semibold" /><TextBlock Text="0x29 BNO055 &#x00B7; 0x40/41/44 INA219 &#x00B7; 0x6E IS32FL3207 &#x00B7; 0x76 BME280" Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" /></StackPanel></Border>
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,8,8,0"><StackPanel><TextBlock Text="CH2  AN / ADC" FontFamily="Segoe UI Semibold" /><TextBlock Text="Analog/ADC expansion I&#x00B2;C branch exposed by the card headers." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" /></StackPanel></Border>
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="8,8,0,0"><StackPanel><TextBlock Text="CH3  DC" FontFamily="Segoe UI Semibold" /><TextBlock Text="DC expansion I&#x00B2;C branch exposed by the card headers." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" /></StackPanel></Border>
+                                        </UniformGrid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource Panel}">
+                                    <StackPanel>
+                                        <TextBlock Text="TMUX1072 MAC route" Style="{StaticResource SectionTitle}" />
+                                        <TextBlock Text="U26 is a two-channel I&#x00B2;C / UART signal switch, not the four-branch bus mux." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,14" />
+                                        <Border Background="#2B2413" BorderBrush="#735F27" BorderThickness="1" CornerRadius="9" Padding="13"><StackPanel><TextBlock Text="PHYSICAL DIP CONTROL" Foreground="{StaticResource GoldBrush}" FontFamily="Segoe UI Semibold" FontSize="10" /><TextBlock Text="Set MACSER = 0 for MAC_I2C_SCL/SDA. Set MACSER = 1 for the FPGA MAC UART. The schematic does not route this select signal back to the FPGA, so software cannot change or read it." Foreground="#E9D89B" TextWrapping="Wrap" Margin="0,6,0,0" /></StackPanel></Border>
+                                        <TextBlock Text="The CH0 ACK result is the software-visible confirmation that the physical route is usable." Foreground="{StaticResource CyanBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,14,0,0" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Border Grid.Row="4" Style="{StaticResource Panel}" Margin="0,0,0,18">
+                                <StackPanel>
+                                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Subsystem RGB status indicators" Style="{StaticResource SectionTitle}" /><TextBlock Text="IS32FL3207 at 0x6E on sensor channel 1 &#x00B7; GNSS 1/2 and IO 1&#x2013;4" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0" /></StackPanel><CheckBox x:Name="I2cLedAutoCheckBox" Grid.Column="1" Content="Automatic status mapping" IsChecked="True" Click="I2cLedAuto_Click" VerticalAlignment="Center" /></Grid>
+                                    <Grid Margin="0,18,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="1.05*" /><ColumnDefinition Width="0.95*" /></Grid.ColumnDefinitions>
+                                        <UniformGrid Columns="3" Margin="0,0,18,0">
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,0,8,8"><StackPanel HorizontalAlignment="Center"><Border x:Name="I2cLedGnss1Swatch" Width="34" Height="34" CornerRadius="17" Background="#263342" BorderBrush="#53677C" BorderThickness="1" /><TextBlock Text="GNSS 1" FontFamily="Segoe UI Semibold" Margin="0,8,0,2" HorizontalAlignment="Center" /><TextBlock x:Name="I2cLedGnss1StatusText" Text="WAITING" Foreground="{StaticResource MutedBrush}" FontSize="9" HorizontalAlignment="Center" /></StackPanel></Border>
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="8,0,8,8"><StackPanel HorizontalAlignment="Center"><Border x:Name="I2cLedGnss2Swatch" Width="34" Height="34" CornerRadius="17" Background="#263342" BorderBrush="#53677C" BorderThickness="1" /><TextBlock Text="GNSS 2" FontFamily="Segoe UI Semibold" Margin="0,8,0,2" HorizontalAlignment="Center" /><TextBlock x:Name="I2cLedGnss2StatusText" Text="WAITING" Foreground="{StaticResource MutedBrush}" FontSize="9" HorizontalAlignment="Center" /></StackPanel></Border>
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="8,0,0,8"><StackPanel HorizontalAlignment="Center"><Border x:Name="I2cLedIo1Swatch" Width="34" Height="34" CornerRadius="17" Background="#263342" BorderBrush="#53677C" BorderThickness="1" /><TextBlock Text="IO 1" FontFamily="Segoe UI Semibold" Margin="0,8,0,2" HorizontalAlignment="Center" /><TextBlock x:Name="I2cLedIo1StatusText" Text="WAITING" Foreground="{StaticResource MutedBrush}" FontSize="9" HorizontalAlignment="Center" /></StackPanel></Border>
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,8,8,0"><StackPanel HorizontalAlignment="Center"><Border x:Name="I2cLedIo2Swatch" Width="34" Height="34" CornerRadius="17" Background="#263342" BorderBrush="#53677C" BorderThickness="1" /><TextBlock Text="IO 2" FontFamily="Segoe UI Semibold" Margin="0,8,0,2" HorizontalAlignment="Center" /><TextBlock x:Name="I2cLedIo2StatusText" Text="WAITING" Foreground="{StaticResource MutedBrush}" FontSize="9" HorizontalAlignment="Center" /></StackPanel></Border>
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="8,8,8,0"><StackPanel HorizontalAlignment="Center"><Border x:Name="I2cLedIo3Swatch" Width="34" Height="34" CornerRadius="17" Background="#263342" BorderBrush="#53677C" BorderThickness="1" /><TextBlock Text="IO 3" FontFamily="Segoe UI Semibold" Margin="0,8,0,2" HorizontalAlignment="Center" /><TextBlock x:Name="I2cLedIo3StatusText" Text="WAITING" Foreground="{StaticResource MutedBrush}" FontSize="9" HorizontalAlignment="Center" /></StackPanel></Border>
+                                            <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="8,8,0,0"><StackPanel HorizontalAlignment="Center"><Border x:Name="I2cLedIo4Swatch" Width="34" Height="34" CornerRadius="17" Background="#263342" BorderBrush="#53677C" BorderThickness="1" /><TextBlock Text="IO 4" FontFamily="Segoe UI Semibold" Margin="0,8,0,2" HorizontalAlignment="Center" /><TextBlock x:Name="I2cLedIo4StatusText" Text="WAITING" Foreground="{StaticResource MutedBrush}" FontSize="9" HorizontalAlignment="Center" /></StackPanel></Border>
+                                        </UniformGrid>
+                                        <StackPanel x:Name="I2cLedManualPanel" Grid.Column="1" IsEnabled="False">
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,12,0"><TextBlock Text="MANUAL TARGET" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="I2cLedSelectionCombo" SelectedIndex="0" SelectionChanged="I2cLedSelection_SelectionChanged"><ComboBoxItem Tag="0">GNSS 1</ComboBoxItem><ComboBoxItem Tag="1">GNSS 2</ComboBoxItem><ComboBoxItem Tag="2">IO 1</ComboBoxItem><ComboBoxItem Tag="3">IO 2</ComboBoxItem><ComboBoxItem Tag="4">IO 3</ComboBoxItem><ComboBoxItem Tag="5">IO 4</ComboBoxItem></ComboBox></StackPanel><Border x:Name="I2cLedPreview" Grid.Column="1" Width="48" Height="48" CornerRadius="24" Background="#263342" BorderBrush="#53677C" BorderThickness="1" VerticalAlignment="Bottom" /></Grid>
+                                            <TextBlock Text="RED" Style="{StaticResource Label}" Margin="0,12,0,2" /><Grid><Slider x:Name="I2cLedRedSlider" Minimum="0" Maximum="255" Value="0" TickFrequency="1" ValueChanged="I2cLedSlider_ValueChanged" /><TextBlock x:Name="I2cLedRedValueText" Text="0" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" Margin="0,-17,0,0" /></Grid>
+                                            <TextBlock Text="GREEN" Style="{StaticResource Label}" Margin="0,8,0,2" /><Grid><Slider x:Name="I2cLedGreenSlider" Minimum="0" Maximum="255" Value="160" TickFrequency="1" ValueChanged="I2cLedSlider_ValueChanged" /><TextBlock x:Name="I2cLedGreenValueText" Text="160" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" Margin="0,-17,0,0" /></Grid>
+                                            <TextBlock Text="BLUE" Style="{StaticResource Label}" Margin="0,8,0,2" /><Grid><Slider x:Name="I2cLedBlueSlider" Minimum="0" Maximum="255" Value="40" TickFrequency="1" ValueChanged="I2cLedSlider_ValueChanged" /><TextBlock x:Name="I2cLedBlueValueText" Text="40" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" Margin="0,-17,0,0" /></Grid>
+                                            <TextBlock Text="GLOBAL CURRENT (SAFETY CAPPED AT 128)" Style="{StaticResource Label}" Margin="0,8,0,2" /><Grid><Slider x:Name="I2cLedCurrentSlider" Minimum="8" Maximum="128" Value="96" TickFrequency="1" ValueChanged="I2cLedSlider_ValueChanged" /><TextBlock x:Name="I2cLedCurrentValueText" Text="96" HorizontalAlignment="Right" Foreground="{StaticResource MutedBrush}" Margin="0,-17,0,0" /></Grid>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0"><Button x:Name="I2cLedReadButton" Content="Read" Click="ReadI2cLed_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" /><Button x:Name="I2cLedOffButton" Content="Off" Click="TurnOffI2cLed_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" /><Button x:Name="I2cLedApplyButton" Content="Apply color" Click="ApplyI2cLed_Click" /></StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock x:Name="I2cLedOperationText" Text="Automatic mapping: GNSS fix/activity and each SMA connector's configured direction." Foreground="{StaticResource CyanBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,14,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Grid Grid.Row="5">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="0.72*" /><ColumnDefinition Width="1.28*" /></Grid.ColumnDefinitions>
                                 <StackPanel Margin="0,0,18,0">
                                     <Border Style="{StaticResource Panel}" Margin="0,0,0,16">
                                         <StackPanel>
                                             <TextBlock Text="Onboard devices" Style="{StaticResource SectionTitle}" />
-                                            <TextBlock Text="The Linux Time Card driver declares these devices for this FPGA layout."
+                                            <TextBlock Text="Known devices for this FPGA layout. A probe only tests whether the address acknowledges."
                                                        Foreground="{StaticResource MutedBrush}" Margin="0,6,0,18" TextWrapping="Wrap" />
                                             <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,0,0,10">
                                                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                     <Image Source="Assets/timecard-i2c.png" Width="38" Height="38" />
-                                                    <StackPanel Grid.Column="1" Margin="12,0">
-                                                        <TextBlock Text="Board configuration EEPROM" FontFamily="Segoe UI Semibold" />
-                                                        <TextBlock Text="24C02 &#x00B7; 7-bit address 0x50" Foreground="{StaticResource MutedBrush}" FontSize="11" />
-                                                    </StackPanel>
-                                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right">
-                                                        <TextBlock x:Name="I2cBoardStatusText" Text="NOT PROBED" Foreground="{StaticResource MutedBrush}" FontSize="10" HorizontalAlignment="Right" />
-                                                        <Button x:Name="I2cBoardReadButton" Content="Read first 32 bytes" Click="ReadBoardEeprom_Click" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="0,7,0,0" />
-                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Margin="12,0"><TextBlock Text="Board configuration EEPROM" FontFamily="Segoe UI Semibold" /><TextBlock Text="24C02 &#x00B7; address 0x50" Foreground="{StaticResource MutedBrush}" FontSize="11" /></StackPanel>
+                                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right"><TextBlock x:Name="I2cBoardStatusText" Text="NOT PROBED" Foreground="{StaticResource MutedBrush}" FontSize="10" HorizontalAlignment="Right" /><Button x:Name="I2cBoardReadButton" Content="Read page" Click="ReadBoardEeprom_Click" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="0,7,0,0" /></StackPanel>
                                                 </Grid>
                                             </Border>
                                             <Border Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14">
                                                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                     <Image Source="Assets/timecard-i2c.png" Width="38" Height="38" />
-                                                    <StackPanel Grid.Column="1" Margin="12,0">
-                                                        <TextBlock Text="MAC identity EEPROM" FontFamily="Segoe UI Semibold" />
-                                                        <TextBlock Text="24MAC402 &#x00B7; 7-bit address 0x58" Foreground="{StaticResource MutedBrush}" FontSize="11" />
-                                                        <TextBlock x:Name="I2cSerialNumberText" Text="Card serial not read" Foreground="{StaticResource CyanBrush}"
-                                                                   FontFamily="Cascadia Mono, Consolas" FontSize="12" Margin="0,5,0,0" />
-                                                    </StackPanel>
-                                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right">
-                                                        <TextBlock x:Name="I2cMacStatusText" Text="NOT PROBED" Foreground="{StaticResource MutedBrush}" FontSize="10" HorizontalAlignment="Right" />
-                                                        <Button x:Name="I2cMacReadButton" Content="Read identity bytes" Click="ReadMacEeprom_Click" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="0,7,0,0" />
-                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="1" Margin="12,0"><TextBlock Text="MAC identity EEPROM" FontFamily="Segoe UI Semibold" /><TextBlock Text="24MAC402 &#x00B7; address 0x58" Foreground="{StaticResource MutedBrush}" FontSize="11" /><TextBlock x:Name="I2cSerialNumberText" Text="Card serial not read" Foreground="{StaticResource CyanBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="12" Margin="0,5,0,0" /></StackPanel>
+                                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right"><TextBlock x:Name="I2cMacStatusText" Text="NOT PROBED" Foreground="{StaticResource MutedBrush}" FontSize="10" HorizontalAlignment="Right" /><Button x:Name="I2cMacReadButton" Content="Read identity" Click="ReadMacEeprom_Click" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="0,7,0,0" /></StackPanel>
                                                 </Grid>
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource Panel}">
+                                        <StackPanel>
+                                            <TextBlock Text="Bus explorer" Style="{StaticResource SectionTitle}" />
+                                            <TextBlock Text="ACK map" Style="{StaticResource Label}" Margin="0,12,0,5" />
+                                            <TextBlock x:Name="I2cAddressMapText" Text="Run a scan to map addresses 0x08&#x2013;0x77." Foreground="{StaticResource CyanBrush}" FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap" />
+                                            <Border Background="#050C14" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,14,0,0">
+                                                <StackPanel><TextBlock Text="CONTROLLER DIAGNOSTICS" Style="{StaticResource Label}" /><TextBlock x:Name="I2cDiagnosticsText" Text="CR &#x2014;  SR &#x2014;&#x0A;ISR &#x2014;  IER &#x2014;&#x0A;No transaction recorded." Foreground="{StaticResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" Margin="0,7,0,0" TextWrapping="Wrap" /></StackPanel>
                                             </Border>
                                         </StackPanel>
                                     </Border>
@@ -1150,34 +1639,84 @@
 
                                 <Border Grid.Column="1" Style="{StaticResource Panel}" Padding="0">
                                     <Grid>
-                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                         <Border Background="#102233" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" CornerRadius="16,16,0,0" Padding="18,14">
-                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                                <StackPanel><TextBlock Text="Register / EEPROM reader" Style="{StaticResource SectionTitle}" />
-                                                    <TextBlock Text="Combined subaddress write + repeated-start read" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0" /></StackPanel>
-                                                <TextBlock Grid.Column="1" Text="READ ONLY" Foreground="{StaticResource AccentBrush}" FontFamily="Segoe UI Semibold" FontSize="10" VerticalAlignment="Center" />
-                                            </Grid>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Register / EEPROM reader" Style="{StaticResource SectionTitle}" /><TextBlock Text="Combined subaddress write + repeated-start read" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,3,0,0" /></StackPanel><TextBlock Grid.Column="1" Text="READ ONLY" Foreground="{StaticResource AccentBrush}" FontFamily="Segoe UI Semibold" FontSize="10" VerticalAlignment="Center" /></Grid>
                                         </Border>
-                                        <Grid Grid.Row="1" Margin="18,16,18,12">
+                                        <Grid Grid.Row="1" Margin="18,14,18,4">
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.15*" /><ColumnDefinition Width="0.9*" /><ColumnDefinition Width="0.7*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,10,0"><TextBlock Text="PRESET" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="I2cPresetCombo" SelectedIndex="0" SelectionChanged="I2cPreset_SelectionChanged"><ComboBoxItem Tag="custom">Custom transaction</ComboBoxItem><ComboBoxItem Tag="board">Board EEPROM page</ComboBoxItem><ComboBoxItem Tag="identity">MAC identity bytes</ComboBoxItem><ComboBoxItem Tag="imu">BNO055 identity (CH1)</ComboBoxItem><ComboBoxItem Tag="power12">INA219 12 V config (CH1)</ComboBoxItem><ComboBoxItem Tag="environment">BME280 chip ID (CH1)</ComboBoxItem><ComboBoxItem Tag="leddriver">IS32FL3207 control (CH1)</ComboBoxItem><ComboBoxItem Tag="direct">Direct receive</ComboBoxItem></ComboBox></StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="0,0,10,0"><TextBlock Text="DATA VIEW" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="I2cDisplayModeCombo" SelectedIndex="0" SelectionChanged="I2cDisplayMode_SelectionChanged"><ComboBoxItem Tag="hexascii">Hex + ASCII</ComboBoxItem><ComboBoxItem Tag="hex">Hex</ComboBoxItem><ComboBoxItem Tag="ascii">ASCII</ComboBoxItem><ComboBoxItem Tag="decimal">Decimal</ComboBoxItem><ComboBoxItem Tag="binary">Binary</ComboBoxItem></ComboBox></StackPanel>
+                                            <StackPanel Grid.Column="2" Margin="0,0,10,0"><TextBlock Text="TIMEOUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="I2cTimeoutCombo" SelectedIndex="1"><ComboBoxItem Tag="50">50 ms</ComboBoxItem><ComboBoxItem Tag="100">100 ms</ComboBoxItem><ComboBoxItem Tag="250">250 ms</ComboBoxItem></ComboBox></StackPanel>
+                                            <Button x:Name="I2cPreviousButton" Grid.Column="3" Content="Previous" ToolTip="Read the previous page" Click="I2cPrevious_Click" Style="{StaticResource SecondaryButton}" Padding="10,7" Margin="0,19,6,0" />
+                                            <Button x:Name="I2cNextButton" Grid.Column="4" Content="Next" ToolTip="Read the next page" Click="I2cNext_Click" Style="{StaticResource SecondaryButton}" Padding="10,7" Margin="0,19,6,0" />
+                                            <Button x:Name="I2cCopyButton" Grid.Column="5" Content="Copy" Click="CopyI2c_Click" Style="{StaticResource SecondaryButton}" Padding="11,7" Margin="0,19,0,0" IsEnabled="False" />
+                                        </Grid>
+                                        <Grid Grid.Row="2" Margin="18,10,18,12">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="0.75*" /><ColumnDefinition Width="1*" /><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="0.75*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <StackPanel Margin="0,0,10,0"><TextBlock Text="ADDRESS (HEX)" Style="{StaticResource Label}" Margin="0,0,0,5" />
-                                                <TextBox x:Name="I2cAddressTextBox" Text="50" MaxLength="4" /></StackPanel>
-                                            <StackPanel Grid.Column="1" Margin="0,0,10,0"><TextBlock Text="SUBADDRESS (HEX)" Style="{StaticResource Label}" Margin="0,0,0,5" />
-                                                <TextBox x:Name="I2cSubaddressTextBox" Text="00" MaxLength="6" /></StackPanel>
-                                            <StackPanel Grid.Column="2" Margin="0,0,10,0"><TextBlock Text="ADDRESS BYTES" Style="{StaticResource Label}" Margin="0,0,0,5" />
-                                                <ComboBox x:Name="I2cSubaddressLengthCombo" SelectedIndex="1"><ComboBoxItem Tag="0">None</ComboBoxItem><ComboBoxItem Tag="1">1 byte</ComboBoxItem><ComboBoxItem Tag="2">2 bytes</ComboBoxItem></ComboBox></StackPanel>
-                                            <StackPanel Grid.Column="3" Margin="0,0,10,0"><TextBlock Text="READ BYTES" Style="{StaticResource Label}" Margin="0,0,0,5" />
-                                                <TextBox x:Name="I2cLengthTextBox" Text="32" MaxLength="3" /></StackPanel>
+                                            <StackPanel Margin="0,0,10,0"><TextBlock Text="ADDRESS (HEX)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="I2cAddressTextBox" Text="50" MaxLength="4" /></StackPanel>
+                                            <StackPanel Grid.Column="1" Margin="0,0,10,0"><TextBlock Text="SUBADDRESS (HEX)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="I2cSubaddressTextBox" Text="00" MaxLength="6" /></StackPanel>
+                                            <StackPanel Grid.Column="2" Margin="0,0,10,0"><TextBlock Text="ADDRESS BYTES" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="I2cSubaddressLengthCombo" SelectedIndex="1"><ComboBoxItem Tag="0">None</ComboBoxItem><ComboBoxItem Tag="1">1 byte</ComboBoxItem><ComboBoxItem Tag="2">2 bytes</ComboBoxItem></ComboBox></StackPanel>
+                                            <StackPanel Grid.Column="3" Margin="0,0,10,0"><TextBlock Text="READ BYTES" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="I2cLengthTextBox" Text="32" MaxLength="3" /></StackPanel>
                                             <Button x:Name="I2cReadButton" Grid.Column="4" Content="Read" Click="ReadI2c_Click" MinWidth="78" VerticalAlignment="Bottom" />
                                         </Grid>
-                                        <TextBox x:Name="I2cOutputTextBox" Grid.Row="2" Margin="18,0" MinHeight="220" IsReadOnly="True" AcceptsReturn="True"
-                                                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                                                 FontFamily="Cascadia Mono, Consolas" FontSize="12" Background="#050C14" BorderThickness="0"
-                                                 Padding="14" Text="No I&#x00B2;C data has been read." />
-                                        <Border Grid.Row="3" Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" CornerRadius="0,0,16,16" Padding="18,10">
-                                            <TextBlock x:Name="I2cReadStatusText" Text="Ready for a bounded read (1&#x2013;255 bytes)." Foreground="{StaticResource MutedBrush}" FontSize="11" />
-                                        </Border>
+                                        <TextBox x:Name="I2cOutputTextBox" Grid.Row="3" Margin="18,0" MinHeight="300" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="12" Background="#050C14" BorderThickness="0" Padding="14" Text="No I&#x00B2;C data has been read." />
+                                        <Border Grid.Row="4" Background="#0B1926" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" CornerRadius="0,0,16,16" Padding="18,10"><TextBlock x:Name="I2cReadStatusText" Text="Ready for a bounded read (1&#x2013;255 bytes)." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" /></Border>
                                     </Grid>
+                                </Border>
+                            </Grid>
+                        </Grid>
+                    </ScrollViewer>
+
+                    <!-- FPGA FLASH -->
+                    <ScrollViewer x:Name="FlashPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="32,28,32,34">
+                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="FPGA MAINTENANCE" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock Text="SPI flash firmware update" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
+                                    <TextBlock Text="Program and verify the FPGA image region without exposing the protected card-configuration area." Foreground="{StaticResource MutedBrush}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Content="Back to subsystems" Click="BackToSubsystems_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,10,0" />
+                                    <Button Content="Refresh device" Click="RefreshFlash_Click" />
+                                </StackPanel>
+                            </Grid>
+                            <Border Grid.Row="1" Background="#32200D" BorderBrush="#80591B" BorderThickness="1" CornerRadius="12" Padding="16,13" Margin="0,22,0,18">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE7BA;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource GoldBrush}" FontSize="18" Margin="0,0,12,0" />
+                                    <TextBlock Text="A failed or interrupted update can leave the FPGA unable to boot. Use a compatible image and keep the card powered until verification finishes." Foreground="#FFE0A3" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+                            <UniformGrid Grid.Row="2" Columns="4" Margin="0,0,0,18">
+                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CONTROLLER" Style="{StaticResource Label}" /><TextBlock x:Name="FlashControllerText" Text="NOT QUERIED" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="JEDEC ID" Style="{StaticResource Label}" /><TextBlock x:Name="FlashJedecText" Text="—" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CAPACITY" Style="{StaticResource Label}" /><TextBlock x:Name="FlashCapacityText" Text="—" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="FPGA REGION" Style="{StaticResource Label}" /><TextBlock x:Name="FlashRegionText" Text="—" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
+                            </UniformGrid>
+                            <Grid Grid.Row="3">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="1.05*" /><ColumnDefinition Width="0.95*" /></Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
+                                    <StackPanel>
+                                        <TextBlock Text="Firmware image" Style="{StaticResource SectionTitle}" />
+                                        <TextBlock Text="Select an OCPC-wrapped image or a raw FPGA binary. Wrapped images are checked against this card's PCI identity and declared length." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,16" />
+                                        <Button x:Name="FlashChooseButton" Content="Choose firmware image…" Click="ChooseFirmware_Click" HorizontalAlignment="Left" />
+                                        <TextBlock x:Name="FlashImagePathText" Text="No image selected" FontFamily="Segoe UI Semibold" TextWrapping="Wrap" Margin="0,16,0,5" />
+                                        <TextBlock x:Name="FlashImageDetailText" Text="OCPC header and image bounds will be validated before writing." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="FlashHashText" Text="SHA-256 —" Foreground="{StaticResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" TextWrapping="Wrap" Margin="0,11,0,0" />
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource Panel}">
+                                    <StackPanel>
+                                        <TextBlock Text="Update &amp; verification" Style="{StaticResource SectionTitle}" />
+                                        <CheckBox x:Name="FlashAcknowledgeCheckBox" Content="I understand that power must not be removed during this operation." Margin="0,14,0,14" Checked="FlashAcknowledge_Changed" Unchecked="FlashAcknowledge_Changed" />
+                                        <Button x:Name="FlashStartButton" Content="Erase, program &amp; verify" Click="FlashFirmware_Click" IsEnabled="False" HorizontalAlignment="Left" />
+                                        <ProgressBar x:Name="FlashProgressBar" Minimum="0" Maximum="100" Value="0" Height="8" Margin="0,20,0,8" />
+                                        <TextBlock x:Name="FlashProgressText" Text="Ready" Foreground="{StaticResource MutedBrush}" />
+                                        <TextBox x:Name="FlashLogTextBox" Margin="0,14,0,0" Height="160" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="11" Background="#050C14" BorderThickness="0" Padding="10" Text="Waiting for a compatible flash device and firmware image." />
+                                    </StackPanel>
                                 </Border>
                             </Grid>
                         </Grid>
@@ -1187,12 +1726,14 @@
                     <ScrollViewer x:Name="SubsystemsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                         <Grid Margin="32,28,32,34">
                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="DEVICE FABRIC" Style="{StaticResource Eyebrow}" />
-                                <TextBlock Text="Time Card subsystem map" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
-                                <TextBlock Text="Every function exposed by the Windows bus driver, with honest capability labels for the current ABI."
-                                           Foreground="{StaticResource MutedBrush}" />
-                            </StackPanel>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="DEVICE FABRIC" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock Text="Time Card subsystem map" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
+                                    <TextBlock Text="Every function exposed by the Windows bus driver, with live presence checks and direct links to configuration." Foreground="{StaticResource MutedBrush}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="Refresh presence" Click="RefreshSubsystems_Click" Style="{StaticResource SecondaryButton}" VerticalAlignment="Center" />
+                            </Grid>
                             <Border Grid.Row="1" Style="{StaticResource Panel}" Margin="0,24,0,22">
                                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                     <StackPanel><TextBlock Text="Device Manager hierarchy" Style="{StaticResource SectionTitle}" />
@@ -1224,7 +1765,9 @@
                                     <TextBlock Text="UART CONTROL" Foreground="{StaticResource GoldBrush}" FontSize="10" /></StackPanel></Border>
                                 <Border Style="{StaticResource SubsystemCard}"><StackPanel><Image Source="Assets/timecard-gnss2.png" Width="46" Height="46" HorizontalAlignment="Left" />
                                     <TextBlock Text="Secondary GNSS Receiver" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
-                                    <TextBlock Text="UART CONTROL" Foreground="{StaticResource GoldBrush}" FontSize="10" /></StackPanel></Border>
+                                    <TextBlock x:Name="SubsystemGnss2StatusText" Text="CHECKING UART 1" Foreground="{StaticResource GoldBrush}" FontSize="10" />
+                                    <TextBlock x:Name="SubsystemGnss2DetailText" Text="Presence requires received UART data." Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                    <Button Content="Open UART" Tag="1" Click="OpenUart_Click" Style="{StaticResource SecondaryButton}" Padding="10,6" Margin="0,10,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource SubsystemCard}"><StackPanel><Image Source="Assets/timecard-atomic.png" Width="46" Height="46" HorizontalAlignment="Left" />
                                     <TextBlock Text="Atomic Clock" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
                                     <TextBlock Text="LIVE SA53 CONTROL" Foreground="{StaticResource AccentBrush}" FontSize="10" />
@@ -1232,7 +1775,8 @@
                                             Padding="10,6" Margin="0,10,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource SubsystemCard}"><StackPanel><Image Source="Assets/timecard-nmea.png" Width="46" Height="46" HorizontalAlignment="Left" />
                                     <TextBlock Text="NMEA Output" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
-                                    <TextBlock Text="GENERATOR + UART CONTROL · ABI 4" Foreground="{StaticResource AccentBrush}" FontSize="10" /></StackPanel></Border>
+                                    <TextBlock Text="GENERATOR + UART CONTROL · ABI 4" Foreground="{StaticResource AccentBrush}" FontSize="10" />
+                                    <Button Content="Configure output" Click="OpenNmea_Click" Style="{StaticResource SecondaryButton}" Padding="10,6" Margin="0,10,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource SubsystemCard}"><StackPanel><Image Source="Assets/timecard-ptm.png" Width="46" Height="46" HorizontalAlignment="Left" />
                                     <TextBlock Text="PCIe PTM" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
                                     <TextBlock Text="DISCOVERED" Foreground="{StaticResource CyanBrush}" FontSize="10" /></StackPanel></Border>
@@ -1242,8 +1786,10 @@
                                     <Button Content="Configure" Click="OpenSma_Click" Style="{StaticResource SecondaryButton}"
                                             Padding="10,6" Margin="0,10,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource SubsystemCard}"><StackPanel><Image Source="Assets/timecard-timing.png" Width="46" Height="46" HorizontalAlignment="Left" />
-                                    <TextBlock Text="Timing Generators" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
-                                    <TextBlock Text="CONTROL API NEXT" Foreground="{StaticResource MutedBrush}" FontSize="10" /></StackPanel></Border>
+                                    <TextBlock Text="Generators &amp; Frequency Modules" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" TextWrapping="Wrap" />
+                                    <TextBlock Text="GENERATOR + FREQUENCY CONTROL · ABI 5" Foreground="{StaticResource AccentBrush}" FontSize="10" />
+                                    <Button Content="Configure" Click="OpenTiming_Click" Style="{StaticResource SecondaryButton}"
+                                            Padding="10,6" Margin="0,10,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource SubsystemCard}"><StackPanel><Image Source="Assets/timecard-i2c.png" Width="46" Height="46" HorizontalAlignment="Left" />
                                     <TextBlock Text="I²C Controller" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
                                     <TextBlock Text="READ-ONLY CONTROL · ABI 3" Foreground="{StaticResource AccentBrush}" FontSize="10" />
@@ -1251,7 +1797,8 @@
                                             Padding="10,6" Margin="0,10,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource SubsystemCard}"><StackPanel><Image Source="Assets/timecard-flash.png" Width="46" Height="46" HorizontalAlignment="Left" />
                                     <TextBlock Text="FPGA &amp; SPI Flash" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
-                                    <TextBlock Text="UPDATE API NEXT" Foreground="{StaticResource MutedBrush}" FontSize="10" /></StackPanel></Border>
+                                    <TextBlock Text="GUARDED UPDATE + VERIFY · ABI 6" Foreground="{StaticResource AccentBrush}" FontSize="10" />
+                                    <Button Content="Update firmware" Click="OpenFlash_Click" Style="{StaticResource SecondaryButton}" Padding="10,6" Margin="0,10,0,0" /></StackPanel></Border>
                             </UniformGrid>
                         </Grid>
                     </ScrollViewer>
@@ -1279,12 +1826,10 @@
                                 </StackPanel></Border>
                                 <Border Grid.Column="1" Style="{StaticResource Panel}"><StackPanel>
                                     <TextBlock Text="Capability roadmap" Style="{StaticResource SectionTitle}" />
-                                    <TextBlock Text="The GUI exposes safe ABI 4 clock-source, NMEA-generator, UART, hierarchy, verified SMA-routing, card-identity, and read-only I²C operations. These controls still require explicit, reviewed kernel additions:"
+                                    <TextBlock Text="The GUI exposes ABI 7 clock-source, NMEA-generator, UART, hierarchy, SMA routing, signal-generator, frequency-counter, card identity, guarded I²C mux/LED operations, and FPGA flash operations. These controls still require explicit, reviewed kernel additions:"
                                                Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,16" />
                                     <TextBlock Text="• SMA polarity, termination, and cable-delay calibration" Margin="0,4" />
-                                    <TextBlock Text="• Timestamp/signal generator programming" Margin="0,4" />
                                     <TextBlock Text="• Validated I²C data-write and EEPROM-programming workflow" Margin="0,4" />
-                                    <TextBlock Text="• Validated FPGA/SPI firmware update workflow" Margin="0,4" />
                                     <TextBlock Text="• PTM counters and advanced clock-source selection" Margin="0,4" />
                                 </StackPanel></Border>
                             </Grid>

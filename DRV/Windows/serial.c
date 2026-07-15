@@ -189,3 +189,44 @@ TimeCardUartWrite(PDEVICE_CONTEXT context,
     UNREFERENCED_PARAMETER(UART_LSR_TEMT);
     return STATUS_SUCCESS;
 }
+
+NTSTATUS
+TimeCardUartObserve(PDEVICE_CONTEXT context,
+                    const TIMECARD_UART_OBSERVE *request,
+                    TIMECARD_UART_OBSERVE *response)
+{
+    ULONGLONG deadline;
+    ULONG timeout;
+
+    if (request->Size < sizeof(*request) ||
+        request->Port >= TIMECARD_UART_COUNT)
+        return STATUS_INVALID_PARAMETER;
+    if (!TimeCardUartValid(context, request->Port))
+        return STATUS_INVALID_DEVICE_STATE;
+
+    timeout = TimeCardUartClampTimeout(request->TimeoutMilliseconds);
+    deadline = KeQueryInterruptTime() + (ULONGLONG)timeout * 10000u;
+    RtlZeroMemory(response, sizeof(*response));
+    response->Size = sizeof(*response);
+    response->Port = request->Port;
+    response->TimeoutMilliseconds = timeout;
+    response->Flags = TIMECARD_UART_OBSERVE_FLAG_PRESENT;
+
+    do {
+        UCHAR lsr;
+
+        WdfWaitLockAcquire(context->RegisterLock, NULL);
+        lsr = TimeCardUartReadRegister(context, request->Port, UART_LSR);
+        WdfWaitLockRelease(context->RegisterLock);
+        response->LineStatus |= lsr;
+        if ((lsr & UART_LSR_DR) != 0) {
+            response->Flags |= TIMECARD_UART_OBSERVE_FLAG_ACTIVITY;
+            break;
+        }
+        if (timeout == 0 || KeQueryInterruptTime() >= deadline)
+            break;
+        TimeCardUartPause();
+    } while (TRUE);
+
+    return STATUS_SUCCESS;
+}

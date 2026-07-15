@@ -43,6 +43,8 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
     ULONG uartOffsets[TIMECARD_UART_COUNT];
     ULONG smaMap1Offset;
     ULONG smaMap2Offset;
+    ULONG signalBaseOffset;
+    ULONG frequencyBaseOffset;
     BOOLEAN useMsix = context->InterruptMessages > 1;
     ULONG i;
 
@@ -57,7 +59,10 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
         uartOffsets[TIMECARD_UART_NMEA] = TIMECARD_UART_NMEA_OFFSET_MSIX;
         smaMap1Offset = TIMECARD_SMA_MAP1_OFFSET_MSIX;
         smaMap2Offset = TIMECARD_SMA_MAP2_OFFSET_MSIX;
+        signalBaseOffset = TIMECARD_SIGNAL_BASE_MSIX;
+        frequencyBaseOffset = TIMECARD_FREQUENCY_BASE_MSIX;
         context->I2cOffset = TIMECARD_I2C_OFFSET_MSIX;
+        context->FlashOffset = TIMECARD_FLASH_OFFSET_MSIX;
     } else {
         context->Layout = TIMECARD_LAYOUT_MSI;
         context->ClockOffset = TIMECARD_CLOCK_OFFSET_MSI;
@@ -69,7 +74,10 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
         uartOffsets[TIMECARD_UART_NMEA] = TIMECARD_UART_NMEA_OFFSET_MSI;
         smaMap1Offset = TIMECARD_SMA_MAP1_OFFSET_MSI;
         smaMap2Offset = TIMECARD_SMA_MAP2_OFFSET_MSI;
+        signalBaseOffset = TIMECARD_SIGNAL_BASE_MSI;
+        frequencyBaseOffset = TIMECARD_FREQUENCY_BASE_MSI;
         context->I2cOffset = TIMECARD_I2C_OFFSET_MSI;
+        context->FlashOffset = TIMECARD_FLASH_OFFSET_MSI;
     }
 
     if (!TimeCardRangeFits(context->Bar0Length, context->ClockOffset,
@@ -96,6 +104,27 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
     context->NmeaOut = NULL;
     context->I2c = NULL;
     context->I2cKnownDeviceMask = 0;
+    context->Flash = NULL;
+    context->FlashJedecId = 0;
+    context->FlashCapacity = 0;
+    context->FlashFifoDepth = 0;
+    for (i = 0; i < TIMECARD_SIGNAL_COUNT; ++i) {
+        ULONG signalOffset = signalBaseOffset +
+                             i * TIMECARD_REGISTER_WINDOW_SIZE;
+        ULONG frequencyOffset = frequencyBaseOffset +
+                                i * TIMECARD_REGISTER_WINDOW_SIZE;
+
+        context->Signal[i] = TimeCardRangeFits(
+            context->Bar0Length, signalOffset,
+            sizeof(TIMECARD_SIGNAL_REG)) ?
+            (volatile TIMECARD_SIGNAL_REG *)(context->Bar0Base +
+                                              signalOffset) : NULL;
+        context->Frequency[i] = TimeCardRangeFits(
+            context->Bar0Length, frequencyOffset,
+            sizeof(TIMECARD_FREQUENCY_REG)) ?
+            (volatile TIMECARD_FREQUENCY_REG *)(context->Bar0Base +
+                                                 frequencyOffset) : NULL;
+    }
     if (TimeCardRangeFits(context->Bar0Length, smaMap1Offset,
                           sizeof(TIMECARD_GPIO_REG)) &&
         TimeCardRangeFits(context->Bar0Length, smaMap2Offset,
@@ -117,6 +146,12 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
     if (TimeCardRangeFits(context->Bar0Length, context->I2cOffset,
                           TIMECARD_REGISTER_WINDOW_SIZE)) {
         context->I2c = context->Bar0Base + context->I2cOffset;
+    }
+
+    /* The Xilinx SPI controller owns the FPGA firmware region of SPI-NOR. */
+    if (TimeCardRangeFits(context->Bar0Length, context->FlashOffset,
+                          TIMECARD_REGISTER_WINDOW_SIZE)) {
+        context->Flash = context->Bar0Base + context->FlashOffset;
     }
     return STATUS_SUCCESS;
 }
@@ -274,6 +309,14 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
     context->SmaMap1 = NULL;
     context->SmaMap2 = NULL;
     context->I2c = NULL;
+    context->Flash = NULL;
+    context->FlashJedecId = 0;
+    context->FlashCapacity = 0;
+    context->FlashFifoDepth = 0;
+    for (i = 0; i < TIMECARD_SIGNAL_COUNT; ++i) {
+        context->Signal[i] = NULL;
+        context->Frequency[i] = NULL;
+    }
     for (i = 0; i < TIMECARD_UART_COUNT; ++i)
         context->Uart[i] = NULL;
     if (context->Bar0Base != NULL) {

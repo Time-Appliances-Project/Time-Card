@@ -54,8 +54,34 @@
     TIMECARD_IOCTL(15, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 #define IOCTL_TIMECARD_GET_IDENTITY \
     TIMECARD_IOCTL(16, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_SIGNAL_QUERY \
+    TIMECARD_IOCTL(17, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_SIGNAL_SET \
+    TIMECARD_IOCTL(18, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_FREQUENCY_QUERY \
+    TIMECARD_IOCTL(19, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_FREQUENCY_SET \
+    TIMECARD_IOCTL(20, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_FLASH_QUERY \
+    TIMECARD_IOCTL(21, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_FLASH_READ \
+    TIMECARD_IOCTL(22, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_FLASH_ERASE \
+    TIMECARD_IOCTL(23, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_FLASH_PROGRAM \
+    TIMECARD_IOCTL(24, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_UART_OBSERVE \
+    TIMECARD_IOCTL(25, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_I2C_MUX_QUERY \
+    TIMECARD_IOCTL(26, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_I2C_MUX_SET \
+    TIMECARD_IOCTL(27, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_LED_QUERY \
+    TIMECARD_IOCTL(28, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_LED_SET \
+    TIMECARD_IOCTL(29, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 
-#define TIMECARD_ABI_VERSION 4u
+#define TIMECARD_ABI_VERSION 7u
 #define TIMECARD_LAYOUT_MSI  1u
 #define TIMECARD_LAYOUT_MSIX 2u
 #define TIMECARD_UART_COUNT  4u
@@ -90,6 +116,26 @@
 #define TIMECARD_I2C_DEVICE_BOARD_EEPROM (1u << 0)
 #define TIMECARD_I2C_DEVICE_MAC_EEPROM   (1u << 1)
 
+/* U27, PCA9546A at 0x70.  More than one downstream branch may be selected. */
+#define TIMECARD_I2C_MUX_ADDRESS         0x70u
+#define TIMECARD_I2C_MUX_CHANNEL_MAC     (1u << 0)
+#define TIMECARD_I2C_MUX_CHANNEL_SENSORS (1u << 1)
+#define TIMECARD_I2C_MUX_CHANNEL_ANADC   (1u << 2)
+#define TIMECARD_I2C_MUX_CHANNEL_DC      (1u << 3)
+#define TIMECARD_I2C_MUX_CHANNEL_MASK    0x0fu
+
+/* U6, IS32FL3207 at 0x6e on the sensor branch. */
+#define TIMECARD_LED_COUNT 6u
+#define TIMECARD_LED_GNSS1 0u
+#define TIMECARD_LED_GNSS2 1u
+#define TIMECARD_LED_IO1   2u
+#define TIMECARD_LED_IO2   3u
+#define TIMECARD_LED_IO3   4u
+#define TIMECARD_LED_IO4   5u
+#define TIMECARD_LED_FLAG_PRESENT (1u << 0)
+#define TIMECARD_LED_FLAG_ENABLED (1u << 1)
+#define TIMECARD_LED_MAX_GLOBAL_CURRENT 128u
+
 #define TIMECARD_CLOCK_SOURCE_NONE 0x00u
 #define TIMECARD_CLOCK_SOURCE_TOD  0x01u
 #define TIMECARD_CLOCK_SOURCE_IRIG 0x02u
@@ -106,6 +152,30 @@
 #define TIMECARD_IDENTITY_FLAG_PRESENT (1u << 0)
 #define TIMECARD_IDENTITY_FLAG_VALID   (1u << 1)
 #define TIMECARD_IDENTITY_SERIAL_LENGTH 6u
+
+#define TIMECARD_SIGNAL_COUNT 4u
+#define TIMECARD_SIGNAL_FLAG_PRESENT  (1u << 0)
+#define TIMECARD_SIGNAL_FLAG_ENABLED  (1u << 1)
+#define TIMECARD_SIGNAL_FLAG_INVERTED (1u << 2)
+
+#define TIMECARD_FREQUENCY_COUNT 4u
+#define TIMECARD_FREQUENCY_FLAG_PRESENT (1u << 0)
+#define TIMECARD_FREQUENCY_FLAG_ENABLED (1u << 1)
+#define TIMECARD_FREQUENCY_FLAG_VALID   (1u << 2)
+#define TIMECARD_FREQUENCY_FLAG_ERROR   (1u << 3)
+#define TIMECARD_FREQUENCY_FLAG_OVERRUN (1u << 4)
+
+#define TIMECARD_FLASH_MAX_TRANSFER 256u
+#define TIMECARD_FLASH_FIRMWARE_OFFSET 0x00400000u
+#define TIMECARD_FLASH_ERASE_SIZE 4096u
+#define TIMECARD_FLASH_PAGE_SIZE 256u
+#define TIMECARD_FLASH_FLAG_PRESENT    (1u << 0)
+#define TIMECARD_FLASH_FLAG_IDENTIFIED (1u << 1)
+#define TIMECARD_FLASH_FLAG_SUPPORTED  (1u << 2)
+#define TIMECARD_FLASH_FLAG_FOUR_BYTE  (1u << 3)
+
+#define TIMECARD_UART_OBSERVE_FLAG_PRESENT  (1u << 0)
+#define TIMECARD_UART_OBSERVE_FLAG_ACTIVITY (1u << 1)
 
 /* Function selectors match the FPGA SMA maps and the Linux ptp_ocp ABI. */
 #define TIMECARD_SMA_INPUT_10MHZ 0x0000u
@@ -255,6 +325,29 @@ typedef struct _TIMECARD_I2C_TRANSFER {
     unsigned char Data[TIMECARD_I2C_MAX_TRANSFER];
 } TIMECARD_I2C_TRANSFER;
 
+typedef struct _TIMECARD_I2C_MUX_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 ChannelMask;
+    unsigned __int32 Present;
+    unsigned __int32 ControllerStatus;
+    unsigned __int32 InterruptStatus;
+    unsigned __int32 Reserved[3];
+} TIMECARD_I2C_MUX_CONTROL;
+
+typedef struct _TIMECARD_LED_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Led;
+    unsigned __int32 Flags;
+    unsigned __int32 Red;
+    unsigned __int32 Green;
+    unsigned __int32 Blue;
+    unsigned __int32 GlobalCurrent;
+    unsigned __int32 MuxChannelMask;
+    unsigned __int32 ControllerStatus;
+    unsigned __int32 InterruptStatus;
+    unsigned __int32 Reserved[2];
+} TIMECARD_LED_CONTROL;
+
 typedef struct _TIMECARD_CLOCK_SOURCE_CONTROL {
     unsigned __int32 Size;
     unsigned __int32 Source;
@@ -280,5 +373,80 @@ typedef struct _TIMECARD_IDENTITY {
     unsigned char Serial[TIMECARD_IDENTITY_SERIAL_LENGTH];
     unsigned char Reserved[2];
 } TIMECARD_IDENTITY;
+
+/* Generator numbers are 1 through 4. Times are expressed in nanoseconds. */
+typedef struct _TIMECARD_SIGNAL_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Generator;
+    unsigned __int32 Flags;
+    unsigned __int32 Status;
+    unsigned __int32 Version;
+    unsigned __int32 RepeatCount;
+    unsigned __int32 StartNanoseconds;
+    unsigned __int32 Reserved;
+    unsigned __int64 PeriodNanoseconds;
+    unsigned __int64 PulseNanoseconds;
+    unsigned __int64 PhaseNanoseconds;
+    unsigned __int64 StartSeconds;
+} TIMECARD_SIGNAL_CONTROL;
+
+/* Counter numbers are 1 through 4; zero integration seconds disables it. */
+typedef struct _TIMECARD_FREQUENCY_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Counter;
+    unsigned __int32 Flags;
+    unsigned __int32 IntegrationSeconds;
+    unsigned __int32 FrequencyHz;
+    unsigned __int32 Control;
+    unsigned __int32 Status;
+    unsigned __int32 Reserved;
+} TIMECARD_FREQUENCY_CONTROL;
+
+typedef struct _TIMECARD_FLASH_STATUS {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Offset;
+    unsigned __int32 JedecId;
+    unsigned __int32 CapacityBytes;
+    unsigned __int32 FirmwareOffset;
+    unsigned __int32 EraseSize;
+    unsigned __int32 PageSize;
+    unsigned __int32 ControllerStatus;
+    unsigned __int32 FlashStatus;
+    unsigned __int32 FifoDepth;
+    unsigned __int32 Reserved[5];
+} TIMECARD_FLASH_STATUS;
+
+/* Flash offsets are relative to TIMECARD_FLASH_FIRMWARE_OFFSET. */
+typedef struct _TIMECARD_FLASH_RANGE {
+    unsigned __int32 Size;
+    unsigned __int32 Offset;
+    unsigned __int32 Length;
+    unsigned __int32 Reserved;
+} TIMECARD_FLASH_RANGE;
+
+typedef struct _TIMECARD_FLASH_TRANSFER {
+    unsigned __int32 Size;
+    unsigned __int32 Offset;
+    unsigned __int32 Length;
+    unsigned __int32 Status;
+    unsigned char Data[TIMECARD_FLASH_MAX_TRANSFER];
+} TIMECARD_FLASH_TRANSFER;
+
+typedef struct _TIMECARD_FLASH_RESULT {
+    unsigned __int32 Size;
+    unsigned __int32 Offset;
+    unsigned __int32 Length;
+    unsigned __int32 Status;
+} TIMECARD_FLASH_RESULT;
+
+typedef struct _TIMECARD_UART_OBSERVE {
+    unsigned __int32 Size;
+    unsigned __int32 Port;
+    unsigned __int32 TimeoutMilliseconds;
+    unsigned __int32 Flags;
+    unsigned __int32 LineStatus;
+    unsigned __int32 Reserved[3];
+} TIMECARD_UART_OBSERVE;
 
 #endif /* TIMECARD_IOCTL_H */

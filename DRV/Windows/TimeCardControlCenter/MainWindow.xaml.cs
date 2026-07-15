@@ -6,6 +6,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,10 +27,30 @@ namespace TimeCardControlCenter
         private TimeCardClient client;
         private TimeCardSnapshot lastSnapshot;
         private CancellationTokenSource uartMonitorCancellation;
+        private readonly List<UartConsoleEntry> uartConsoleEntries = new List<UartConsoleEntry>();
+        private int uartConsoleHistoryBytes;
         private bool refreshing;
         private bool connecting;
         private bool smaUpdatingUi;
+        private bool timingRefreshing;
         private bool i2cRefreshing;
+        private bool ledAutomationUpdating;
+        private bool ledControlsUpdating;
+        private bool subsystemsRefreshing;
+        private bool flashUpdating;
+        private FlashDeviceStatus lastFlashStatus;
+        private byte[] selectedFlashImage;
+        private string selectedFlashPath;
+        private bool selectedFlashIsRaw;
+        private byte[] lastI2cData;
+        private uint lastI2cAddress;
+        private uint lastI2cSubaddress;
+        private uint lastI2cSubaddressLength;
+        private readonly SmaConnectorState[] lastSmaLedStates = new SmaConnectorState[4];
+        private readonly BoardLedColor[] lastAppliedLedColors = new BoardLedColor[6];
+        private bool? secondaryGnssPresent;
+        private DateTime lastSmaLedRefreshUtc = DateTime.MinValue;
+        private DateTime lastSecondaryLedObservationUtc = DateTime.MinValue;
         private bool atomicRefreshing;
         private Sa53Snapshot lastSa53Snapshot;
         private bool ubloxRefreshing;
@@ -36,14 +58,70 @@ namespace TimeCardControlCenter
         private uint? lastUbloxPort;
         private uint? lastUbloxBaud;
         private DateTime lastConnectionAttemptUtc = DateTime.MinValue;
+        private SignalGeneratorControls[] signalGeneratorControls;
+        private FrequencyCounterControls[] frequencyCounterControls;
+
+        private sealed class SignalGeneratorControls
+        {
+            public TextBlock Status { get; set; }
+            public CheckBox Enabled { get; set; }
+            public TextBox Frequency { get; set; }
+            public TextBox Duty { get; set; }
+            public TextBox Phase { get; set; }
+            public CheckBox Invert { get; set; }
+            public ComboBox Route { get; set; }
+            public TextBlock Detail { get; set; }
+            public Button Apply { get; set; }
+        }
+
+        private sealed class FrequencyCounterControls
+        {
+            public TextBlock Status { get; set; }
+            public TextBlock Value { get; set; }
+            public TextBox Seconds { get; set; }
+            public ComboBox Route { get; set; }
+            public TextBlock Detail { get; set; }
+            public Button Apply { get; set; }
+        }
+
+        private sealed class UartConsoleEntry
+        {
+            public DateTime Timestamp { get; set; }
+            public string Direction { get; set; }
+            public byte[] Data { get; set; }
+            public uint LineStatus { get; set; }
+        }
 
         private sealed class I2cRefreshResult
         {
             public I2cControllerStatus Status { get; set; }
+            public I2cMuxState Mux { get; set; }
             public I2cProbeResult BoardEeprom { get; set; }
             public I2cProbeResult MacEeprom { get; set; }
             public List<uint> Addresses { get; set; }
             public bool FullScan { get; set; }
+        }
+
+        private sealed class BoardLedColor
+        {
+            public BoardLedColor(byte red, byte green, byte blue, string status)
+            {
+                Red = red;
+                Green = green;
+                Blue = blue;
+                Status = status;
+            }
+
+            public byte Red { get; private set; }
+            public byte Green { get; private set; }
+            public byte Blue { get; private set; }
+            public string Status { get; private set; }
+
+            public bool SameColor(BoardLedColor other)
+            {
+                return other != null && Red == other.Red &&
+                    Green == other.Green && Blue == other.Blue;
+            }
         }
 
         private sealed class SmaFunctionChoice
@@ -96,6 +174,20 @@ namespace TimeCardControlCenter
         public MainWindow()
         {
             InitializeComponent();
+            signalGeneratorControls = new[]
+            {
+                new SignalGeneratorControls { Status = Generator1StatusText, Enabled = Generator1EnabledCheckBox, Frequency = Generator1FrequencyTextBox, Duty = Generator1DutyTextBox, Phase = Generator1PhaseTextBox, Invert = Generator1InvertCheckBox, Route = Generator1RouteCombo, Detail = Generator1DetailText, Apply = Generator1ApplyButton },
+                new SignalGeneratorControls { Status = Generator2StatusText, Enabled = Generator2EnabledCheckBox, Frequency = Generator2FrequencyTextBox, Duty = Generator2DutyTextBox, Phase = Generator2PhaseTextBox, Invert = Generator2InvertCheckBox, Route = Generator2RouteCombo, Detail = Generator2DetailText, Apply = Generator2ApplyButton },
+                new SignalGeneratorControls { Status = Generator3StatusText, Enabled = Generator3EnabledCheckBox, Frequency = Generator3FrequencyTextBox, Duty = Generator3DutyTextBox, Phase = Generator3PhaseTextBox, Invert = Generator3InvertCheckBox, Route = Generator3RouteCombo, Detail = Generator3DetailText, Apply = Generator3ApplyButton },
+                new SignalGeneratorControls { Status = Generator4StatusText, Enabled = Generator4EnabledCheckBox, Frequency = Generator4FrequencyTextBox, Duty = Generator4DutyTextBox, Phase = Generator4PhaseTextBox, Invert = Generator4InvertCheckBox, Route = Generator4RouteCombo, Detail = Generator4DetailText, Apply = Generator4ApplyButton }
+            };
+            frequencyCounterControls = new[]
+            {
+                new FrequencyCounterControls { Status = Frequency1StatusText, Value = Frequency1ValueText, Seconds = Frequency1SecondsTextBox, Route = Frequency1RouteCombo, Detail = Frequency1DetailText, Apply = Frequency1ApplyButton },
+                new FrequencyCounterControls { Status = Frequency2StatusText, Value = Frequency2ValueText, Seconds = Frequency2SecondsTextBox, Route = Frequency2RouteCombo, Detail = Frequency2DetailText, Apply = Frequency2ApplyButton },
+                new FrequencyCounterControls { Status = Frequency3StatusText, Value = Frequency3ValueText, Seconds = Frequency3SecondsTextBox, Route = Frequency3RouteCombo, Detail = Frequency3DetailText, Apply = Frequency3ApplyButton },
+                new FrequencyCounterControls { Status = Frequency4StatusText, Value = Frequency4ValueText, Seconds = Frequency4SecondsTextBox, Route = Frequency4RouteCombo, Detail = Frequency4DetailText, Apply = Frequency4ApplyButton }
+            };
             startupArguments = Environment.GetCommandLineArgs();
             refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             refreshTimer.Tick += RefreshTimer_Tick;
@@ -126,11 +218,17 @@ namespace TimeCardControlCenter
                 UartPortCombo.SelectedIndex = uartPort.Value;
             if (string.IsNullOrWhiteSpace(page))
                 return;
+            if (page.Equals("Flash", StringComparison.OrdinalIgnoreCase))
+            {
+                ShowPage("Flash");
+                return;
+            }
             RadioButton navigation = page.Equals("Clock", StringComparison.OrdinalIgnoreCase) ? ClockNav :
                 page.Equals("Gnss", StringComparison.OrdinalIgnoreCase) ? GnssNav :
                 page.Equals("Atomic", StringComparison.OrdinalIgnoreCase) ? AtomicNav :
                 page.Equals("Uart", StringComparison.OrdinalIgnoreCase) ? UartNav :
                 page.Equals("Sma", StringComparison.OrdinalIgnoreCase) ? SmaNav :
+                page.Equals("Timing", StringComparison.OrdinalIgnoreCase) ? TimingNav :
                 page.Equals("I2c", StringComparison.OrdinalIgnoreCase) ? I2cNav :
                 page.Equals("Subsystems", StringComparison.OrdinalIgnoreCase) ? SubsystemsNav :
                 page.Equals("Diagnostics", StringComparison.OrdinalIgnoreCase) ? DiagnosticsNav :
@@ -142,10 +240,21 @@ namespace TimeCardControlCenter
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
             Log("OCP Time Card Control Center started.");
+            string capturePath = StartupArgumentValue(startupArguments, "--capture");
+            if (string.IsNullOrWhiteSpace(capturePath) && !HasAdministratorAccess())
+            {
+                MessageBoxResult elevationChoice = MessageBox.Show(this,
+                    "Time Card Control Center is running without administrator access. " +
+                    "Some hardware features may be unavailable.\n\n" +
+                    "Restart now with administrator access?",
+                    "Administrator access recommended", MessageBoxButton.YesNo,
+                    MessageBoxImage.Information, MessageBoxResult.Yes);
+                if (elevationChoice == MessageBoxResult.Yes && RestartAsAdministrator())
+                    return;
+            }
             refreshTimer.Start();
             await ConnectAsync();
             ApplyStartupView(startupArguments);
-            string capturePath = StartupArgumentValue(startupArguments, "--capture");
             if (!string.IsNullOrWhiteSpace(capturePath))
             {
                 await Task.Delay(300);
@@ -182,6 +291,17 @@ namespace TimeCardControlCenter
                 encoder.Save(output);
         }
 
+        private void Window_Closing(object sender, CancelEventArgs e)
+        {
+            if (!flashUpdating)
+                return;
+            e.Cancel = true;
+            MessageBox.Show(this,
+                "The FPGA flash update is still running. Keep the card powered and wait for verification to finish before closing the Control Center.",
+                "Firmware update in progress", MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
         private void Window_Closed(object sender, EventArgs e)
         {
             refreshTimer.Stop();
@@ -214,7 +334,7 @@ namespace TimeCardControlCenter
             try
             {
                 client = await Task.Run(() => new TimeCardClient());
-                SetConnectionState(true, "Hardware connected", false);
+                SetConnectionState(true, "Time Card Connected", false);
                 Log("Connected to \\.\\TimeCard0.");
                 await RefreshSnapshotAsync(true);
                 await RefreshIdentityAsync();
@@ -278,6 +398,7 @@ namespace TimeCardControlCenter
 
             SidebarDriverText.Text = "Driver " + snapshot.DriverVersion + " · ABI " + snapshot.AbiVersion;
             LastRefreshText.Text = "Sampled " + DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            UpdateI2cDriverCompatibility(snapshot);
 
             SyncStatusText.Text = snapshot.IsClockSynchronized ? "IN SYNC" : "NOT LOCKED";
             SyncStatusText.Foreground = snapshot.IsClockSynchronized ? healthyBrush : warningBrush;
@@ -296,6 +417,7 @@ namespace TimeCardControlCenter
                 "HH:mm:ss.fffffff 'UTC'", CultureInfo.InvariantCulture);
             OffsetText.Text = offset;
             SamplingWindowText.Text = sampleWindow;
+            UpdateClockHistory(snapshot, offset, sampleWindow);
             ClockChipText.Text = snapshot.IsClockSynchronized ? "SYNCHRONIZED" : "LIVE · UNLOCKED";
             ClockChipText.Foreground = snapshot.IsClockSynchronized ? healthyBrush : warningBrush;
             HierarchyOverviewText.Text = snapshot.HierarchyRuntimeEnabled ? "ENABLED" : "DISABLED";
@@ -339,6 +461,77 @@ namespace TimeCardControlCenter
             HierarchyPersistedText.Text = snapshot.HierarchyPersisted ? "enabled" : "disabled";
             HierarchyPersistedText.Foreground = snapshot.HierarchyPersisted ? healthyBrush : warningBrush;
             DiagnosticsSummaryText.Text = BuildDiagnostics(snapshot);
+            UpdateBoardLedAutomationAsync(false);
+        }
+
+        private void UpdateClockHistory(TimeCardSnapshot snapshot, string offset,
+                                        string sampleWindow)
+        {
+            OffsetHistoryChart.AddSample(snapshot.OffsetNanoseconds);
+            SamplingHistoryChart.AddSample(snapshot.SamplingWindowNanoseconds);
+            ClockOffsetHistoryChart.AddSample(snapshot.OffsetNanoseconds);
+            ClockSamplingHistoryChart.AddSample(
+                snapshot.SamplingWindowNanoseconds);
+            OffsetHistoryValueText.Text = offset;
+            SamplingHistoryValueText.Text = sampleWindow;
+            ClockOffsetHistoryValueText.Text = offset;
+            ClockSamplingHistoryValueText.Text = sampleWindow;
+
+            if (OffsetHistoryChart.SampleCount < 2)
+            {
+                OffsetHistoryScaleText.Text = string.Format(CultureInfo.InvariantCulture,
+                    "COLLECTING · {0}/{1}", OffsetHistoryChart.SampleCount,
+                    OffsetHistoryChart.Capacity);
+            }
+            else
+            {
+                OffsetHistoryScaleText.Text = "AUTO ZOOM " +
+                    FormatNanoseconds(ToNanoseconds(
+                        OffsetHistoryChart.VisibleMinimum)) + " \u2013 " +
+                    FormatNanoseconds(ToNanoseconds(
+                        OffsetHistoryChart.VisibleMaximum));
+            }
+            ClockOffsetHistoryScaleText.Text = OffsetHistoryScaleText.Text;
+
+            if (SamplingHistoryChart.SampleCount < 2)
+            {
+                SamplingHistoryScaleText.Text = string.Format(CultureInfo.InvariantCulture,
+                    "COLLECTING · {0}/{1}", SamplingHistoryChart.SampleCount,
+                    SamplingHistoryChart.Capacity);
+            }
+            else
+            {
+                SamplingHistoryScaleText.Text = "RANGE " +
+                    FormatNanoseconds(ToNanoseconds(SamplingHistoryChart.Minimum)) +
+                    " \u2013 " +
+                    FormatNanoseconds(ToNanoseconds(SamplingHistoryChart.Maximum));
+            }
+            ClockSamplingHistoryScaleText.Text = SamplingHistoryScaleText.Text;
+        }
+
+        private void ResetClockHistory()
+        {
+            OffsetHistoryChart.Clear();
+            SamplingHistoryChart.Clear();
+            ClockOffsetHistoryChart.Clear();
+            ClockSamplingHistoryChart.Clear();
+            OffsetHistoryValueText.Text = "\u2014";
+            SamplingHistoryValueText.Text = "\u2014";
+            ClockOffsetHistoryValueText.Text = "\u2014";
+            ClockSamplingHistoryValueText.Text = "\u2014";
+            OffsetHistoryScaleText.Text = "WAITING FOR SAMPLES";
+            SamplingHistoryScaleText.Text = "WAITING FOR SAMPLES";
+            ClockOffsetHistoryScaleText.Text = "WAITING FOR SAMPLES";
+            ClockSamplingHistoryScaleText.Text = "WAITING FOR SAMPLES";
+        }
+
+        private static long ToNanoseconds(double value)
+        {
+            if (value >= long.MaxValue)
+                return long.MaxValue;
+            if (value <= long.MinValue)
+                return long.MinValue;
+            return (long)Math.Round(value, MidpointRounding.AwayFromZero);
         }
 
         private void SetConnectionState(bool connected, string text, bool showElevation)
@@ -346,6 +539,8 @@ namespace TimeCardControlCenter
             ConnectionText.Text = text;
             ConnectionDot.Fill = (Brush)FindResource(connected ? "AccentBrush" : "DangerBrush");
             ElevateButton.Visibility = showElevation ? Visibility.Visible : Visibility.Collapsed;
+            if (!connected)
+                ResetClockHistory();
         }
 
         private async void Refresh_Click(object sender, RoutedEventArgs e)
@@ -363,7 +558,7 @@ namespace TimeCardControlCenter
             try
             {
                 await Task.Run(() => client.SetClockFromSystem());
-                Log("PHC set from Windows UTC.");
+                Log("PHC synchronized from the system clock.");
                 await RefreshSnapshotAsync(false);
             }
             catch (Exception ex)
@@ -388,7 +583,7 @@ namespace TimeCardControlCenter
                         "The Time Card PHC currently reports " +
                         cardUtc.ToString("yyyy-MM-dd HH:mm:ss.fff 'UTC'",
                             CultureInfo.InvariantCulture) +
-                        ". Set the PHC from Windows or establish GNSS time before using it to set Windows.",
+                        ". Synchronize the PHC from the system clock or establish GNSS time before using it to set Windows.",
                         "Time Card UTC is not plausible", MessageBoxButton.OK,
                         MessageBoxImage.Warning);
                     return;
@@ -632,8 +827,19 @@ namespace TimeCardControlCenter
 
         private void ClearUart_Click(object sender, RoutedEventArgs e)
         {
+            uartConsoleEntries.Clear();
+            uartConsoleHistoryBytes = 0;
             UartOutputTextBox.Clear();
             UartStatusText.Text = "UART terminal cleared";
+        }
+
+        private void UartFormat_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (UartOutputTextBox == null)
+                return;
+            RenderUartConsole();
+            if (UartStatusText != null && uartConsoleEntries.Count != 0)
+                UartStatusText.Text = "UART display changed to " + SelectedUartDisplayName();
         }
 
         private async void UartPort_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -804,6 +1010,7 @@ namespace TimeCardControlCenter
                 lastUbloxSnapshot = null;
                 lastUbloxPort = null;
                 lastUbloxBaud = null;
+                RenderUbloxSkyMap(null);
                 SetUbloxConfigurationEnabled(false);
                 UbloxConnectionText.Text = "RECEIVER UNAVAILABLE";
                 UbloxConnectionText.Foreground = (Brush)FindResource("DangerBrush");
@@ -828,6 +1035,7 @@ namespace TimeCardControlCenter
             lastUbloxSnapshot = null;
             lastUbloxPort = null;
             lastUbloxBaud = null;
+            RenderUbloxSkyMap(null);
             SetUbloxConfigurationEnabled(false);
             UbloxConnectionText.Text = "REFRESH REQUIRED";
             UbloxConnectionText.Foreground = (Brush)FindResource("GoldBrush");
@@ -867,6 +1075,7 @@ namespace TimeCardControlCenter
                 "Position unavailable";
             UbloxSignalSupportText.Text = "Reported support: " +
                 (string.IsNullOrWhiteSpace(snapshot.SupportedGnss) ? "not reported" : snapshot.SupportedGnss);
+            RenderUbloxSkyMap(snapshot);
 
             UbloxRatePanel.IsEnabled = snapshot.RateConfigurationSupported;
             UbloxSignalPanel.IsEnabled = snapshot.SignalConfigurationSupported;
@@ -903,6 +1112,324 @@ namespace TimeCardControlCenter
             SetConfigText(UbloxGsvRateTextBox, snapshot, UbloxClient.CfgMsgNmeaGsvUart1);
             SetConfigText(UbloxRmcRateTextBox, snapshot, UbloxClient.CfgMsgNmeaRmcUart1);
             SetConfigText(UbloxZdaRateTextBox, snapshot, UbloxClient.CfgMsgNmeaZdaUart1);
+        }
+
+        private void UbloxSkyMap_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (UbloxSkyMapCanvas == null || UbloxSatelliteListPanel == null)
+                return;
+            RenderUbloxSkyMap(lastUbloxSnapshot);
+        }
+
+        private void RenderUbloxSkyMap(UbloxReceiverSnapshot snapshot)
+        {
+            if (UbloxSkyMapCanvas == null || UbloxSatelliteListPanel == null)
+                return;
+
+            Canvas canvas = UbloxSkyMapCanvas;
+            canvas.Children.Clear();
+            UbloxSatelliteListPanel.Children.Clear();
+            double width = canvas.ActualWidth;
+            double height = canvas.ActualHeight;
+            if (width < 120 || height < 120)
+                return;
+
+            double radius = Math.Max(40, Math.Min(width - 54, height - 46) / 2.0);
+            double centerX = width / 2.0;
+            double centerY = height / 2.0 + 3;
+            SolidColorBrush gridBrush = new SolidColorBrush(Color.FromRgb(43, 76, 101));
+            SolidColorBrush axisBrush = new SolidColorBrush(Color.FromRgb(31, 58, 79));
+            SolidColorBrush mutedBrush = new SolidColorBrush(Color.FromRgb(143, 166, 187));
+            gridBrush.Freeze();
+            axisBrush.Freeze();
+            mutedBrush.Freeze();
+
+            RadialGradientBrush skyFill = new RadialGradientBrush();
+            skyFill.GradientStops.Add(new GradientStop(Color.FromRgb(18, 43, 61), 0));
+            skyFill.GradientStops.Add(new GradientStop(Color.FromRgb(7, 17, 31), 1));
+            AddSkyMapCircle(canvas, centerX, centerY, radius, skyFill,
+                gridBrush, 1.4);
+            AddSkyMapLine(canvas, centerX - radius, centerY,
+                centerX + radius, centerY, axisBrush, 1);
+            AddSkyMapLine(canvas, centerX, centerY - radius,
+                centerX, centerY + radius, axisBrush, 1);
+            AddSkyMapCircle(canvas, centerX, centerY, radius * 2.0 / 3.0,
+                Brushes.Transparent, gridBrush, 1);
+            AddSkyMapCircle(canvas, centerX, centerY, radius / 3.0,
+                Brushes.Transparent, gridBrush, 1);
+
+            AddSkyMapText(canvas, "N", centerX - 6, centerY - radius - 24,
+                Brushes.White, 12, FontWeights.Bold);
+            AddSkyMapText(canvas, "E", centerX + radius + 9, centerY - 8,
+                mutedBrush, 11, FontWeights.SemiBold);
+            AddSkyMapText(canvas, "S", centerX - 5, centerY + radius + 7,
+                mutedBrush, 11, FontWeights.SemiBold);
+            AddSkyMapText(canvas, "W", centerX - radius - 23, centerY - 8,
+                mutedBrush, 11, FontWeights.SemiBold);
+            AddSkyMapText(canvas, "60°", centerX + 7,
+                centerY - radius / 3.0 - 13, mutedBrush, 9, FontWeights.Normal);
+            AddSkyMapText(canvas, "30°", centerX + 7,
+                centerY - radius * 2.0 / 3.0 - 13, mutedBrush, 9,
+                FontWeights.Normal);
+            AddSkyMapText(canvas, "ZENITH", centerX + 7, centerY + 4,
+                mutedBrush, 8, FontWeights.Normal);
+
+            IList<UbloxSatelliteInfo> satellites = snapshot == null ?
+                new List<UbloxSatelliteInfo>().AsReadOnly() : snapshot.Satellites;
+            List<UbloxSatelliteInfo> plotted = satellites.Where(satellite =>
+                satellite.ElevationDegrees >= 0 && satellite.ElevationDegrees <= 90 &&
+                satellite.AzimuthDegrees >= 0).ToList();
+
+            foreach (UbloxSatelliteInfo satellite in plotted
+                .OrderBy(item => item.IsUsed ? 1 : 0)
+                .ThenBy(item => item.CarrierToNoise))
+            {
+                int azimuth = ((satellite.AzimuthDegrees % 360) + 360) % 360;
+                double angle = azimuth * Math.PI / 180.0;
+                double distance = radius *
+                    (90.0 - satellite.ElevationDegrees) / 90.0;
+                double markerSize = 18.0 +
+                    Math.Min(satellite.CarrierToNoise, (byte)55) / 55.0 * 12.0;
+                double x = centerX + distance * Math.Sin(angle) - markerSize / 2.0;
+                double y = centerY - distance * Math.Cos(angle) - markerSize / 2.0;
+                Brush color = SkyMapConstellationBrush(satellite.GnssIdentifier);
+                Grid marker = new Grid
+                {
+                    Width = markerSize,
+                    Height = markerSize,
+                    Opacity = satellite.CarrierToNoise == 0 ? 0.4 :
+                        (satellite.IsUsed ? 1.0 : 0.78),
+                    ToolTip = string.Format(CultureInfo.InvariantCulture,
+                        "{0} · {1}\nElevation {2}° · azimuth {3}°\nC/N₀ {4} dB-Hz · {5} · {6}",
+                        satellite.DisplayIdentifier, satellite.Constellation,
+                        satellite.ElevationDegrees, azimuth,
+                        satellite.CarrierToNoise,
+                        satellite.IsUsed ? "used in solution" : "tracked",
+                        satellite.QualityDescription)
+                };
+                marker.Children.Add(new System.Windows.Shapes.Ellipse
+                {
+                    Fill = satellite.CarrierToNoise == 0 ? Brushes.DimGray : color,
+                    Stroke = satellite.IsUsed ? Brushes.White : color,
+                    StrokeThickness = satellite.IsUsed ? 2.4 : 1.1
+                });
+                marker.Children.Add(new TextBlock
+                {
+                    Text = satellite.DisplayIdentifier,
+                    Foreground = Brushes.White,
+                    FontFamily = new FontFamily("Segoe UI Semibold"),
+                    FontSize = satellite.DisplayIdentifier.Length > 3 ? 8 : 9,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                });
+                Panel.SetZIndex(marker, satellite.IsUsed ? 2 : 1);
+                Canvas.SetLeft(marker, x);
+                Canvas.SetTop(marker, y);
+                canvas.Children.Add(marker);
+            }
+
+            if (plotted.Count == 0)
+                AddSkyMapText(canvas, snapshot == null ? "REFRESH RECEIVER" :
+                    "NO SATELLITES ABOVE HORIZON", centerX - 79, centerY - 8,
+                    mutedBrush, 10, FontWeights.SemiBold);
+
+            PopulateUbloxSatelliteList(satellites);
+            if (snapshot == null)
+            {
+                UbloxSkyMapStatusText.Text = "AWAITING UBX-NAV-SAT";
+                UbloxSkyMapStatusText.Foreground = (Brush)FindResource("GoldBrush");
+                UbloxSkyMapSummaryText.Text =
+                    "Refresh the selected receiver to load satellite geometry.";
+            }
+            else
+            {
+                int used = satellites.Count(item => item.IsUsed);
+                int strong = satellites.Count(item => item.CarrierToNoise >= 35);
+                UbloxSkyMapStatusText.Text = string.Format(CultureInfo.InvariantCulture,
+                    "{0:N0} PLOTTED · {1:HH:mm:ss} UTC", plotted.Count,
+                    snapshot.CapturedAtUtc);
+                UbloxSkyMapStatusText.Foreground = (Brush)FindResource(
+                    satellites.Count == 0 ? "GoldBrush" : "AccentBrush");
+                UbloxSkyMapSummaryText.Text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0:N0} used · {1:N0} reported · {2:N0} at or above 35 dB-Hz. Hover a marker for receiver details.",
+                    used, satellites.Count, strong);
+            }
+        }
+
+        private void PopulateUbloxSatelliteList(IList<UbloxSatelliteInfo> satellites)
+        {
+            if (satellites.Count == 0)
+            {
+                UbloxSatelliteListPanel.Children.Add(new TextBlock
+                {
+                    Text = "No satellite records were returned.",
+                    Foreground = (Brush)FindResource("MutedBrush"),
+                    Margin = new Thickness(0, 8, 0, 0),
+                    TextWrapping = TextWrapping.Wrap
+                });
+                return;
+            }
+
+            int rowIndex = 0;
+            foreach (UbloxSatelliteInfo satellite in satellites
+                .OrderByDescending(item => item.IsUsed)
+                .ThenByDescending(item => item.CarrierToNoise)
+                .ThenBy(item => item.GnssIdentifier)
+                .ThenBy(item => item.SatelliteIdentifier))
+            {
+                Brush color = SkyMapConstellationBrush(satellite.GnssIdentifier);
+                Grid row = new Grid();
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(54) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(58) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                StackPanel identifier = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                identifier.Children.Add(new System.Windows.Shapes.Ellipse
+                {
+                    Width = 8,
+                    Height = 8,
+                    Fill = color,
+                    Stroke = satellite.IsUsed ? Brushes.White : color,
+                    StrokeThickness = satellite.IsUsed ? 1.4 : 0,
+                    Margin = new Thickness(0, 0, 6, 0)
+                });
+                identifier.Children.Add(new TextBlock
+                {
+                    Text = satellite.DisplayIdentifier,
+                    FontFamily = new FontFamily("Segoe UI Semibold"),
+                    FontSize = 11
+                });
+                row.Children.Add(identifier);
+
+                TextBlock geometry = new TextBlock
+                {
+                    Text = string.Format(CultureInfo.InvariantCulture,
+                        "{0}° / {1}°", satellite.ElevationDegrees,
+                        satellite.AzimuthDegrees),
+                    Foreground = (Brush)FindResource("MutedBrush"),
+                    FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+                    FontSize = 10,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(geometry, 1);
+                row.Children.Add(geometry);
+
+                TextBlock signal = new TextBlock
+                {
+                    Text = satellite.CarrierToNoise.ToString(
+                        CultureInfo.InvariantCulture) + " dB",
+                    Foreground = satellite.CarrierToNoise >= 35 ? color :
+                        (Brush)FindResource("MutedBrush"),
+                    FontSize = 10,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(signal, 2);
+                row.Children.Add(signal);
+
+                ProgressBar bar = new ProgressBar
+                {
+                    Minimum = 0,
+                    Maximum = 60,
+                    Value = Math.Min(60, (int)satellite.CarrierToNoise),
+                    Height = 6,
+                    Foreground = color,
+                    Background = new SolidColorBrush(Color.FromRgb(21, 40, 58)),
+                    BorderThickness = new Thickness(0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    ToolTip = satellite.QualityDescription
+                };
+                Grid.SetColumn(bar, 3);
+                row.Children.Add(bar);
+
+                Border rowBorder = new Border
+                {
+                    Background = new SolidColorBrush(rowIndex++ % 2 == 0 ?
+                        Color.FromRgb(10, 23, 37) : Color.FromRgb(12, 28, 43)),
+                    CornerRadius = new CornerRadius(6),
+                    Padding = new Thickness(8, 6, 8, 6),
+                    Margin = new Thickness(0, 0, 0, 3),
+                    Child = row,
+                    ToolTip = satellite.Constellation + " · " +
+                        (satellite.IsUsed ? "used in solution" : "tracked")
+                };
+                UbloxSatelliteListPanel.Children.Add(rowBorder);
+            }
+        }
+
+        private static void AddSkyMapCircle(Canvas canvas, double centerX,
+            double centerY, double radius, Brush fill, Brush stroke,
+            double strokeThickness)
+        {
+            System.Windows.Shapes.Ellipse circle =
+                new System.Windows.Shapes.Ellipse
+                {
+                    Width = radius * 2,
+                    Height = radius * 2,
+                    Fill = fill,
+                    Stroke = stroke,
+                    StrokeThickness = strokeThickness,
+                    IsHitTestVisible = false
+                };
+            Canvas.SetLeft(circle, centerX - radius);
+            Canvas.SetTop(circle, centerY - radius);
+            canvas.Children.Add(circle);
+        }
+
+        private static void AddSkyMapLine(Canvas canvas, double x1, double y1,
+            double x2, double y2, Brush stroke, double strokeThickness)
+        {
+            canvas.Children.Add(new System.Windows.Shapes.Line
+            {
+                X1 = x1,
+                Y1 = y1,
+                X2 = x2,
+                Y2 = y2,
+                Stroke = stroke,
+                StrokeThickness = strokeThickness,
+                IsHitTestVisible = false
+            });
+        }
+
+        private static void AddSkyMapText(Canvas canvas, string text,
+            double left, double top, Brush foreground, double fontSize,
+            FontWeight weight)
+        {
+            TextBlock label = new TextBlock
+            {
+                Text = text,
+                Foreground = foreground,
+                FontSize = fontSize,
+                FontWeight = weight,
+                IsHitTestVisible = false
+            };
+            Canvas.SetLeft(label, left);
+            Canvas.SetTop(label, top);
+            canvas.Children.Add(label);
+        }
+
+        private static Brush SkyMapConstellationBrush(byte identifier)
+        {
+            Color color;
+            switch (identifier)
+            {
+                case 0: color = Color.FromRgb(105, 196, 65); break;
+                case 1: color = Color.FromRgb(80, 227, 194); break;
+                case 2: color = Color.FromRgb(76, 201, 240); break;
+                case 3: color = Color.FromRgb(218, 181, 57); break;
+                case 5: color = Color.FromRgb(203, 136, 255); break;
+                case 6: color = Color.FromRgb(255, 102, 122); break;
+                case 7: color = Color.FromRgb(255, 158, 100); break;
+                default: color = Color.FromRgb(143, 166, 187); break;
+            }
+            SolidColorBrush brush = new SolidColorBrush(color);
+            brush.Freeze();
+            return brush;
         }
 
         private async void ApplyUbloxRate_Click(object sender, RoutedEventArgs e)
@@ -1844,6 +2371,9 @@ namespace TimeCardControlCenter
             Button applyButton = GetSmaApplyButton(state.Connector);
             Brush healthyBrush = (Brush)FindResource("AccentBrush");
 
+            if (state.Connector >= 1 && state.Connector <= 4)
+                lastSmaLedStates[(int)state.Connector - 1] = state;
+
             smaUpdatingUi = true;
             try
             {
@@ -1864,6 +2394,7 @@ namespace TimeCardControlCenter
             {
                 smaUpdatingUi = false;
             }
+            UpdateBoardLedAutomationAsync(false);
         }
 
         private void PopulateSmaFunctions(uint connector, SmaDirection direction,
@@ -1992,6 +2523,389 @@ namespace TimeCardControlCenter
             }
         }
 
+        private void OpenTiming_Click(object sender, RoutedEventArgs e)
+        {
+            TimingNav.IsChecked = true;
+        }
+
+        private async void RefreshTiming_Click(object sender, RoutedEventArgs e)
+        {
+            await RefreshTimingAsync();
+        }
+
+        private async Task RefreshTimingAsync()
+        {
+            if (timingRefreshing)
+                return;
+            if (client == null)
+            {
+                SetTimingUnavailable("NOT CONNECTED");
+                return;
+            }
+            if (lastSnapshot == null || lastSnapshot.AbiVersion < 5)
+            {
+                SetTimingUnavailable("DRIVER 1.10 / ABI 5 REQUIRED");
+                return;
+            }
+
+            timingRefreshing = true;
+            SmaConnectorState[] routes = new SmaConnectorState[4];
+            try
+            {
+                for (uint channel = 1; channel <= 4; channel++)
+                {
+                    uint currentChannel = channel;
+                    try
+                    {
+                        SignalGeneratorState state = await Task.Run(() =>
+                            client.GetSignalGenerator(currentChannel));
+                        ApplySignalGeneratorState(state);
+                    }
+                    catch (Exception ex)
+                    {
+                        SetSignalGeneratorUnavailable(channel, "QUERY FAILED");
+                        Log(string.Format(CultureInfo.InvariantCulture,
+                            "Generator {0} query failed: {1}", channel, ex.Message));
+                    }
+
+                    try
+                    {
+                        FrequencyCounterState state = await Task.Run(() =>
+                            client.GetFrequencyCounter(currentChannel));
+                        ApplyFrequencyCounterState(state);
+                    }
+                    catch (Exception ex)
+                    {
+                        SetFrequencyCounterUnavailable(channel, "QUERY FAILED");
+                        Log(string.Format(CultureInfo.InvariantCulture,
+                            "Frequency {0} query failed: {1}", channel, ex.Message));
+                    }
+                }
+
+                for (uint connector = 1; connector <= 4; connector++)
+                {
+                    uint currentConnector = connector;
+                    try
+                    {
+                        routes[connector - 1] = await Task.Run(() =>
+                            client.GetSmaConnector(currentConnector));
+                    }
+                    catch (Exception ex)
+                    {
+                        Log(string.Format(CultureInfo.InvariantCulture,
+                            "Timing route query for SMA {0} failed: {1}",
+                            connector, ex.Message));
+                    }
+                }
+                ApplyTimingRoutes(routes);
+            }
+            finally
+            {
+                timingRefreshing = false;
+            }
+        }
+
+        private async void ApplySignalGenerator_Click(object sender,
+                                                        RoutedEventArgs e)
+        {
+            Button button = sender as Button;
+            uint generator;
+            if (button == null || !uint.TryParse(
+                Convert.ToString(button.Tag, CultureInfo.InvariantCulture),
+                NumberStyles.Integer, CultureInfo.InvariantCulture,
+                out generator) || !EnsureConnected())
+                return;
+            if (lastSnapshot == null || lastSnapshot.AbiVersion < 5)
+            {
+                MessageBox.Show(this,
+                    "Signal-generator control requires Time Card driver 1.10 / ABI 5.",
+                    "Driver update required", MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            SignalGeneratorControls controls = signalGeneratorControls[generator - 1];
+            bool enabled = controls.Enabled.IsChecked == true;
+            bool inverted = controls.Invert.IsChecked == true;
+            ulong period = 0;
+            ulong pulse = 0;
+            ulong phase = 0;
+            try
+            {
+                if (enabled)
+                {
+                    decimal frequency;
+                    if (!decimal.TryParse(controls.Frequency.Text,
+                        NumberStyles.Float, CultureInfo.InvariantCulture,
+                        out frequency) || frequency < 0.000001m ||
+                        frequency > 500000000m)
+                        throw new InvalidOperationException(
+                            "Enter a generator frequency from 0.000001 through 500000000 Hz.");
+                    period = decimal.ToUInt64(decimal.Round(
+                        1000000000m / frequency, 0,
+                        MidpointRounding.AwayFromZero));
+                    uint duty = ParseUnsigned(controls.Duty.Text,
+                        "duty cycle", 1, 99);
+                    pulse = decimal.ToUInt64(decimal.Round(
+                        period * (decimal)duty / 100m, 0,
+                        MidpointRounding.AwayFromZero));
+                    if (pulse == 0 || pulse >= period)
+                        throw new InvalidOperationException(
+                            "The selected frequency and duty cycle cannot be represented at one-nanosecond resolution.");
+                    phase = ParseUnsignedLong(controls.Phase.Text,
+                        "phase", 0, period - 1);
+                }
+
+                uint route = SelectedTimingRoute(controls.Route);
+                if (route != 0)
+                {
+                    MessageBoxResult confirmation = MessageBox.Show(this,
+                        string.Format(CultureInfo.InvariantCulture,
+                            "Route Generator {0} to SMA {1} as an output? Disconnect any external source from this connector first.",
+                            generator, route),
+                        "Confirm generator output", MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning);
+                    if (confirmation != MessageBoxResult.Yes)
+                        return;
+                }
+
+                button.IsEnabled = false;
+                SignalGeneratorState state = await Task.Run(() =>
+                    client.SetSignalGenerator(generator, enabled, period,
+                        pulse, phase, inverted));
+                ApplySignalGeneratorState(state);
+                if (route != 0)
+                {
+                    uint function = 0x0040u << ((int)generator - 1);
+                    SmaConnectorState routed = await Task.Run(() =>
+                        client.SetSmaConnector(route, SmaDirection.Output,
+                                               function));
+                    ApplySmaState(routed);
+                    controls.Route.SelectedIndex = (int)route;
+                }
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "Generator {0} {1}{2}.", generator,
+                    enabled ? "configured and enabled" : "disabled",
+                    route == 0 ? string.Empty : " on SMA " + route));
+            }
+            catch (Exception ex)
+            {
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "Generator {0} configuration failed: {1}",
+                    generator, ex.Message));
+                MessageBox.Show(this, ex.Message,
+                    "Unable to configure signal generator",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                button.IsEnabled = true;
+            }
+        }
+
+        private async void ApplyFrequencyCounter_Click(object sender,
+                                                        RoutedEventArgs e)
+        {
+            Button button = sender as Button;
+            uint counter;
+            if (button == null || !uint.TryParse(
+                Convert.ToString(button.Tag, CultureInfo.InvariantCulture),
+                NumberStyles.Integer, CultureInfo.InvariantCulture,
+                out counter) || !EnsureConnected())
+                return;
+            if (lastSnapshot == null || lastSnapshot.AbiVersion < 5)
+                return;
+
+            FrequencyCounterControls controls = frequencyCounterControls[counter - 1];
+            button.IsEnabled = false;
+            try
+            {
+                uint seconds = ParseUnsigned(controls.Seconds.Text,
+                    "integration time", 0, 255);
+                uint route = SelectedTimingRoute(controls.Route);
+                FrequencyCounterState state = await Task.Run(() =>
+                    client.SetFrequencyCounter(counter, seconds));
+                ApplyFrequencyCounterState(state);
+                if (route != 0)
+                {
+                    uint function = 0x0100u << ((int)counter - 1);
+                    SmaConnectorState routed = await Task.Run(() =>
+                        client.SetSmaConnector(route, SmaDirection.Input,
+                                               function));
+                    ApplySmaState(routed);
+                    controls.Route.SelectedIndex = (int)route;
+                }
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "Frequency counter {0} integration set to {1} second(s){2}.",
+                    counter, seconds, route == 0 ? string.Empty :
+                    " from SMA " + route));
+            }
+            catch (Exception ex)
+            {
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "Frequency counter {0} configuration failed: {1}",
+                    counter, ex.Message));
+                MessageBox.Show(this, ex.Message,
+                    "Unable to configure frequency counter",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                button.IsEnabled = true;
+            }
+        }
+
+        private void ApplySignalGeneratorState(SignalGeneratorState state)
+        {
+            SignalGeneratorControls controls = signalGeneratorControls[state.Generator - 1];
+            bool available = state.IsPresent;
+            controls.Enabled.IsChecked = state.IsEnabled;
+            controls.Invert.IsChecked = state.IsInverted;
+            if (state.PeriodNanoseconds != 0)
+            {
+                controls.Frequency.Text = state.FrequencyHz.ToString(
+                    "0.#########", CultureInfo.InvariantCulture);
+                controls.Duty.Text = Math.Round(state.DutyPercent).ToString(
+                    "0", CultureInfo.InvariantCulture);
+                controls.Phase.Text = state.PhaseNanoseconds.ToString(
+                    CultureInfo.InvariantCulture);
+            }
+            controls.Status.Text = state.Status != 0 ?
+                string.Format(CultureInfo.InvariantCulture,
+                    "FAULT 0x{0:X8}", state.Status) :
+                state.IsEnabled ? "RUNNING" : "DISABLED";
+            controls.Status.Foreground = state.Status != 0 ?
+                (Brush)FindResource("DangerBrush") :
+                state.IsEnabled ? (Brush)FindResource("AccentBrush") :
+                (Brush)FindResource("MutedBrush");
+            controls.Detail.Text = string.Format(CultureInfo.InvariantCulture,
+                "Period {0:N0} ns · Start {1}.{2:D9} TAI · v{3:X8}",
+                state.PeriodNanoseconds, state.StartSeconds,
+                state.StartNanoseconds, state.Version);
+            controls.Enabled.IsEnabled = available;
+            controls.Frequency.IsEnabled = available;
+            controls.Duty.IsEnabled = available;
+            controls.Phase.IsEnabled = available;
+            controls.Invert.IsEnabled = available;
+            controls.Route.IsEnabled = available;
+            controls.Apply.IsEnabled = available;
+        }
+
+        private void ApplyFrequencyCounterState(FrequencyCounterState state)
+        {
+            FrequencyCounterControls controls = frequencyCounterControls[state.Counter - 1];
+            bool available = state.IsPresent;
+            if (state.IsEnabled)
+                controls.Seconds.Text = state.IntegrationSeconds.ToString(
+                    CultureInfo.InvariantCulture);
+            controls.Value.Text = state.IsValid ?
+                state.FrequencyHz.ToString("N0", CultureInfo.InvariantCulture) + " Hz" :
+                "— Hz";
+            controls.Status.Text = state.HasError ? "ERROR" :
+                state.HasOverrun ? "OVERRUN" :
+                state.IsValid ? "VALID" :
+                state.IsEnabled ? "MEASURING" : "DISABLED";
+            controls.Status.Foreground = state.HasError || state.HasOverrun ?
+                (Brush)FindResource("DangerBrush") :
+                state.IsValid ? (Brush)FindResource("AccentBrush") :
+                (Brush)FindResource("MutedBrush");
+            controls.Detail.Text = string.Format(CultureInfo.InvariantCulture,
+                "Control 0x{0:X8} · Status 0x{1:X8}",
+                state.Control, state.Status);
+            controls.Seconds.IsEnabled = available;
+            controls.Route.IsEnabled = available;
+            controls.Apply.IsEnabled = available;
+        }
+
+        private void ApplyTimingRoutes(IEnumerable<SmaConnectorState> routes)
+        {
+            foreach (SignalGeneratorControls controls in signalGeneratorControls)
+                controls.Route.SelectedIndex = 0;
+            foreach (FrequencyCounterControls controls in frequencyCounterControls)
+                controls.Route.SelectedIndex = 0;
+            foreach (SmaConnectorState route in routes.Where(value => value != null))
+            {
+                if (route.Direction == SmaDirection.Output &&
+                    route.Function >= 0x0040u && route.Function <= 0x0200u)
+                {
+                    for (int index = 0; index < 4; index++)
+                    {
+                        if (route.Function == (0x0040u << index))
+                            signalGeneratorControls[index].Route.SelectedIndex =
+                                (int)route.Connector;
+                    }
+                }
+                if (route.Direction == SmaDirection.Input &&
+                    route.Function >= 0x0100u && route.Function <= 0x0800u)
+                {
+                    for (int index = 0; index < 4; index++)
+                    {
+                        if (route.Function == (0x0100u << index))
+                            frequencyCounterControls[index].Route.SelectedIndex =
+                                (int)route.Connector;
+                    }
+                }
+            }
+        }
+
+        private void SetTimingUnavailable(string status)
+        {
+            for (uint channel = 1; channel <= 4; channel++)
+            {
+                SetSignalGeneratorUnavailable(channel, status);
+                SetFrequencyCounterUnavailable(channel, status);
+            }
+        }
+
+        private void SetSignalGeneratorUnavailable(uint generator, string status)
+        {
+            SignalGeneratorControls controls = signalGeneratorControls[generator - 1];
+            controls.Status.Text = status;
+            controls.Status.Foreground = (Brush)FindResource("GoldBrush");
+            controls.Enabled.IsEnabled = false;
+            controls.Frequency.IsEnabled = false;
+            controls.Duty.IsEnabled = false;
+            controls.Phase.IsEnabled = false;
+            controls.Invert.IsEnabled = false;
+            controls.Route.IsEnabled = false;
+            controls.Apply.IsEnabled = false;
+        }
+
+        private void SetFrequencyCounterUnavailable(uint counter, string status)
+        {
+            FrequencyCounterControls controls = frequencyCounterControls[counter - 1];
+            controls.Status.Text = status;
+            controls.Status.Foreground = (Brush)FindResource("GoldBrush");
+            controls.Value.Text = "— Hz";
+            controls.Seconds.IsEnabled = false;
+            controls.Route.IsEnabled = false;
+            controls.Apply.IsEnabled = false;
+        }
+
+        private static uint SelectedTimingRoute(ComboBox combo)
+        {
+            ComboBoxItem item = combo.SelectedItem as ComboBoxItem;
+            uint route;
+            return item != null && uint.TryParse(
+                Convert.ToString(item.Tag, CultureInfo.InvariantCulture),
+                NumberStyles.Integer, CultureInfo.InvariantCulture,
+                out route) ? route : 0;
+        }
+
+        private static ulong ParseUnsignedLong(string text, string name,
+                                               ulong minimum, ulong maximum)
+        {
+            ulong value;
+            if (!ulong.TryParse(text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out value) ||
+                value < minimum || value > maximum)
+                throw new InvalidOperationException(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Enter a valid {0} between {1} and {2}.",
+                    name, minimum, maximum));
+            return value;
+        }
+
         private async void RefreshI2c_Click(object sender, RoutedEventArgs e)
         {
             await RefreshI2cAsync(false);
@@ -2035,6 +2949,8 @@ namespace TimeCardControlCenter
                         Addresses = new List<uint>(),
                         FullScan = fullScan
                     };
+                    if (lastSnapshot != null && lastSnapshot.AbiVersion >= 7)
+                        value.Mux = activeClient.GetI2cMux();
                     uint first = fullScan ? 0x08u : 0x50u;
                     uint last = fullScan ? 0x77u : 0x58u;
                     for (uint address = first; address <= last; address++)
@@ -2079,6 +2995,9 @@ namespace TimeCardControlCenter
             Brush healthyBrush = (Brush)FindResource("AccentBrush");
             Brush warningBrush = (Brush)FindResource("GoldBrush");
             I2cControllerStatus status = result.Status;
+            bool readsSupported = SupportsReliableI2cReads();
+
+            ApplyI2cMuxState(result.Mux);
 
             I2cControllerStateText.Text = status.IsPresent ?
                 (status.IsEnabled ? "ENABLED" : "PRESENT") : "NOT PRESENT";
@@ -2111,11 +3030,503 @@ namespace TimeCardControlCenter
                 "No addresses acknowledged" :
                 string.Join(", ", result.Addresses.Select(address =>
                     string.Format(CultureInfo.InvariantCulture, "0x{0:X2}", address)));
-            I2cReadButton.IsEnabled = true;
-            I2cBoardReadButton.IsEnabled = result.BoardEeprom != null &&
+            I2cAddressMapText.Text = FormatI2cAddressMap(result);
+            I2cDiagnosticsText.Text = FormatI2cControllerDiagnostics(
+                status, result.FullScan ? "Full 7-bit scan completed." :
+                "Known-device probe completed.");
+            I2cReadButton.IsEnabled = readsSupported;
+            I2cPreviousButton.IsEnabled = readsSupported;
+            I2cNextButton.IsEnabled = readsSupported;
+            I2cBoardReadButton.IsEnabled = readsSupported &&
+                result.BoardEeprom != null &&
                 result.BoardEeprom.IsPresent;
-            I2cMacReadButton.IsEnabled = result.MacEeprom != null &&
+            I2cMacReadButton.IsEnabled = readsSupported &&
+                result.MacEeprom != null &&
                 result.MacEeprom.IsPresent;
+            if (!readsSupported)
+                I2cReadStatusText.Text = "Install Time Card driver 1.13 to enable reliable I\u00B2C reads.";
+        }
+
+        private void UpdateI2cDriverCompatibility(TimeCardSnapshot snapshot)
+        {
+            bool abiSupported = snapshot.AbiVersion >= 3;
+            bool reliableReads = abiSupported &&
+                DriverVersionAtLeast(snapshot.DriverVersion, 1, 11);
+            bool boardControls = snapshot.AbiVersion >= 7;
+            Brush stateBrush = (Brush)FindResource(
+                boardControls ? "AccentBrush" : "GoldBrush");
+
+            I2cModeIcon.Foreground = stateBrush;
+            I2cDriverBadgeText.Foreground = stateBrush;
+            I2cLedAutoCheckBox.IsEnabled = boardControls;
+            I2cLedManualPanel.IsEnabled = boardControls &&
+                I2cLedAutoCheckBox.IsChecked != true;
+            if (boardControls)
+            {
+                I2cDriverBadgeText.Text = "DRIVER " + snapshot.DriverVersion;
+                I2cSafetyBannerText.Text =
+                    "Guarded mode allows reads plus dedicated PCA9546A routing and IS32FL3207 LED updates. Arbitrary I\u00B2C writes remain blocked.";
+                return;
+            }
+
+            if (reliableReads)
+            {
+                I2cDriverBadgeText.Text = "READS ONLY · UPDATE";
+                I2cSafetyBannerText.Text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Driver {0} supports reliable reads. Install driver 1.13 / ABI 7 to control the PCA9546A mux and subsystem LEDs.",
+                    snapshot.DriverVersion);
+                return;
+            }
+
+            I2cDriverBadgeText.Text = "UPDATE REQUIRED";
+            I2cSafetyBannerText.Text = abiSupported ? string.Format(
+                CultureInfo.InvariantCulture,
+                "Driver {0} uses the legacy AXI IIC receive sequence that Windows can report as a CRC data error. Install driver 1.13 before reading.",
+                snapshot.DriverVersion) :
+                "This driver predates I\u00B2C control support. Install Time Card driver 1.13 before using the bus workspace.";
+            I2cReadButton.IsEnabled = false;
+            I2cPreviousButton.IsEnabled = false;
+            I2cNextButton.IsEnabled = false;
+            I2cBoardReadButton.IsEnabled = false;
+            I2cMacReadButton.IsEnabled = false;
+            I2cReadStatusText.Text = "Driver update required for I\u00B2C reads.";
+        }
+
+        private bool SupportsReliableI2cReads()
+        {
+            return client != null && lastSnapshot != null &&
+                lastSnapshot.AbiVersion >= 3 &&
+                DriverVersionAtLeast(lastSnapshot.DriverVersion, 1, 11);
+        }
+
+        private bool SupportsI2cBoardControls()
+        {
+            return client != null && lastSnapshot != null &&
+                lastSnapshot.AbiVersion >= 7;
+        }
+
+        private static bool DriverVersionAtLeast(string value, int major,
+                                                 int minor)
+        {
+            Version installed;
+            return Version.TryParse(value, out installed) &&
+                installed.CompareTo(new Version(major, minor)) >= 0;
+        }
+
+        private void ApplyI2cMuxState(I2cMuxState state)
+        {
+            Brush healthyBrush = (Brush)FindResource("AccentBrush");
+            Brush warningBrush = (Brush)FindResource("GoldBrush");
+            if (state == null)
+            {
+                I2cMuxStatusText.Text = "DRIVER 1.13 / ABI 7 REQUIRED";
+                I2cMuxStatusText.Foreground = warningBrush;
+                return;
+            }
+            if (!state.IsPresent)
+            {
+                I2cMuxStatusText.Text = "NO ACK AT 0x70";
+                I2cMuxStatusText.Foreground = warningBrush;
+                return;
+            }
+
+            I2cMuxStatusText.Text = state.ChannelMask == 0 ?
+                "ALL CHANNELS DISCONNECTED" :
+                "ACTIVE · " + FormatI2cMuxMask(state.ChannelMask);
+            I2cMuxStatusText.Foreground = healthyBrush;
+        }
+
+        private static string FormatI2cMuxMask(uint mask)
+        {
+            List<string> channels = new List<string>();
+            if ((mask & 1u) != 0)
+                channels.Add("CH0 MAC");
+            if ((mask & 2u) != 0)
+                channels.Add("CH1 SENSORS");
+            if ((mask & 4u) != 0)
+                channels.Add("CH2 AN/ADC");
+            if ((mask & 8u) != 0)
+                channels.Add("CH3 DC");
+            return channels.Count == 0 ? "NONE" : string.Join(" + ", channels);
+        }
+
+        private async void SelectI2cMux_Click(object sender, RoutedEventArgs e)
+        {
+            Button button = sender as Button;
+            uint channelMask;
+            if (button == null || !uint.TryParse(
+                Convert.ToString(button.Tag, CultureInfo.InvariantCulture),
+                NumberStyles.Integer, CultureInfo.InvariantCulture,
+                out channelMask))
+                return;
+            if (!SupportsI2cBoardControls())
+            {
+                MessageBox.Show(this,
+                    "Install Time Card driver 1.13 / ABI 7 to control the PCA9546A.",
+                    "Driver update required", MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            TimeCardClient activeClient = client;
+            button.IsEnabled = false;
+            I2cMuxStatusText.Text = "APPLYING ROUTE…";
+            try
+            {
+                I2cMuxState state = await Task.Run(
+                    () => activeClient.SetI2cMux(channelMask));
+                if (client != activeClient)
+                    return;
+                ApplyI2cMuxState(state);
+                Log("I2C mux route set to " + FormatI2cMuxMask(channelMask) + ".");
+            }
+            catch (Exception ex)
+            {
+                I2cMuxStatusText.Text = "ROUTE FAILED";
+                I2cMuxStatusText.Foreground = (Brush)FindResource("GoldBrush");
+                I2cLedOperationText.Text = ex.Message;
+                Log("I2C mux route failed: " + ex.Message);
+            }
+            finally
+            {
+                button.IsEnabled = true;
+            }
+        }
+
+        private async void UpdateBoardLedAutomationAsync(bool force)
+        {
+            if (I2cLedAutoCheckBox == null ||
+                I2cLedAutoCheckBox.IsChecked != true || ledAutomationUpdating)
+                return;
+            if (!SupportsI2cBoardControls())
+            {
+                I2cLedOperationText.Text =
+                    "Automatic LED mapping requires Time Card driver 1.13 / ABI 7.";
+                return;
+            }
+
+            ledAutomationUpdating = true;
+            TimeCardClient activeClient = client;
+            try
+            {
+                DateTime now = DateTime.UtcNow;
+                if (lastSnapshot != null && lastSnapshot.AbiVersion >= 2 &&
+                    now - lastSmaLedRefreshUtc >= TimeSpan.FromSeconds(10))
+                {
+                    lastSmaLedRefreshUtc = now;
+                    SmaConnectorState[] routes = await Task.Run(() =>
+                    {
+                        SmaConnectorState[] values = new SmaConnectorState[4];
+                        for (uint connector = 1; connector <= 4; connector++)
+                        {
+                            try
+                            {
+                                values[(int)connector - 1] =
+                                    activeClient.GetSmaConnector(connector);
+                            }
+                            catch
+                            {
+                                values[(int)connector - 1] = null;
+                            }
+                        }
+                        return values;
+                    });
+                    if (client != activeClient)
+                        return;
+                    for (int index = 0; index < routes.Length; index++)
+                        lastSmaLedStates[index] = routes[index];
+                }
+
+                if (lastSnapshot != null && lastSnapshot.AbiVersion >= 6 &&
+                    now - lastSecondaryLedObservationUtc >=
+                    TimeSpan.FromSeconds(10))
+                {
+                    lastSecondaryLedObservationUtc = now;
+                    try
+                    {
+                        UartObservation observation = await Task.Run(
+                            () => activeClient.ObserveUart(1, 1500));
+                        if (client != activeClient)
+                            return;
+                        secondaryGnssPresent = observation.IsPresent &&
+                            observation.HasActivity;
+                    }
+                    catch
+                    {
+                        secondaryGnssPresent = false;
+                    }
+                }
+
+                BoardLedColor[] desired = BuildAutomaticLedColors();
+                for (int index = 0; index < desired.Length; index++)
+                    ApplyBoardLedVisual(index, desired[index]);
+                if (force)
+                    Array.Clear(lastAppliedLedColors, 0,
+                        lastAppliedLedColors.Length);
+
+                List<int> changed = new List<int>();
+                for (int index = 0; index < desired.Length; index++)
+                {
+                    if (!desired[index].SameColor(lastAppliedLedColors[index]))
+                        changed.Add(index);
+                }
+                if (changed.Count == 0)
+                {
+                    I2cLedOperationText.Text =
+                        "Automatic mapping is active · hardware colors are current.";
+                    return;
+                }
+
+                await Task.Run(() =>
+                {
+                    foreach (int index in changed)
+                    {
+                        BoardLedColor color = desired[index];
+                        activeClient.SetBoardLed((uint)index, color.Red,
+                            color.Green, color.Blue, 96);
+                    }
+                });
+                if (client != activeClient)
+                    return;
+                foreach (int index in changed)
+                    lastAppliedLedColors[index] = desired[index];
+                I2cLedOperationText.Text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Automatic mapping updated {0} indicator{1}; mux route restored after each update.",
+                    changed.Count, changed.Count == 1 ? string.Empty : "s");
+            }
+            catch (Exception ex)
+            {
+                I2cLedOperationText.Text = "Automatic LED update failed: " + ex.Message;
+                Log("Automatic subsystem LED update failed: " + ex.Message);
+            }
+            finally
+            {
+                ledAutomationUpdating = false;
+            }
+        }
+
+        private BoardLedColor[] BuildAutomaticLedColors()
+        {
+            BoardLedColor[] colors = new BoardLedColor[6];
+            TimeCardSnapshot snapshot = lastSnapshot;
+            colors[0] = snapshot != null && snapshot.GnssFixOk ?
+                new BoardLedColor(0, 180, 30, "FIX LOCKED") :
+                snapshot != null && snapshot.SatelliteDataValid &&
+                snapshot.SeenSatellites != 0 ?
+                    new BoardLedColor(170, 78, 0, "SEARCHING") :
+                    new BoardLedColor(180, 0, 0, "NO FIX");
+            colors[1] = secondaryGnssPresent == true ?
+                new BoardLedColor(0, 165, 30, "UART ACTIVE") :
+                secondaryGnssPresent == false ?
+                    new BoardLedColor(180, 0, 0, "NOT PRESENT") :
+                    new BoardLedColor(145, 64, 0, "UART UNKNOWN");
+
+            for (int index = 0; index < 4; index++)
+            {
+                SmaConnectorState state = lastSmaLedStates[index];
+                if (state == null)
+                    colors[index + 2] = new BoardLedColor(130, 55, 0, "UNKNOWN");
+                else if (!state.IsPresent)
+                    colors[index + 2] = new BoardLedColor(180, 0, 0, "NOT PRESENT");
+                else if (state.IsDisabled || state.Direction == SmaDirection.Disabled)
+                    colors[index + 2] = new BoardLedColor(50, 35, 0, "DISABLED");
+                else if (state.Direction == SmaDirection.Output)
+                    colors[index + 2] = new BoardLedColor(0, 165, 30, "OUTPUT");
+                else
+                    colors[index + 2] = new BoardLedColor(0, 65, 180, "INPUT");
+            }
+            return colors;
+        }
+
+        private void ApplyBoardLedVisual(int led, BoardLedColor color)
+        {
+            Border swatch = GetBoardLedSwatch(led);
+            TextBlock status = GetBoardLedStatusText(led);
+            swatch.Background = new SolidColorBrush(Color.FromRgb(
+                color.Red, color.Green, color.Blue));
+            status.Text = color.Status;
+            status.Foreground = (Brush)FindResource("MutedBrush");
+        }
+
+        private Border GetBoardLedSwatch(int led)
+        {
+            return led == 0 ? I2cLedGnss1Swatch :
+                led == 1 ? I2cLedGnss2Swatch :
+                led == 2 ? I2cLedIo1Swatch :
+                led == 3 ? I2cLedIo2Swatch :
+                led == 4 ? I2cLedIo3Swatch : I2cLedIo4Swatch;
+        }
+
+        private TextBlock GetBoardLedStatusText(int led)
+        {
+            return led == 0 ? I2cLedGnss1StatusText :
+                led == 1 ? I2cLedGnss2StatusText :
+                led == 2 ? I2cLedIo1StatusText :
+                led == 3 ? I2cLedIo2StatusText :
+                led == 4 ? I2cLedIo3StatusText : I2cLedIo4StatusText;
+        }
+
+        private void I2cLedAuto_Click(object sender, RoutedEventArgs e)
+        {
+            bool automatic = I2cLedAutoCheckBox.IsChecked == true;
+            I2cLedManualPanel.IsEnabled = SupportsI2cBoardControls() && !automatic;
+            if (automatic)
+            {
+                Array.Clear(lastAppliedLedColors, 0,
+                    lastAppliedLedColors.Length);
+                UpdateBoardLedAutomationAsync(true);
+            }
+            else
+            {
+                I2cLedOperationText.Text =
+                    "Automatic mapping paused. Select an indicator and apply a manual color.";
+            }
+        }
+
+        private void I2cLedSelection_SelectionChanged(
+            object sender, SelectionChangedEventArgs e)
+        {
+            if (I2cLedSelectionCombo != null && IsInitialized &&
+                I2cLedAutoCheckBox.IsChecked != true)
+                I2cLedOperationText.Text = "Read the selected indicator or apply a new color.";
+        }
+
+        private void I2cLedSlider_ValueChanged(object sender,
+                                                RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (ledControlsUpdating || I2cLedRedSlider == null ||
+                I2cLedGreenSlider == null || I2cLedBlueSlider == null ||
+                I2cLedCurrentSlider == null || I2cLedPreview == null ||
+                I2cLedRedValueText == null || I2cLedGreenValueText == null ||
+                I2cLedBlueValueText == null || I2cLedCurrentValueText == null)
+                return;
+            byte red = (byte)Math.Round(I2cLedRedSlider.Value);
+            byte green = (byte)Math.Round(I2cLedGreenSlider.Value);
+            byte blue = (byte)Math.Round(I2cLedBlueSlider.Value);
+            I2cLedRedValueText.Text = red.ToString(CultureInfo.InvariantCulture);
+            I2cLedGreenValueText.Text = green.ToString(CultureInfo.InvariantCulture);
+            I2cLedBlueValueText.Text = blue.ToString(CultureInfo.InvariantCulture);
+            I2cLedCurrentValueText.Text = Math.Round(
+                I2cLedCurrentSlider.Value).ToString(CultureInfo.InvariantCulture);
+            I2cLedPreview.Background = new SolidColorBrush(
+                Color.FromRgb(red, green, blue));
+        }
+
+        private async void ReadI2cLed_Click(object sender, RoutedEventArgs e)
+        {
+            if (!SupportsI2cBoardControls())
+                return;
+            uint led = SelectedBoardLed();
+            TimeCardClient activeClient = client;
+            I2cLedOperationText.Text = "Reading selected indicator…";
+            try
+            {
+                BoardLedState state = await Task.Run(
+                    () => activeClient.GetBoardLed(led));
+                if (client != activeClient)
+                    return;
+                ApplyManualBoardLedState(state);
+                I2cLedOperationText.Text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "LED {0} read · RGB {1}/{2}/{3} · global current {4}.",
+                    led + 1, state.Red, state.Green, state.Blue,
+                    state.GlobalCurrent);
+            }
+            catch (Exception ex)
+            {
+                I2cLedOperationText.Text = "LED read failed: " + ex.Message;
+            }
+        }
+
+        private async void ApplyI2cLed_Click(object sender, RoutedEventArgs e)
+        {
+            await SetManualBoardLedAsync(false);
+        }
+
+        private async void TurnOffI2cLed_Click(object sender, RoutedEventArgs e)
+        {
+            await SetManualBoardLedAsync(true);
+        }
+
+        private async Task SetManualBoardLedAsync(bool turnOff)
+        {
+            if (!SupportsI2cBoardControls())
+                return;
+            uint led = SelectedBoardLed();
+            byte red = turnOff ? (byte)0 :
+                (byte)Math.Round(I2cLedRedSlider.Value);
+            byte green = turnOff ? (byte)0 :
+                (byte)Math.Round(I2cLedGreenSlider.Value);
+            byte blue = turnOff ? (byte)0 :
+                (byte)Math.Round(I2cLedBlueSlider.Value);
+            byte current = (byte)Math.Round(I2cLedCurrentSlider.Value);
+            TimeCardClient activeClient = client;
+            SetI2cLedButtonsEnabled(false);
+            I2cLedOperationText.Text = turnOff ?
+                "Turning off selected indicator…" : "Applying selected color…";
+            try
+            {
+                BoardLedState state = await Task.Run(() =>
+                    activeClient.SetBoardLed(led, red, green, blue, current));
+                if (client != activeClient)
+                    return;
+                ApplyManualBoardLedState(state);
+                I2cLedOperationText.Text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "LED {0} updated · RGB {1}/{2}/{3}; previous PCA9546A route restored.",
+                    led + 1, state.Red, state.Green, state.Blue);
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "Subsystem LED {0} set to RGB {1}/{2}/{3}.",
+                    led + 1, state.Red, state.Green, state.Blue));
+            }
+            catch (Exception ex)
+            {
+                I2cLedOperationText.Text = "LED update failed: " + ex.Message;
+                Log("Subsystem LED update failed: " + ex.Message);
+            }
+            finally
+            {
+                SetI2cLedButtonsEnabled(true);
+            }
+        }
+
+        private uint SelectedBoardLed()
+        {
+            uint led;
+            return uint.TryParse(GetComboTag(I2cLedSelectionCombo),
+                NumberStyles.Integer, CultureInfo.InvariantCulture,
+                out led) ? led : 0u;
+        }
+
+        private void ApplyManualBoardLedState(BoardLedState state)
+        {
+            ledControlsUpdating = true;
+            try
+            {
+                I2cLedRedSlider.Value = state.Red;
+                I2cLedGreenSlider.Value = state.Green;
+                I2cLedBlueSlider.Value = state.Blue;
+                I2cLedCurrentSlider.Value = state.GlobalCurrent == 0 ?
+                    96 : state.GlobalCurrent;
+            }
+            finally
+            {
+                ledControlsUpdating = false;
+            }
+            I2cLedSlider_ValueChanged(null, null);
+            ApplyBoardLedVisual((int)state.Led,
+                new BoardLedColor(state.Red, state.Green, state.Blue,
+                    state.Red == 0 && state.Green == 0 && state.Blue == 0 ?
+                    "OFF" : "MANUAL"));
+        }
+
+        private void SetI2cLedButtonsEnabled(bool enabled)
+        {
+            I2cLedReadButton.IsEnabled = enabled;
+            I2cLedOffButton.IsEnabled = enabled;
+            I2cLedApplyButton.IsEnabled = enabled;
         }
 
         private void SetI2cUnavailable(string state, string detail)
@@ -2130,12 +3541,128 @@ namespace TimeCardControlCenter
             I2cRegisterText.Text = "CR — · SR —";
             I2cDeviceCountText.Text = "—";
             I2cScanResultText.Text = detail;
+            I2cAddressMapText.Text = "Bus map unavailable.";
+            I2cDiagnosticsText.Text = detail;
             I2cBoardStatusText.Text = "NOT AVAILABLE";
             I2cMacStatusText.Text = "NOT AVAILABLE";
             I2cSerialNumberText.Text = "Card serial unavailable";
+            I2cMuxStatusText.Text = "NOT AVAILABLE";
+            I2cMuxStatusText.Foreground = warningBrush;
+            I2cLedOperationText.Text = detail;
             I2cReadButton.IsEnabled = false;
+            I2cPreviousButton.IsEnabled = false;
+            I2cNextButton.IsEnabled = false;
             I2cBoardReadButton.IsEnabled = false;
             I2cMacReadButton.IsEnabled = false;
+        }
+
+        private static string FormatI2cAddressMap(I2cRefreshResult result)
+        {
+            if (result.Addresses.Count == 0)
+                return result.FullScan ?
+                    "Scan complete · no addresses ACKed." :
+                    "Known-device probe · no addresses ACKed.";
+
+            StringBuilder output = new StringBuilder();
+            output.Append(result.FullScan ? "Full scan" : "Known probes");
+            output.AppendFormat(CultureInfo.InvariantCulture,
+                " · {0} ACK{1}\r\n", result.Addresses.Count,
+                result.Addresses.Count == 1 ? "" : "s");
+            foreach (uint address in result.Addresses)
+            {
+                string name = address == 0x50 ? "board EEPROM" :
+                    address == 0x58 ? "MAC identity" :
+                    address == 0x70 ? "PCA9546A mux" :
+                    address == 0x6e ? "IS32FL3207 status LEDs (CH1)" :
+                    address == 0x29 ? "BNO055 IMU (CH1)" :
+                    address == 0x40 ? "INA219 12 V monitor (CH1)" :
+                    address == 0x41 ? "INA219 5 V monitor (CH1)" :
+                    address == 0x44 ? "INA219 3.3 V monitor (CH1)" :
+                    address == 0x76 ? "BME280 environment (CH1)" :
+                    "unclassified / expansion";
+                output.AppendFormat(CultureInfo.InvariantCulture,
+                    "0x{0:X2}  {1}\r\n", address, name);
+            }
+            return output.ToString().TrimEnd();
+        }
+
+        private static string FormatI2cControllerDiagnostics(
+            I2cControllerStatus status, string operation)
+        {
+            return string.Format(CultureInfo.InvariantCulture,
+                "CR  0x{0:X2}  {1}\r\nSR  0x{2:X2}  {3}\r\n" +
+                "ISR 0x{4:X8}  {5}\r\nIER 0x{6:X8}\r\n" +
+                "TX FIFO {7}  RX FIFO {8}\r\n{9}",
+                status.Control, DecodeI2cControl(status.Control),
+                status.Status, DecodeI2cStatus(status.Status),
+                status.InterruptStatus,
+                DecodeI2cInterrupts(status.InterruptStatus),
+                status.InterruptEnable, status.TxFifoOccupancy,
+                status.RxFifoOccupancy, operation);
+        }
+
+        private static string FormatI2cTransactionDiagnostics(
+            I2cReadResult result, uint subaddress, uint subaddressLength,
+            uint requestedLength, uint timeoutMilliseconds)
+        {
+            return string.Format(CultureInfo.InvariantCulture,
+                "READ 0x{0:X2} / sub 0x{1:X4} ({2} byte{3})\r\n" +
+                "RX {4}/{5} bytes · timeout {6} ms\r\n" +
+                "SR  0x{7:X2}  {8}\r\nISR 0x{9:X8}  {10}",
+                result.Address, subaddress, subaddressLength,
+                subaddressLength == 1 ? "" : "s", result.Data.Length,
+                requestedLength, timeoutMilliseconds,
+                result.ControllerStatus, DecodeI2cStatus(result.ControllerStatus),
+                result.InterruptStatus,
+                DecodeI2cInterrupts(result.InterruptStatus));
+        }
+
+        private static string DecodeI2cControl(uint value)
+        {
+            return DecodeFlags(value, new[]
+            {
+                new KeyValuePair<uint, string>(0x01, "EN"),
+                new KeyValuePair<uint, string>(0x02, "TX_RESET"),
+                new KeyValuePair<uint, string>(0x04, "MASTER"),
+                new KeyValuePair<uint, string>(0x08, "TX"),
+                new KeyValuePair<uint, string>(0x10, "NACK"),
+                new KeyValuePair<uint, string>(0x20, "RESTART")
+            });
+        }
+
+        private static string DecodeI2cStatus(uint value)
+        {
+            return DecodeFlags(value, new[]
+            {
+                new KeyValuePair<uint, string>(0x80, "TX_EMPTY"),
+                new KeyValuePair<uint, string>(0x40, "RX_EMPTY"),
+                new KeyValuePair<uint, string>(0x20, "RX_FULL"),
+                new KeyValuePair<uint, string>(0x10, "TX_FULL"),
+                new KeyValuePair<uint, string>(0x08, "SLAVE_READ"),
+                new KeyValuePair<uint, string>(0x04, "BUS_BUSY"),
+                new KeyValuePair<uint, string>(0x02, "ADDRESSED")
+            });
+        }
+
+        private static string DecodeI2cInterrupts(uint value)
+        {
+            return DecodeFlags(value, new[]
+            {
+                new KeyValuePair<uint, string>(0x01, "ARB_LOST"),
+                new KeyValuePair<uint, string>(0x02, "TX_ERROR/FINAL_NACK"),
+                new KeyValuePair<uint, string>(0x04, "TX_EMPTY"),
+                new KeyValuePair<uint, string>(0x08, "RX_FULL"),
+                new KeyValuePair<uint, string>(0x10, "BUS_NOT_BUSY")
+            });
+        }
+
+        private static string DecodeFlags(uint value,
+            IEnumerable<KeyValuePair<uint, string>> flags)
+        {
+            string decoded = string.Join("|", flags
+                .Where(flag => (value & flag.Key) != 0)
+                .Select(flag => flag.Value));
+            return decoded.Length == 0 ? "none" : decoded;
         }
 
         private async void ReadI2c_Click(object sender, RoutedEventArgs e)
@@ -2143,8 +3670,138 @@ namespace TimeCardControlCenter
             await ExecuteI2cReadAsync();
         }
 
+        private void I2cPreset_SelectionChanged(object sender,
+                                                SelectionChangedEventArgs e)
+        {
+            if (I2cAddressTextBox == null || I2cPresetCombo == null)
+                return;
+            string preset = GetComboTag(I2cPresetCombo);
+            if (preset == "board")
+            {
+                I2cAddressTextBox.Text = "50";
+                I2cSubaddressTextBox.Text = "00";
+                I2cSubaddressLengthCombo.SelectedIndex = 1;
+                I2cLengthTextBox.Text = "32";
+            }
+            else if (preset == "identity")
+            {
+                I2cAddressTextBox.Text = "58";
+                I2cSubaddressTextBox.Text = "00";
+                I2cSubaddressLengthCombo.SelectedIndex = 1;
+                I2cLengthTextBox.Text = "6";
+            }
+            else if (preset == "imu")
+            {
+                I2cAddressTextBox.Text = "29";
+                I2cSubaddressTextBox.Text = "00";
+                I2cSubaddressLengthCombo.SelectedIndex = 1;
+                I2cLengthTextBox.Text = "4";
+            }
+            else if (preset == "power12")
+            {
+                I2cAddressTextBox.Text = "40";
+                I2cSubaddressTextBox.Text = "00";
+                I2cSubaddressLengthCombo.SelectedIndex = 1;
+                I2cLengthTextBox.Text = "2";
+            }
+            else if (preset == "environment")
+            {
+                I2cAddressTextBox.Text = "76";
+                I2cSubaddressTextBox.Text = "D0";
+                I2cSubaddressLengthCombo.SelectedIndex = 1;
+                I2cLengthTextBox.Text = "1";
+            }
+            else if (preset == "leddriver")
+            {
+                I2cAddressTextBox.Text = "6E";
+                I2cSubaddressTextBox.Text = "00";
+                I2cSubaddressLengthCombo.SelectedIndex = 1;
+                I2cLengthTextBox.Text = "8";
+            }
+            else if (preset == "direct")
+            {
+                I2cSubaddressTextBox.Text = "00";
+                I2cSubaddressLengthCombo.SelectedIndex = 0;
+                I2cLengthTextBox.Text = "16";
+            }
+        }
+
+        private void I2cDisplayMode_SelectionChanged(
+            object sender, SelectionChangedEventArgs e)
+        {
+            if (I2cOutputTextBox != null && lastI2cData != null)
+                RenderI2cOutput();
+        }
+
+        private async void I2cPrevious_Click(object sender, RoutedEventArgs e)
+        {
+            await MoveI2cPageAsync(-1);
+        }
+
+        private async void I2cNext_Click(object sender, RoutedEventArgs e)
+        {
+            await MoveI2cPageAsync(1);
+        }
+
+        private async Task MoveI2cPageAsync(int direction)
+        {
+            try
+            {
+                uint subaddressLength = GetI2cSubaddressLength();
+                if (subaddressLength == 0)
+                    throw new InvalidOperationException(
+                        "Page navigation requires a 1-byte or 2-byte subaddress.");
+                uint maximum = subaddressLength == 1 ? 0xffu : 0xffffu;
+                uint current = ParseHex(I2cSubaddressTextBox.Text,
+                    "subaddress", 0, maximum);
+                uint length = ParseUnsigned(I2cLengthTextBox.Text,
+                    "read length", 1, 255);
+                uint next = direction < 0 ?
+                    (current > length ? current - length : 0u) :
+                    Math.Min(maximum, current + length);
+                I2cSubaddressTextBox.Text = next.ToString(
+                    subaddressLength == 1 ? "X2" : "X4",
+                    CultureInfo.InvariantCulture);
+                I2cPresetCombo.SelectedIndex = 0;
+                await ExecuteI2cReadAsync();
+            }
+            catch (Exception ex)
+            {
+                I2cReadStatusText.Text = ex.Message;
+            }
+        }
+
+        private void CopyI2c_Click(object sender, RoutedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(I2cOutputTextBox.Text))
+            {
+                Clipboard.SetText(I2cOutputTextBox.Text);
+                I2cReadStatusText.Text = "The formatted I²C output was copied.";
+            }
+        }
+
+        private static string GetComboTag(ComboBox combo)
+        {
+            ComboBoxItem item = combo == null ? null :
+                combo.SelectedItem as ComboBoxItem;
+            return item == null ? string.Empty :
+                Convert.ToString(item.Tag, CultureInfo.InvariantCulture);
+        }
+
+        private uint GetI2cSubaddressLength()
+        {
+            string value = GetComboTag(I2cSubaddressLengthCombo);
+            uint result;
+            if (!uint.TryParse(value, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out result) || result > 2)
+                throw new InvalidOperationException(
+                    "Select a valid subaddress length.");
+            return result;
+        }
+
         private async void ReadBoardEeprom_Click(object sender, RoutedEventArgs e)
         {
+            I2cPresetCombo.SelectedIndex = 1;
             I2cAddressTextBox.Text = "50";
             I2cSubaddressTextBox.Text = "00";
             I2cSubaddressLengthCombo.SelectedIndex = 1;
@@ -2154,6 +3811,7 @@ namespace TimeCardControlCenter
 
         private async void ReadMacEeprom_Click(object sender, RoutedEventArgs e)
         {
+            I2cPresetCombo.SelectedIndex = 2;
             I2cAddressTextBox.Text = "58";
             I2cSubaddressTextBox.Text = "00";
             I2cSubaddressLengthCombo.SelectedIndex = 1;
@@ -2164,10 +3822,12 @@ namespace TimeCardControlCenter
 
         private async Task RefreshIdentityAsync()
         {
-            if (client == null || lastSnapshot == null || lastSnapshot.AbiVersion < 3)
+            if (client == null || lastSnapshot == null ||
+                !SupportsReliableI2cReads())
             {
-                SidebarSerialText.Text = "Driver update required";
-                I2cSerialNumberText.Text = "Card serial requires ABI 3+";
+                SidebarSerialText.Text = "Driver 1.12 required";
+                I2cSerialNumberText.Text =
+                    "Update to driver 1.12 to read the card identity";
                 return;
             }
 
@@ -2211,26 +3871,25 @@ namespace TimeCardControlCenter
         {
             if (!EnsureConnected())
                 return;
-            if (lastSnapshot != null && lastSnapshot.AbiVersion < 3)
+            if (!SupportsReliableI2cReads())
             {
                 MessageBox.Show(this,
-                    "I2C access requires Time Card driver 1.8 or later.",
+                    "Reliable I2C reads require Time Card driver 1.11 or later. " +
+                    "This computer is running driver " +
+                    (lastSnapshot == null ? "an unknown version" :
+                     lastSnapshot.DriverVersion) + ".\n\n" +
+                     "Install the current driver 1.13 package, then restart the Control Center.",
                     "Driver update required", MessageBoxButton.OK,
                     MessageBoxImage.Information);
                 return;
             }
 
+            TimeCardClient activeClient = client;
             try
             {
                 uint address = ParseHex(I2cAddressTextBox.Text,
                     "7-bit I2C address", 0x08, 0x77);
-                ComboBoxItem lengthItem =
-                    I2cSubaddressLengthCombo.SelectedItem as ComboBoxItem;
-                if (lengthItem == null)
-                    throw new InvalidOperationException("Select a subaddress length.");
-                uint subaddressLength = uint.Parse(
-                    Convert.ToString(lengthItem.Tag, CultureInfo.InvariantCulture),
-                    CultureInfo.InvariantCulture);
+                uint subaddressLength = GetI2cSubaddressLength();
                 uint subaddressMaximum = subaddressLength == 2 ? 0xffffu :
                     subaddressLength == 1 ? 0xffu : 0u;
                 uint subaddress = subaddressLength == 0 ? 0u :
@@ -2238,26 +3897,34 @@ namespace TimeCardControlCenter
                         subaddressMaximum);
                 uint length = ParseUnsigned(I2cLengthTextBox.Text,
                     "read length", 1, 255);
-                TimeCardClient activeClient = client;
+                uint timeoutMilliseconds = uint.Parse(
+                    GetComboTag(I2cTimeoutCombo), CultureInfo.InvariantCulture);
 
                 I2cReadButton.IsEnabled = false;
+                I2cPreviousButton.IsEnabled = false;
+                I2cNextButton.IsEnabled = false;
+                I2cCopyButton.IsEnabled = false;
                 I2cBoardReadButton.IsEnabled = false;
                 I2cMacReadButton.IsEnabled = false;
                 I2cReadStatusText.Text = string.Format(CultureInfo.InvariantCulture,
                     "Reading {0} byte(s) from 0x{1:X2}...", length, address);
                 I2cReadResult result = await Task.Run(() =>
                     activeClient.ReadI2c(address, subaddress,
-                        subaddressLength, length, 100));
+                        subaddressLength, length, timeoutMilliseconds));
                 if (client != activeClient)
                     return;
 
-                I2cOutputTextBox.Text = string.Format(CultureInfo.InvariantCulture,
-                    "Device 0x{0:X2} · subaddress 0x{1:X4} ({2} byte{3})\r\n\r\n{4}",
-                    result.Address, subaddress, subaddressLength,
-                    subaddressLength == 1 ? "" : "s",
-                    FormatI2cData(result.Data));
+                lastI2cData = result.Data;
+                lastI2cAddress = result.Address;
+                lastI2cSubaddress = subaddress;
+                lastI2cSubaddressLength = subaddressLength;
+                RenderI2cOutput();
+                I2cCopyButton.IsEnabled = true;
+                I2cDiagnosticsText.Text = FormatI2cTransactionDiagnostics(
+                    result, subaddress, subaddressLength, length,
+                    timeoutMilliseconds);
                 I2cReadStatusText.Text = string.Format(CultureInfo.InvariantCulture,
-                    "Read {0} byte(s) · SR 0x{1:X2} · ISR 0x{2:X8}",
+                    "Read {0} byte(s) · SR 0x{1:X2} · events 0x{2:X8}",
                     result.Data.Length, result.ControllerStatus,
                     result.InterruptStatus);
                 Log(string.Format(CultureInfo.InvariantCulture,
@@ -2266,19 +3933,49 @@ namespace TimeCardControlCenter
             }
             catch (Exception ex)
             {
-                I2cReadStatusText.Text = "Read failed: " + ex.Message;
-                Log("I2C read failed: " + ex.Message);
-                MessageBox.Show(this, ex.Message, "I2C read failed",
+                string failureMessage = DescribeI2cReadFailure(ex);
+                I2cReadStatusText.Text = "Read failed: " + failureMessage;
+                if (client == activeClient && activeClient != null)
+                {
+                    try
+                    {
+                        I2cControllerStatus status = await Task.Run(() =>
+                            activeClient.GetI2cStatus());
+                        I2cDiagnosticsText.Text = FormatI2cControllerDiagnostics(
+                            status, "Last read failed: " + failureMessage);
+                    }
+                    catch (Exception statusError)
+                    {
+                        I2cDiagnosticsText.Text = "Read failed: " + failureMessage +
+                            "\r\nStatus sample failed: " + statusError.Message;
+                    }
+                }
+                Log("I2C read failed: " + failureMessage);
+                MessageBox.Show(this, failureMessage, "I2C read failed",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
-                bool supported = client != null &&
-                    (lastSnapshot == null || lastSnapshot.AbiVersion >= 3);
+                bool supported = SupportsReliableI2cReads();
                 I2cReadButton.IsEnabled = supported;
+                I2cPreviousButton.IsEnabled = supported;
+                I2cNextButton.IsEnabled = supported;
+                I2cCopyButton.IsEnabled = lastI2cData != null;
                 I2cBoardReadButton.IsEnabled = supported;
                 I2cMacReadButton.IsEnabled = supported;
             }
+        }
+
+        private static string DescribeI2cReadFailure(Exception error)
+        {
+            Win32Exception win32 = error as Win32Exception;
+            if (win32 != null && win32.NativeErrorCode == 23)
+            {
+                return "The installed driver returned its legacy I2C short-transfer status. " +
+                    "Windows labels that status as a CRC data error, but this transaction does not use a CRC. " +
+                    "Install Time Card driver 1.13 and retry the read.";
+            }
+            return error.Message;
         }
 
         private static uint ParseHex(string text, string name,
@@ -2298,28 +3995,75 @@ namespace TimeCardControlCenter
             return value;
         }
 
-        private static string FormatI2cData(byte[] data)
+        private void RenderI2cOutput()
+        {
+            if (lastI2cData == null)
+                return;
+            string mode = GetComboTag(I2cDisplayModeCombo);
+            string subaddressText = lastI2cSubaddressLength == 0 ?
+                "direct receive" : string.Format(CultureInfo.InvariantCulture,
+                    "subaddress 0x{0:X4} ({1} byte{2})",
+                    lastI2cSubaddress, lastI2cSubaddressLength,
+                    lastI2cSubaddressLength == 1 ? "" : "s");
+            I2cOutputTextBox.Text = string.Format(CultureInfo.InvariantCulture,
+                "Device 0x{0:X2} · {1} · {2} bytes · {3}\r\n\r\n{4}",
+                lastI2cAddress, subaddressText, lastI2cData.Length,
+                I2cDisplayModeCombo.Text,
+                FormatI2cData(lastI2cData, lastI2cSubaddress, mode));
+        }
+
+        private static string FormatI2cData(byte[] data, uint baseAddress,
+                                            string mode)
         {
             StringBuilder output = new StringBuilder();
-            for (int offset = 0; offset < data.Length; offset += 16)
+            int columns = mode == "binary" ? 4 :
+                mode == "decimal" ? 8 : mode == "ascii" ? 32 : 16;
+            for (int offset = 0; offset < data.Length; offset += columns)
             {
                 output.AppendFormat(CultureInfo.InvariantCulture,
-                    "{0:X4}  ", offset);
-                for (int index = 0; index < 16; index++)
+                    "{0:X4}  ", baseAddress + (uint)offset);
+                int count = Math.Min(columns, data.Length - offset);
+                if (mode == "binary")
                 {
-                    if (offset + index < data.Length)
-                        output.AppendFormat(CultureInfo.InvariantCulture,
-                            "{0:X2} ", data[offset + index]);
-                    else
-                        output.Append("   ");
+                    for (int index = 0; index < count; index++)
+                        output.Append(Convert.ToString(data[offset + index], 2)
+                            .PadLeft(8, '0')).Append(' ');
                 }
-                output.Append(" ");
-                for (int index = 0; index < 16 &&
-                     offset + index < data.Length; index++)
+                else if (mode == "decimal")
                 {
-                    byte value = data[offset + index];
-                    output.Append(value >= 0x20 && value <= 0x7e ?
-                        (char)value : '.');
+                    for (int index = 0; index < count; index++)
+                        output.AppendFormat(CultureInfo.InvariantCulture,
+                            "{0,3} ", data[offset + index]);
+                }
+                else if (mode == "ascii")
+                {
+                    for (int index = 0; index < count; index++)
+                    {
+                        byte value = data[offset + index];
+                        output.Append(value >= 0x20 && value <= 0x7e ?
+                            (char)value : '.');
+                    }
+                }
+                else
+                {
+                    for (int index = 0; index < columns; index++)
+                    {
+                        if (index < count)
+                            output.AppendFormat(CultureInfo.InvariantCulture,
+                                "{0:X2} ", data[offset + index]);
+                        else if (mode == "hexascii")
+                            output.Append("   ");
+                    }
+                    if (mode == "hexascii")
+                    {
+                        output.Append(" ");
+                        for (int index = 0; index < count; index++)
+                        {
+                            byte value = data[offset + index];
+                            output.Append(value >= 0x20 && value <= 0x7e ?
+                                (char)value : '.');
+                        }
+                    }
                 }
                 output.AppendLine();
             }
@@ -2353,23 +4097,64 @@ namespace TimeCardControlCenter
         {
             if (data == null)
                 return;
-            string formatted = FormatUartData(data);
-            string line = string.Format(CultureInfo.InvariantCulture, "[{0:HH:mm:ss.fff}] {1} {2} byte(s) · LSR 0x{3:X2}\r\n{4}{5}",
-                DateTime.Now, direction, data.Length, lineStatus & 0xff, formatted,
-                formatted.EndsWith("\n", StringComparison.Ordinal) ? string.Empty : "\r\n");
-            UartOutputTextBox.AppendText(line);
+            byte[] capturedData = (byte[])data.Clone();
+            UartConsoleEntry entry = new UartConsoleEntry
+            {
+                Timestamp = DateTime.Now,
+                Direction = direction,
+                Data = capturedData,
+                LineStatus = lineStatus
+            };
+            uartConsoleEntries.Add(entry);
+            uartConsoleHistoryBytes += capturedData.Length;
+            while (uartConsoleHistoryBytes > 65536 && uartConsoleEntries.Count > 1)
+            {
+                uartConsoleHistoryBytes -= uartConsoleEntries[0].Data.Length;
+                uartConsoleEntries.RemoveAt(0);
+            }
+            UartOutputTextBox.AppendText(RenderUartConsoleEntry(entry));
             if (UartOutputTextBox.Text.Length > 131072)
-                UartOutputTextBox.Text = UartOutputTextBox.Text.Substring(UartOutputTextBox.Text.Length - 65536);
+                UartOutputTextBox.Text = UartOutputTextBox.Text.Substring(
+                    UartOutputTextBox.Text.Length - 65536);
             UartOutputTextBox.ScrollToEnd();
+        }
+
+        private void RenderUartConsole()
+        {
+            const int maximumCharacters = 131072;
+            List<string> renderedEntries = new List<string>(uartConsoleEntries.Count);
+            int renderedCharacters = 0;
+            for (int index = uartConsoleEntries.Count - 1; index >= 0; index--)
+            {
+                UartConsoleEntry entry = uartConsoleEntries[index];
+                string rendered = RenderUartConsoleEntry(entry);
+                if (renderedCharacters != 0 &&
+                    renderedCharacters + rendered.Length > maximumCharacters)
+                    break;
+                renderedEntries.Add(rendered);
+                renderedCharacters += rendered.Length;
+            }
+            renderedEntries.Reverse();
+            UartOutputTextBox.Text = string.Concat(renderedEntries);
+            UartOutputTextBox.ScrollToEnd();
+        }
+
+        private string RenderUartConsoleEntry(UartConsoleEntry entry)
+        {
+            string formatted = FormatUartData(entry.Data);
+            return string.Format(CultureInfo.InvariantCulture,
+                "[{0:HH:mm:ss.fff}] {1} {2} byte(s) · LSR 0x{3:X2}\r\n{4}{5}",
+                entry.Timestamp, entry.Direction, entry.Data.Length,
+                entry.LineStatus & 0xff, formatted,
+                formatted.EndsWith("\n", StringComparison.Ordinal) ? string.Empty : "\r\n");
         }
 
         private string FormatUartData(byte[] data)
         {
-            ComboBoxItem item = UartFormatCombo.SelectedItem as ComboBoxItem;
-            string mode = item == null ? "Auto" : Convert.ToString(item.Content, CultureInfo.InvariantCulture);
+            string mode = SelectedUartDisplayMode();
             bool printable = data.Length == 0 || data.Count(value => value == 9 || value == 10 || value == 13 ||
                 (value >= 32 && value < 127)) >= data.Length * 0.82;
-            if (mode == "Text" || (mode == "Auto" && printable))
+            if (mode == "Ascii" || (mode == "Auto" && printable))
             {
                 StringBuilder text = new StringBuilder(data.Length);
                 foreach (byte value in data)
@@ -2381,7 +4166,25 @@ namespace TimeCardControlCenter
                 }
                 return text.ToString();
             }
+            if (mode == "Binary")
+                return string.Join(" ", data.Select(value => Convert.ToString(value, 2).PadLeft(8, '0')));
+            if (mode == "Decimal")
+                return string.Join(" ", data.Select(value => value.ToString("D3", CultureInfo.InvariantCulture)));
             return string.Join(" ", data.Select(value => value.ToString("X2", CultureInfo.InvariantCulture)));
+        }
+
+        private string SelectedUartDisplayMode()
+        {
+            ComboBoxItem item = UartFormatCombo.SelectedItem as ComboBoxItem;
+            return item == null ? "Auto" :
+                Convert.ToString(item.Tag, CultureInfo.InvariantCulture);
+        }
+
+        private string SelectedUartDisplayName()
+        {
+            ComboBoxItem item = UartFormatCombo.SelectedItem as ComboBoxItem;
+            return item == null ? "Auto" :
+                Convert.ToString(item.Content, CultureInfo.InvariantCulture);
         }
 
         private uint SelectedUartPort()
@@ -2465,6 +4268,451 @@ namespace TimeCardControlCenter
             LogTextBox.ScrollToEnd();
         }
 
+        private async void OpenNmea_Click(object sender, RoutedEventArgs e)
+        {
+            UartPortCombo.SelectedIndex = 3;
+            UartNav.IsChecked = true;
+            ShowPage("Uart");
+            await RefreshNmeaAsync(false);
+        }
+
+        private async void RefreshSubsystems_Click(object sender,
+                                                     RoutedEventArgs e)
+        {
+            await RefreshSubsystemsAsync();
+        }
+
+        private async Task RefreshSubsystemsAsync()
+        {
+            if (subsystemsRefreshing)
+                return;
+            if (client == null)
+            {
+                SubsystemGnss2StatusText.Text = "NOT PRESENT";
+                SubsystemGnss2StatusText.Foreground =
+                    (Brush)FindResource("GoldBrush");
+                SubsystemGnss2DetailText.Text = "Driver access is unavailable.";
+                return;
+            }
+            if (lastSnapshot == null || lastSnapshot.AbiVersion < 6)
+            {
+                SubsystemGnss2StatusText.Text = "DRIVER 1.12 / ABI 6 REQUIRED";
+                SubsystemGnss2StatusText.Foreground =
+                    (Brush)FindResource("GoldBrush");
+                SubsystemGnss2DetailText.Text =
+                    "Install the current driver for non-destructive UART activity detection.";
+                return;
+            }
+
+            subsystemsRefreshing = true;
+            StopUartMonitor();
+            SubsystemGnss2StatusText.Text = "LISTENING ON UART 1";
+            SubsystemGnss2StatusText.Foreground =
+                (Brush)FindResource("CyanBrush");
+            SubsystemGnss2DetailText.Text =
+                "Waiting up to 1.5 seconds for receiver data…";
+            try
+            {
+                UartObservation observation = await Task.Run(
+                    () => client.ObserveUart(1, 1500));
+                if (observation.IsPresent && observation.HasActivity)
+                {
+                    secondaryGnssPresent = true;
+                    SubsystemGnss2StatusText.Text = "PRESENT · UART DATA";
+                    SubsystemGnss2StatusText.Foreground =
+                        (Brush)FindResource("AccentBrush");
+                    SubsystemGnss2DetailText.Text = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Received activity detected; line status 0x{0:X2}.",
+                        observation.LineStatus);
+                }
+                else
+                {
+                    secondaryGnssPresent = false;
+                    SubsystemGnss2StatusText.Text = "NOT PRESENT";
+                    SubsystemGnss2StatusText.Foreground =
+                        (Brush)FindResource("GoldBrush");
+                    SubsystemGnss2DetailText.Text =
+                        "No data was received on UART 1 during the observation window.";
+                }
+            }
+            catch (Exception ex)
+            {
+                secondaryGnssPresent = false;
+                SubsystemGnss2StatusText.Text = "NOT PRESENT";
+                SubsystemGnss2StatusText.Foreground =
+                    (Brush)FindResource("GoldBrush");
+                SubsystemGnss2DetailText.Text = "UART observation failed: " + ex.Message;
+                Log("Secondary GNSS UART observation failed: " + ex.Message);
+            }
+            finally
+            {
+                subsystemsRefreshing = false;
+                UpdateBoardLedAutomationAsync(false);
+            }
+        }
+
+        private async void OpenFlash_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPage("Flash");
+            await RefreshFlashAsync(true);
+        }
+
+        private async void RefreshFlash_Click(object sender, RoutedEventArgs e)
+        {
+            await RefreshFlashAsync(true);
+        }
+
+        private void BackToSubsystems_Click(object sender, RoutedEventArgs e)
+        {
+            SubsystemsNav.IsChecked = true;
+            ShowPage("Subsystems");
+        }
+
+        private async Task RefreshFlashAsync(bool showError)
+        {
+            if (flashUpdating)
+                return;
+            lastFlashStatus = null;
+            FlashControllerText.Text = "QUERYING";
+            FlashControllerText.Foreground = (Brush)FindResource("CyanBrush");
+            FlashJedecText.Text = "—";
+            FlashCapacityText.Text = "—";
+            FlashRegionText.Text = "—";
+            if (client == null || lastSnapshot == null)
+            {
+                FlashControllerText.Text = "NOT CONNECTED";
+                FlashControllerText.Foreground = (Brush)FindResource("GoldBrush");
+                FlashLogTextBox.Text = "Connect to the Time Card driver before querying SPI flash.";
+                UpdateFlashStartState();
+                return;
+            }
+            if (lastSnapshot.AbiVersion < 6)
+            {
+                FlashControllerText.Text = "ABI 6 REQUIRED";
+                FlashControllerText.Foreground = (Brush)FindResource("GoldBrush");
+                FlashLogTextBox.Text = "Install Time Card driver 1.12 or newer to enable guarded FPGA firmware updates.";
+                UpdateFlashStartState();
+                return;
+            }
+
+            try
+            {
+                FlashDeviceStatus status = await Task.Run(() => client.GetFlashStatus());
+                lastFlashStatus = status;
+                FlashControllerText.Text = status.IsSupported ? "READY" : "UNSUPPORTED";
+                FlashControllerText.Foreground = (Brush)FindResource(
+                    status.IsSupported ? "AccentBrush" : "GoldBrush");
+                FlashJedecText.Text = status.IsIdentified ? string.Format(
+                    CultureInfo.InvariantCulture, "0x{0:X6}", status.JedecId) : "NOT IDENTIFIED";
+                FlashCapacityText.Text = status.CapacityBytes == 0 ? "—" :
+                    string.Format(CultureInfo.InvariantCulture, "{0:N0} MiB",
+                        status.CapacityBytes / 1048576.0);
+                FlashRegionText.Text = status.CapacityBytes <= status.FirmwareOffset ? "—" :
+                    string.Format(CultureInfo.InvariantCulture, "0x{0:X8} · {1:N0} MiB",
+                        status.FirmwareOffset,
+                        (status.CapacityBytes - status.FirmwareOffset) / 1048576.0);
+                FlashLogTextBox.Text = string.Format(CultureInfo.InvariantCulture,
+                    "SPI controller 0x{0:X8}\r\nFIFO depth {1} byte(s)\r\nErase {2:N0} bytes · page {3:N0} bytes\r\nController status 0x{4:X8} · flash status 0x{5:X2}",
+                    status.ControllerOffset, status.FifoDepth, status.EraseSize,
+                    status.PageSize, status.ControllerStatus, status.FlashStatus);
+            }
+            catch (Exception ex)
+            {
+                FlashControllerText.Text = "QUERY FAILED";
+                FlashControllerText.Foreground = (Brush)FindResource("GoldBrush");
+                FlashLogTextBox.Text = ex.Message;
+                Log("SPI flash query failed: " + ex.Message);
+                if (showError)
+                    MessageBox.Show(this, ex.Message, "Unable to query SPI flash",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                UpdateFlashStartState();
+            }
+        }
+
+        private void ChooseFirmware_Click(object sender, RoutedEventArgs e)
+        {
+            Microsoft.Win32.OpenFileDialog dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Select FPGA firmware image",
+                Filter = "FPGA firmware (*.bin;*.fw;*.bit)|*.bin;*.fw;*.bit|All files (*.*)|*.*",
+                CheckFileExists = true,
+                Multiselect = false
+            };
+            if (dialog.ShowDialog(this) != true)
+                return;
+
+            try
+            {
+                byte[] file = File.ReadAllBytes(dialog.FileName);
+                if (file.Length == 0)
+                    throw new InvalidDataException("The selected firmware image is empty.");
+
+                bool wrapped = file.Length >= 4 && file[0] == (byte)'O' &&
+                    file[1] == (byte)'C' && file[2] == (byte)'P' &&
+                    file[3] == (byte)'C';
+                byte[] image;
+                string detail;
+                if (wrapped)
+                {
+                    if (file.Length < 16)
+                        throw new InvalidDataException("The OCPC firmware header is truncated.");
+                    ushort vendor = ReadBigEndian16(file, 4);
+                    ushort device = ReadBigEndian16(file, 6);
+                    uint declaredSize = ReadBigEndian32(file, 8);
+                    ushort hardwareRevision = ReadBigEndian16(file, 12);
+                    ushort expectedCrc = ReadBigEndian16(file, 14);
+                    if (vendor != 0x1d9b || device != 0x0400)
+                        throw new InvalidDataException(string.Format(
+                            CultureInfo.InvariantCulture,
+                            "This image targets PCI {0:X4}:{1:X4}, not the Time Card 1D9B:0400.",
+                            vendor, device));
+                    if (declaredSize != file.Length - 16)
+                        throw new InvalidDataException("The OCPC image length does not match its header.");
+                    ushort actualCrc = Crc16(file, 16, (int)declaredSize);
+                    if (expectedCrc != actualCrc)
+                        throw new InvalidDataException(string.Format(
+                            CultureInfo.InvariantCulture,
+                            "The OCPC CRC is invalid (expected 0x{0:X4}, calculated 0x{1:X4}).",
+                            expectedCrc, actualCrc));
+                    image = new byte[declaredSize];
+                    Buffer.BlockCopy(file, 16, image, 0, image.Length);
+                    detail = string.Format(CultureInfo.InvariantCulture,
+                        "Validated OCPC image · PCI 1D9B:0400 · hardware revision 0x{0:X4} · CRC 0x{1:X4} · {2:N0} bytes",
+                        hardwareRevision, actualCrc, image.Length);
+                }
+                else
+                {
+                    image = file;
+                    detail = string.Format(CultureInfo.InvariantCulture,
+                        "Raw image · no hardware identity or CRC header · {0:N0} bytes",
+                        image.Length);
+                }
+
+                if (lastFlashStatus != null && lastFlashStatus.CapacityBytes >
+                    lastFlashStatus.FirmwareOffset && image.LongLength >
+                    lastFlashStatus.CapacityBytes - lastFlashStatus.FirmwareOffset)
+                    throw new InvalidDataException("The firmware image does not fit in the protected FPGA image region.");
+
+                selectedFlashImage = image;
+                selectedFlashPath = dialog.FileName;
+                selectedFlashIsRaw = !wrapped;
+                FlashImagePathText.Text = Path.GetFileName(dialog.FileName);
+                FlashImageDetailText.Text = detail;
+                using (SHA256 sha = SHA256.Create())
+                    FlashHashText.Text = "SHA-256 " +
+                        BitConverter.ToString(sha.ComputeHash(image)).Replace("-", string.Empty);
+                FlashAcknowledgeCheckBox.IsChecked = false;
+                FlashProgressBar.Value = 0;
+                FlashProgressText.Text = "Image validated; acknowledgement required.";
+                FlashLogTextBox.Text = wrapped ?
+                    "OCPC wrapper validated. The 16-byte wrapper will not be written to flash." :
+                    "RAW IMAGE WARNING: compatibility cannot be established from the file. Confirm its source before continuing.";
+                UpdateFlashStartState();
+            }
+            catch (Exception ex)
+            {
+                selectedFlashImage = null;
+                selectedFlashPath = null;
+                selectedFlashIsRaw = false;
+                FlashImagePathText.Text = "Image rejected";
+                FlashImageDetailText.Text = ex.Message;
+                FlashHashText.Text = "SHA-256 —";
+                UpdateFlashStartState();
+                MessageBox.Show(this, ex.Message, "Invalid firmware image",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void FlashAcknowledge_Changed(object sender, RoutedEventArgs e)
+        {
+            if (IsInitialized)
+                UpdateFlashStartState();
+        }
+
+        private void UpdateFlashStartState()
+        {
+            if (FlashStartButton == null)
+                return;
+            FlashStartButton.IsEnabled = !flashUpdating && client != null &&
+                lastSnapshot != null && lastSnapshot.AbiVersion >= 6 &&
+                lastFlashStatus != null && lastFlashStatus.IsSupported &&
+                selectedFlashImage != null && selectedFlashImage.Length != 0 &&
+                FlashAcknowledgeCheckBox.IsChecked == true;
+            FlashChooseButton.IsEnabled = !flashUpdating;
+        }
+
+        private async void FlashFirmware_Click(object sender, RoutedEventArgs e)
+        {
+            if (!FlashStartButton.IsEnabled || selectedFlashImage == null ||
+                lastFlashStatus == null)
+                return;
+            if (selectedFlashImage.LongLength > lastFlashStatus.CapacityBytes -
+                lastFlashStatus.FirmwareOffset)
+            {
+                MessageBox.Show(this, "The firmware image does not fit in the FPGA image region.",
+                    "Image too large", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            string rawWarning = selectedFlashIsRaw ?
+                "\n\nThis is a raw image with no OCPC hardware identity or CRC wrapper." : string.Empty;
+            MessageBoxResult confirmation = MessageBox.Show(this,
+                "Erase the current FPGA firmware, program " +
+                Path.GetFileName(selectedFlashPath) +
+                ", and verify every byte? Do not remove power during this operation." + rawWarning,
+                "Confirm FPGA firmware update", MessageBoxButton.YesNo,
+                MessageBoxImage.Warning, MessageBoxResult.No);
+            if (confirmation != MessageBoxResult.Yes)
+                return;
+
+            flashUpdating = true;
+            UpdateFlashStartState();
+            FlashAcknowledgeCheckBox.IsEnabled = false;
+            FlashProgressBar.Value = 0;
+            FlashLogTextBox.Clear();
+            FlashAppendLog("Firmware region starts at physical flash offset " +
+                string.Format(CultureInfo.InvariantCulture, "0x{0:X8}.",
+                    lastFlashStatus.FirmwareOffset));
+            try
+            {
+                byte[] image = (byte[])selectedFlashImage.Clone();
+                FlashDeviceStatus status = lastFlashStatus;
+                TimeCardClient operationClient = client;
+                await Task.Run(() => ProgramAndVerifyFlash(operationClient,
+                    status, image));
+                FlashReportProgress("Verified · power-cycle the card to load the new FPGA image.", 100);
+                FlashAppendLog("UPDATE COMPLETE. Read-back matches the selected firmware image.");
+                Log("FPGA firmware update completed and verified: " +
+                    Path.GetFileName(selectedFlashPath));
+                MessageBox.Show(this,
+                    "The FPGA firmware was programmed and verified. Power-cycle or reboot the card to load the new image.",
+                    "Firmware update complete", MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                FlashProgressText.Text = "FAILED · keep the card powered and retry with a known-good image";
+                FlashAppendLog("FAILED: " + ex.Message);
+                Log("FPGA firmware update failed: " + ex.Message);
+                MessageBox.Show(this,
+                    ex.Message + "\n\nThe previous FPGA image may be incomplete. Keep the card powered and retry with a known-good image.",
+                    "Firmware update failed", MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                flashUpdating = false;
+                FlashAcknowledgeCheckBox.IsEnabled = true;
+                UpdateFlashStartState();
+            }
+        }
+
+        private void ProgramAndVerifyFlash(TimeCardClient operationClient,
+            FlashDeviceStatus status, byte[] image)
+        {
+            int eraseSize = checked((int)status.EraseSize);
+            int pageSize = checked((int)status.PageSize);
+            if (eraseSize <= 0 || pageSize <= 0 || pageSize > 256)
+                throw new InvalidOperationException("The flash geometry reported by the driver is invalid.");
+            int eraseCount = (image.Length + eraseSize - 1) / eraseSize;
+            int programCount = (image.Length + pageSize - 1) / pageSize;
+            int verifyCount = (image.Length + 255) / 256;
+            int totalOperations = eraseCount + programCount + verifyCount;
+            int completed = 0;
+
+            for (int sector = 0; sector < eraseCount; sector++)
+            {
+                uint offset = checked((uint)(sector * eraseSize));
+                FlashReportProgress(string.Format(CultureInfo.InvariantCulture,
+                    "Erasing sector {0:N0} of {1:N0}…", sector + 1, eraseCount),
+                    completed * 100.0 / totalOperations);
+                operationClient.EraseFlashSector(offset, status.EraseSize);
+                completed++;
+                FlashAppendLog(string.Format(CultureInfo.InvariantCulture,
+                    "Erased relative offset 0x{0:X8}", offset));
+            }
+
+            for (int offset = 0; offset < image.Length; offset += pageSize)
+            {
+                int length = Math.Min(pageSize, image.Length - offset);
+                byte[] page = new byte[length];
+                Buffer.BlockCopy(image, offset, page, 0, length);
+                FlashReportProgress(string.Format(CultureInfo.InvariantCulture,
+                    "Programming {0:N0} of {1:N0} bytes…", offset + length,
+                    image.Length), completed * 100.0 / totalOperations);
+                operationClient.ProgramFlashPage((uint)offset, page);
+                completed++;
+            }
+            FlashAppendLog(string.Format(CultureInfo.InvariantCulture,
+                "Programmed {0:N0} bytes.", image.Length));
+
+            for (int offset = 0; offset < image.Length; offset += 256)
+            {
+                int length = Math.Min(256, image.Length - offset);
+                FlashReportProgress(string.Format(CultureInfo.InvariantCulture,
+                    "Verifying {0:N0} of {1:N0} bytes…", offset + length,
+                    image.Length), completed * 100.0 / totalOperations);
+                byte[] actual = operationClient.ReadFlash((uint)offset,
+                    (uint)length);
+                for (int index = 0; index < length; index++)
+                {
+                    if (actual[index] != image[offset + index])
+                        throw new InvalidDataException(string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Read-back mismatch at relative flash offset 0x{0:X8} (expected 0x{1:X2}, read 0x{2:X2}).",
+                            offset + index, image[offset + index], actual[index]));
+                }
+                completed++;
+            }
+        }
+
+        private void FlashReportProgress(string message, double percent)
+        {
+            Dispatcher.Invoke(new Action(() =>
+            {
+                FlashProgressText.Text = message;
+                FlashProgressBar.Value = Math.Max(0, Math.Min(100, percent));
+            }));
+        }
+
+        private void FlashAppendLog(string message)
+        {
+            Dispatcher.Invoke(new Action(() =>
+            {
+                FlashLogTextBox.AppendText(string.Format(CultureInfo.InvariantCulture,
+                    "[{0:HH:mm:ss}] {1}\r\n", DateTime.Now, message));
+                FlashLogTextBox.ScrollToEnd();
+            }));
+        }
+
+        private static ushort ReadBigEndian16(byte[] value, int offset)
+        {
+            return (ushort)((value[offset] << 8) | value[offset + 1]);
+        }
+
+        private static uint ReadBigEndian32(byte[] value, int offset)
+        {
+            return ((uint)value[offset] << 24) | ((uint)value[offset + 1] << 16) |
+                ((uint)value[offset + 2] << 8) | value[offset + 3];
+        }
+
+        private static ushort Crc16(byte[] value, int offset, int length)
+        {
+            ushort crc = 0xffff;
+            for (int index = 0; index < length; index++)
+            {
+                crc ^= value[offset + index];
+                for (int bit = 0; bit < 8; bit++)
+                    crc = (ushort)(((crc & 1) != 0) ?
+                        ((crc >> 1) ^ 0xa001) : (crc >> 1));
+            }
+            return crc;
+        }
+
         private async void Navigate_Checked(object sender, RoutedEventArgs e)
         {
             RadioButton button = sender as RadioButton;
@@ -2480,8 +4728,12 @@ namespace TimeCardControlCenter
                 await RefreshNmeaAsync(false);
             else if (page == "Sma")
                 await RefreshSmaAsync();
+            else if (page == "Timing")
+                await RefreshTimingAsync();
             else if (page == "I2c")
                 await RefreshI2cAsync(false);
+            else if (page == "Subsystems")
+                await RefreshSubsystemsAsync();
         }
 
         private void ShowPage(string name)
@@ -2494,18 +4746,27 @@ namespace TimeCardControlCenter
             AtomicPage.Visibility = name == "Atomic" ? Visibility.Visible : Visibility.Collapsed;
             UartPage.Visibility = name == "Uart" ? Visibility.Visible : Visibility.Collapsed;
             SmaPage.Visibility = name == "Sma" ? Visibility.Visible : Visibility.Collapsed;
+            TimingPage.Visibility = name == "Timing" ? Visibility.Visible : Visibility.Collapsed;
             I2cPage.Visibility = name == "I2c" ? Visibility.Visible : Visibility.Collapsed;
+            FlashPage.Visibility = name == "Flash" ? Visibility.Visible : Visibility.Collapsed;
             SubsystemsPage.Visibility = name == "Subsystems" ? Visibility.Visible : Visibility.Collapsed;
             DiagnosticsPage.Visibility = name == "Diagnostics" ? Visibility.Visible : Visibility.Collapsed;
             string title = name == "Gnss" ? "GNSS & Time-of-Day" :
                 name == "Atomic" ? "Atomic Clock" :
                 name == "Uart" ? "UART Console" :
                 name == "Sma" ? "SMA Connectors" :
+                name == "Timing" ? "Generators & Frequency" :
+                name == "Flash" ? "FPGA SPI Flash" :
                 name == "I2c" ? "I²C Bus" : name;
             TopPageTitle.Text = title;
         }
 
         private void Elevate_Click(object sender, RoutedEventArgs e)
+        {
+            RestartAsAdministrator();
+        }
+
+        private bool RestartAsAdministrator()
         {
             try
             {
@@ -2513,15 +4774,68 @@ namespace TimeCardControlCenter
                 {
                     FileName = Assembly.GetEntryAssembly().Location,
                     UseShellExecute = true,
-                    Verb = "runas"
+                    Verb = "runas",
+                    Arguments = string.Join(" ", startupArguments.Skip(1).Select(QuoteProcessArgument))
                 };
                 Process.Start(startInfo);
                 Application.Current.Shutdown();
+                return true;
             }
             catch (Win32Exception ex)
             {
                 Log("Elevation was not completed: " + ex.Message);
+                return false;
             }
+        }
+
+        private static bool HasAdministratorAccess()
+        {
+            try
+            {
+                using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+                {
+                    WindowsPrincipal principal = new WindowsPrincipal(identity);
+                    return principal.IsInRole(WindowsBuiltInRole.Administrator);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string QuoteProcessArgument(string argument)
+        {
+            if (string.IsNullOrEmpty(argument))
+                return "\"\"";
+            if (!argument.Any(character => char.IsWhiteSpace(character) || character == '\"'))
+                return argument;
+
+            StringBuilder quoted = new StringBuilder("\"");
+            int backslashes = 0;
+            foreach (char character in argument)
+            {
+                if (character == '\\')
+                {
+                    backslashes++;
+                    continue;
+                }
+
+                if (character == '\"')
+                {
+                    quoted.Append('\\', (backslashes * 2) + 1);
+                    quoted.Append('\"');
+                    backslashes = 0;
+                    continue;
+                }
+
+                quoted.Append('\\', backslashes);
+                backslashes = 0;
+                quoted.Append(character);
+            }
+            quoted.Append('\\', backslashes * 2);
+            quoted.Append('\"');
+            return quoted.ToString();
         }
 
         private void ConnectionChip_Click(object sender, RoutedEventArgs e)
