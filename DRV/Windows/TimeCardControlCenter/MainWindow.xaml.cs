@@ -33,6 +33,7 @@ namespace TimeCardControlCenter
         private bool connecting;
         private bool smaUpdatingUi;
         private bool timingRefreshing;
+        private bool sensorsRefreshing;
         private bool i2cRefreshing;
         private bool ledAutomationUpdating;
         private bool ledControlsUpdating;
@@ -48,6 +49,8 @@ namespace TimeCardControlCenter
         private uint lastI2cSubaddressLength;
         private readonly SmaConnectorState[] lastSmaLedStates = new SmaConnectorState[4];
         private readonly BoardLedColor[] lastAppliedLedColors = new BoardLedColor[6];
+        private readonly bool[] boardLedHardwareFaults = new bool[6];
+        private string boardLedHardwareWarning;
         private bool? secondaryGnssPresent;
         private DateTime lastSmaLedRefreshUtc = DateTime.MinValue;
         private DateTime lastSecondaryLedObservationUtc = DateTime.MinValue;
@@ -122,6 +125,13 @@ namespace TimeCardControlCenter
                 return other != null && Red == other.Red &&
                     Green == other.Green && Blue == other.Blue;
             }
+        }
+
+        private sealed class BoardLedElectricalTestResult
+        {
+            public BoardLedState[] Saved { get; set; }
+            public BoardLedState Reset { get; set; }
+            public BoardLedState Output { get; set; }
         }
 
         private sealed class SmaFunctionChoice
@@ -229,6 +239,7 @@ namespace TimeCardControlCenter
                 page.Equals("Uart", StringComparison.OrdinalIgnoreCase) ? UartNav :
                 page.Equals("Sma", StringComparison.OrdinalIgnoreCase) ? SmaNav :
                 page.Equals("Timing", StringComparison.OrdinalIgnoreCase) ? TimingNav :
+                page.Equals("Sensors", StringComparison.OrdinalIgnoreCase) ? SensorsNav :
                 page.Equals("I2c", StringComparison.OrdinalIgnoreCase) ? I2cNav :
                 page.Equals("Subsystems", StringComparison.OrdinalIgnoreCase) ? SubsystemsNav :
                 page.Equals("Diagnostics", StringComparison.OrdinalIgnoreCase) ? DiagnosticsNav :
@@ -322,6 +333,8 @@ namespace TimeCardControlCenter
                 return;
             }
             await RefreshSnapshotAsync(false);
+            if (SensorsPage.Visibility == Visibility.Visible)
+                await RefreshSensorsAsync(false);
         }
 
         private async Task ConnectAsync()
@@ -399,6 +412,7 @@ namespace TimeCardControlCenter
             SidebarDriverText.Text = "Driver " + snapshot.DriverVersion + " · ABI " + snapshot.AbiVersion;
             LastRefreshText.Text = "Sampled " + DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
             UpdateI2cDriverCompatibility(snapshot);
+            UpdateSensorsCompatibility(snapshot);
 
             SyncStatusText.Text = snapshot.IsClockSynchronized ? "IN SYNC" : "NOT LOCKED";
             SyncStatusText.Foreground = snapshot.IsClockSynchronized ? healthyBrush : warningBrush;
@@ -3044,15 +3058,15 @@ namespace TimeCardControlCenter
                 result.MacEeprom != null &&
                 result.MacEeprom.IsPresent;
             if (!readsSupported)
-                I2cReadStatusText.Text = "Install Time Card driver 1.13 to enable reliable I\u00B2C reads.";
+                I2cReadStatusText.Text = "Install Time Card driver 1.14 to enable reliable I\u00B2C reads.";
         }
 
         private void UpdateI2cDriverCompatibility(TimeCardSnapshot snapshot)
         {
             bool abiSupported = snapshot.AbiVersion >= 3;
             bool reliableReads = abiSupported &&
-                DriverVersionAtLeast(snapshot.DriverVersion, 1, 11);
-            bool boardControls = snapshot.AbiVersion >= 7;
+                DriverVersionAtLeast(snapshot.DriverVersion, 1, 14);
+            bool boardControls = snapshot.AbiVersion >= 7 && reliableReads;
             Brush stateBrush = (Brush)FindResource(
                 boardControls ? "AccentBrush" : "GoldBrush");
 
@@ -3074,7 +3088,7 @@ namespace TimeCardControlCenter
                 I2cDriverBadgeText.Text = "READS ONLY · UPDATE";
                 I2cSafetyBannerText.Text = string.Format(
                     CultureInfo.InvariantCulture,
-                    "Driver {0} supports reliable reads. Install driver 1.13 / ABI 7 to control the PCA9546A mux and subsystem LEDs.",
+                    "Driver {0} supports legacy reads. Install driver 1.14 / ABI 7 for corrected PCA9546A, identity, and subsystem LED control.",
                     snapshot.DriverVersion);
                 return;
             }
@@ -3082,9 +3096,9 @@ namespace TimeCardControlCenter
             I2cDriverBadgeText.Text = "UPDATE REQUIRED";
             I2cSafetyBannerText.Text = abiSupported ? string.Format(
                 CultureInfo.InvariantCulture,
-                "Driver {0} uses the legacy AXI IIC receive sequence that Windows can report as a CRC data error. Install driver 1.13 before reading.",
+                "Driver {0} uses the legacy AXI IIC sequence that Windows can report as a CRC data error. Install driver 1.14 before reading.",
                 snapshot.DriverVersion) :
-                "This driver predates I\u00B2C control support. Install Time Card driver 1.13 before using the bus workspace.";
+                "This driver predates corrected I\u00B2C control support. Install Time Card driver 1.14 before using the bus workspace.";
             I2cReadButton.IsEnabled = false;
             I2cPreviousButton.IsEnabled = false;
             I2cNextButton.IsEnabled = false;
@@ -3097,13 +3111,14 @@ namespace TimeCardControlCenter
         {
             return client != null && lastSnapshot != null &&
                 lastSnapshot.AbiVersion >= 3 &&
-                DriverVersionAtLeast(lastSnapshot.DriverVersion, 1, 11);
+                DriverVersionAtLeast(lastSnapshot.DriverVersion, 1, 14);
         }
 
         private bool SupportsI2cBoardControls()
         {
             return client != null && lastSnapshot != null &&
-                lastSnapshot.AbiVersion >= 7;
+                lastSnapshot.AbiVersion >= 7 &&
+                DriverVersionAtLeast(lastSnapshot.DriverVersion, 1, 14);
         }
 
         private static bool DriverVersionAtLeast(string value, int major,
@@ -3120,7 +3135,7 @@ namespace TimeCardControlCenter
             Brush warningBrush = (Brush)FindResource("GoldBrush");
             if (state == null)
             {
-                I2cMuxStatusText.Text = "DRIVER 1.13 / ABI 7 REQUIRED";
+                I2cMuxStatusText.Text = "DRIVER 1.14 / ABI 7 REQUIRED";
                 I2cMuxStatusText.Foreground = warningBrush;
                 return;
             }
@@ -3163,7 +3178,7 @@ namespace TimeCardControlCenter
             if (!SupportsI2cBoardControls())
             {
                 MessageBox.Show(this,
-                    "Install Time Card driver 1.13 / ABI 7 to control the PCA9546A.",
+                    "Install Time Card driver 1.14 / ABI 7 to control the PCA9546A.",
                     "Driver update required", MessageBoxButton.OK,
                     MessageBoxImage.Information);
                 return;
@@ -3202,7 +3217,7 @@ namespace TimeCardControlCenter
             if (!SupportsI2cBoardControls())
             {
                 I2cLedOperationText.Text =
-                    "Automatic LED mapping requires Time Card driver 1.13 / ABI 7.";
+                    "Automatic LED mapping requires Time Card driver 1.14 / ABI 7.";
                 return;
             }
 
@@ -3273,28 +3288,58 @@ namespace TimeCardControlCenter
                 }
                 if (changed.Count == 0)
                 {
-                    I2cLedOperationText.Text =
+                    I2cLedOperationText.Text = boardLedHardwareWarning ??
                         "Automatic mapping is active · hardware colors are current.";
                     return;
                 }
 
-                await Task.Run(() =>
+                BoardLedState[] applied = await Task.Run(() =>
                 {
-                    foreach (int index in changed)
+                    BoardLedState[] states = new BoardLedState[changed.Count];
+                    for (int resultIndex = 0;
+                         resultIndex < changed.Count; resultIndex++)
                     {
+                        int index = changed[resultIndex];
                         BoardLedColor color = desired[index];
-                        activeClient.SetBoardLed((uint)index, color.Red,
+                        states[resultIndex] = activeClient.SetBoardLed(
+                            (uint)index, color.Red,
                             color.Green, color.Blue, 96);
                     }
+                    return states;
                 });
                 if (client != activeClient)
                     return;
                 foreach (int index in changed)
                     lastAppliedLedColors[index] = desired[index];
-                I2cLedOperationText.Text = string.Format(
-                    CultureInfo.InvariantCulture,
-                    "Automatic mapping updated {0} indicator{1}; mux route restored after each update.",
-                    changed.Count, changed.Count == 1 ? string.Empty : "s");
+                List<uint> faulted = new List<uint>();
+                foreach (BoardLedState state in applied)
+                {
+                    bool hasFault = HasBoardLedFault(state);
+                    boardLedHardwareFaults[state.Led] = hasFault;
+                    if (!hasFault)
+                        continue;
+                    faulted.Add(state.Led + 1);
+                    TextBlock status = GetBoardLedStatusText((int)state.Led);
+                    status.Text = "HARDWARE FAULT";
+                    status.Foreground = (Brush)FindResource("GoldBrush");
+                }
+                if (faulted.Count != 0)
+                {
+                    boardLedHardwareWarning = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "IS32FL3207 accepted the colors, but LED {0} report electrical open/short faults. Check the +3.3 V common-anode rail and D13-D18 assembly.",
+                        string.Join(", ", faulted));
+                    I2cLedOperationText.Text = boardLedHardwareWarning;
+                }
+                else
+                {
+                    boardLedHardwareWarning = null;
+                    I2cLedOperationText.Text = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Automatic mapping updated {0} indicator{1}; mux route restored after each update.",
+                        changed.Count,
+                        changed.Count == 1 ? string.Empty : "s");
+                }
             }
             catch (Exception ex)
             {
@@ -3348,6 +3393,11 @@ namespace TimeCardControlCenter
                 color.Red, color.Green, color.Blue));
             status.Text = color.Status;
             status.Foreground = (Brush)FindResource("MutedBrush");
+            if (boardLedHardwareFaults[led])
+            {
+                status.Text = "HARDWARE FAULT";
+                status.Foreground = (Brush)FindResource("GoldBrush");
+            }
         }
 
         private Border GetBoardLedSwatch(int led)
@@ -3430,9 +3480,9 @@ namespace TimeCardControlCenter
                 ApplyManualBoardLedState(state);
                 I2cLedOperationText.Text = string.Format(
                     CultureInfo.InvariantCulture,
-                    "LED {0} read · RGB {1}/{2}/{3} · global current {4}.",
+                    "LED {0} read · RGB {1}/{2}/{3} · global current {4} · {5}.",
                     led + 1, state.Red, state.Green, state.Blue,
-                    state.GlobalCurrent);
+                    state.GlobalCurrent, DescribeBoardLedFaults(state));
             }
             catch (Exception ex)
             {
@@ -3448,6 +3498,101 @@ namespace TimeCardControlCenter
         private async void TurnOffI2cLed_Click(object sender, RoutedEventArgs e)
         {
             await SetManualBoardLedAsync(true);
+        }
+
+        private async void TestI2cLeds_Click(object sender, RoutedEventArgs e)
+        {
+            if (!SupportsI2cBoardControls() || ledAutomationUpdating)
+                return;
+
+            TimeCardClient activeClient = client;
+            BoardLedElectricalTestResult test = null;
+            string resultText = null;
+            ledAutomationUpdating = true;
+            SetI2cLedButtonsEnabled(false);
+            I2cLedTestButton.IsEnabled = false;
+            I2cLedOperationText.Text =
+                "Preparing the guarded IS32FL3207 electrical test…";
+            try
+            {
+                test = await Task.Run(() =>
+                {
+                    BoardLedElectricalTestResult value =
+                        new BoardLedElectricalTestResult
+                        {
+                            Saved = new BoardLedState[6]
+                        };
+                    for (uint led = 0; led < 6; led++)
+                        value.Saved[led] = activeClient.GetBoardLed(led);
+
+                    value.Reset = activeClient.SetBoardLed(
+                        0, 255, 255, 255, 128, false, true);
+                    for (uint led = 1; led < 6; led++)
+                        activeClient.SetBoardLed(
+                            led, 255, 255, 255, 128);
+                    value.Output = activeClient.SetBoardLed(
+                        0, 255, 255, 255, 128, true);
+                    return value;
+                });
+                if (client == activeClient)
+                    I2cLedOperationText.Text =
+                        "Electrical test active · all 18 outputs forced on for five seconds.";
+                await Task.Delay(TimeSpan.FromSeconds(5));
+
+                if (!test.Reset.IsSdbHigh)
+                    resultText =
+                        "Electrical test failed: the IS32FL3207 SDB pin is low. Check R109 and the U6 shutdown net.";
+                else if (HasAnyBoardLedFault(test.Output))
+                    resultText = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Electrical test: SDB is high and DC mode was accepted, but U6 reports open 0x{0:X5} / short 0x{1:X5}. Inspect the +3.3 V common-anode rail and D13-D18 orientation/soldering.",
+                        test.Output.OpenOutputMask,
+                        test.Output.ShortOutputMask);
+                else
+                    resultText =
+                        "Electrical test passed: SDB is high and all 18 LED outputs are electrically connected.";
+            }
+            catch (Exception ex)
+            {
+                resultText = "LED electrical test failed: " + ex.Message;
+            }
+            finally
+            {
+                if (test != null && test.Saved != null)
+                {
+                    try
+                    {
+                        await Task.Run(() =>
+                        {
+                            for (uint led = 0; led < test.Saved.Length; led++)
+                            {
+                                BoardLedState saved = test.Saved[led];
+                                byte current = (byte)Math.Max(
+                                    1, (int)saved.GlobalCurrent);
+                                activeClient.SetBoardLed(
+                                    led, saved.Red, saved.Green,
+                                    saved.Blue, current);
+                            }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        resultText = (resultText ?? "LED test completed.") +
+                            " Restore failed: " + ex.Message;
+                    }
+                }
+                Array.Clear(lastAppliedLedColors, 0,
+                    lastAppliedLedColors.Length);
+                boardLedHardwareWarning = resultText;
+                ledAutomationUpdating = false;
+                if (client == activeClient)
+                {
+                    SetI2cLedButtonsEnabled(true);
+                    I2cLedTestButton.IsEnabled = true;
+                    I2cLedOperationText.Text = resultText ??
+                        "LED electrical test completed.";
+                }
+            }
         }
 
         private async Task SetManualBoardLedAsync(bool turnOff)
@@ -3475,8 +3620,9 @@ namespace TimeCardControlCenter
                 ApplyManualBoardLedState(state);
                 I2cLedOperationText.Text = string.Format(
                     CultureInfo.InvariantCulture,
-                    "LED {0} updated · RGB {1}/{2}/{3}; previous PCA9546A route restored.",
-                    led + 1, state.Red, state.Green, state.Blue);
+                    "LED {0} updated · RGB {1}/{2}/{3} · {4}; previous PCA9546A route restored.",
+                    led + 1, state.Red, state.Green, state.Blue,
+                    DescribeBoardLedFaults(state));
                 Log(string.Format(CultureInfo.InvariantCulture,
                     "Subsystem LED {0} set to RGB {1}/{2}/{3}.",
                     led + 1, state.Red, state.Green, state.Blue));
@@ -3500,6 +3646,41 @@ namespace TimeCardControlCenter
                 out led) ? led : 0u;
         }
 
+        private static string DescribeBoardLedFaults(BoardLedState state)
+        {
+            if (!state.HasFaultDiagnostics)
+                return "hardware fault diagnostics unavailable";
+
+            uint channelMask = 7u << ((int)state.Led * 3);
+            uint open = state.OpenOutputMask & channelMask;
+            uint shorted = state.ShortOutputMask & channelMask;
+            if (open == 0 && shorted == 0)
+                return "LED outputs electrically connected";
+            if (open != 0 && shorted != 0)
+                return string.Format(CultureInfo.InvariantCulture,
+                    "open 0x{0:X5}, short 0x{1:X5}",
+                    state.OpenOutputMask, state.ShortOutputMask);
+            return open != 0 ? string.Format(CultureInfo.InvariantCulture,
+                "open-output mask 0x{0:X5}", state.OpenOutputMask) :
+                string.Format(CultureInfo.InvariantCulture,
+                    "short-output mask 0x{0:X5}", state.ShortOutputMask);
+        }
+
+        private static bool HasBoardLedFault(BoardLedState state)
+        {
+            if (!state.HasFaultDiagnostics)
+                return false;
+            uint channelMask = 7u << ((int)state.Led * 3);
+            return ((state.OpenOutputMask | state.ShortOutputMask) &
+                    channelMask) != 0;
+        }
+
+        private static bool HasAnyBoardLedFault(BoardLedState state)
+        {
+            return state.HasFaultDiagnostics &&
+                (state.OpenOutputMask | state.ShortOutputMask) != 0;
+        }
+
         private void ApplyManualBoardLedState(BoardLedState state)
         {
             ledControlsUpdating = true;
@@ -3520,6 +3701,13 @@ namespace TimeCardControlCenter
                 new BoardLedColor(state.Red, state.Green, state.Blue,
                     state.Red == 0 && state.Green == 0 && state.Blue == 0 ?
                     "OFF" : "MANUAL"));
+            boardLedHardwareFaults[state.Led] = HasBoardLedFault(state);
+            if (HasBoardLedFault(state))
+            {
+                TextBlock status = GetBoardLedStatusText((int)state.Led);
+                status.Text = "HARDWARE FAULT";
+                status.Foreground = (Brush)FindResource("GoldBrush");
+            }
         }
 
         private void SetI2cLedButtonsEnabled(bool enabled)
@@ -3527,6 +3715,7 @@ namespace TimeCardControlCenter
             I2cLedReadButton.IsEnabled = enabled;
             I2cLedOffButton.IsEnabled = enabled;
             I2cLedApplyButton.IsEnabled = enabled;
+            I2cLedTestButton.IsEnabled = enabled;
         }
 
         private void SetI2cUnavailable(string state, string detail)
@@ -3573,7 +3762,7 @@ namespace TimeCardControlCenter
                 string name = address == 0x50 ? "board EEPROM" :
                     address == 0x58 ? "MAC identity" :
                     address == 0x70 ? "PCA9546A mux" :
-                    address == 0x6e ? "IS32FL3207 status LEDs (CH1)" :
+                    address == 0x37 ? "IS32FL3207 status LEDs (CH1)" :
                     address == 0x29 ? "BNO055 IMU (CH1)" :
                     address == 0x40 ? "INA219 12 V monitor (CH1)" :
                     address == 0x41 ? "INA219 5 V monitor (CH1)" :
@@ -3592,13 +3781,20 @@ namespace TimeCardControlCenter
             return string.Format(CultureInfo.InvariantCulture,
                 "CR  0x{0:X2}  {1}\r\nSR  0x{2:X2}  {3}\r\n" +
                 "ISR 0x{4:X8}  {5}\r\nIER 0x{6:X8}\r\n" +
-                "TX FIFO {7}  RX FIFO {8}\r\n{9}",
+                "TX FIFO {7}  RX FIFO {8}\r\n" +
+                "Last START CR 0x{9:X2}->0x{10:X2}  SR 0x{11:X2}->0x{12:X2}\r\n" +
+                "Last START events 0x{13:X4}  TX FIFO {14}->{15}\r\n{16}",
                 status.Control, DecodeI2cControl(status.Control),
                 status.Status, DecodeI2cStatus(status.Status),
                 status.InterruptStatus,
                 DecodeI2cInterrupts(status.InterruptStatus),
                 status.InterruptEnable, status.TxFifoOccupancy,
-                status.RxFifoOccupancy, operation);
+                status.RxFifoOccupancy,
+                status.LastStartInitialControl, status.LastStartFinalControl,
+                status.LastStartInitialStatus, status.LastStartFinalStatus,
+                status.LastStartInterruptStatus,
+                status.LastStartInitialTxFifoOccupancy,
+                status.LastStartFinalTxFifoOccupancy, operation);
         }
 
         private static string FormatI2cTransactionDiagnostics(
@@ -3686,7 +3882,7 @@ namespace TimeCardControlCenter
             else if (preset == "identity")
             {
                 I2cAddressTextBox.Text = "58";
-                I2cSubaddressTextBox.Text = "00";
+                I2cSubaddressTextBox.Text = "9A";
                 I2cSubaddressLengthCombo.SelectedIndex = 1;
                 I2cLengthTextBox.Text = "6";
             }
@@ -3713,7 +3909,7 @@ namespace TimeCardControlCenter
             }
             else if (preset == "leddriver")
             {
-                I2cAddressTextBox.Text = "6E";
+                I2cAddressTextBox.Text = "37";
                 I2cSubaddressTextBox.Text = "00";
                 I2cSubaddressLengthCombo.SelectedIndex = 1;
                 I2cLengthTextBox.Text = "8";
@@ -3813,7 +4009,7 @@ namespace TimeCardControlCenter
         {
             I2cPresetCombo.SelectedIndex = 2;
             I2cAddressTextBox.Text = "58";
-            I2cSubaddressTextBox.Text = "00";
+            I2cSubaddressTextBox.Text = "9A";
             I2cSubaddressLengthCombo.SelectedIndex = 1;
             I2cLengthTextBox.Text = "6";
             await ExecuteI2cReadAsync();
@@ -3825,9 +4021,9 @@ namespace TimeCardControlCenter
             if (client == null || lastSnapshot == null ||
                 !SupportsReliableI2cReads())
             {
-                SidebarSerialText.Text = "Driver 1.12 required";
+                SidebarSerialText.Text = "Driver 1.14 required";
                 I2cSerialNumberText.Text =
-                    "Update to driver 1.12 to read the card identity";
+                    "Update to driver 1.14 to read the card identity";
                 return;
             }
 
@@ -3844,7 +4040,7 @@ namespace TimeCardControlCenter
                 else
                 {
                     I2cReadResult result = await Task.Run(() =>
-                        client.ReadI2c(0x58, 0, 1, 6, 100));
+                        client.ReadI2c(0x58, 0x9a, 1, 6, 100));
                     serial = BitConverter.ToString(result.Data).Replace('-', ':');
                     valid = result.Data.Length == 6 &&
                         result.Data.Any(value => value != 0) &&
@@ -3874,11 +4070,11 @@ namespace TimeCardControlCenter
             if (!SupportsReliableI2cReads())
             {
                 MessageBox.Show(this,
-                    "Reliable I2C reads require Time Card driver 1.11 or later. " +
+                    "Corrected I2C reads require Time Card driver 1.14 or later. " +
                     "This computer is running driver " +
                     (lastSnapshot == null ? "an unknown version" :
                      lastSnapshot.DriverVersion) + ".\n\n" +
-                     "Install the current driver 1.13 package, then restart the Control Center.",
+                     "Install the current driver 1.14 package, then restart the Control Center.",
                     "Driver update required", MessageBoxButton.OK,
                     MessageBoxImage.Information);
                 return;
@@ -3973,7 +4169,7 @@ namespace TimeCardControlCenter
             {
                 return "The installed driver returned its legacy I2C short-transfer status. " +
                     "Windows labels that status as a CRC data error, but this transaction does not use a CRC. " +
-                    "Install Time Card driver 1.13 and retry the read.";
+                    "Install Time Card driver 1.14 and retry the read.";
             }
             return error.Message;
         }
@@ -4713,6 +4909,249 @@ namespace TimeCardControlCenter
             return crc;
         }
 
+        private void UpdateSensorsCompatibility(TimeCardSnapshot snapshot)
+        {
+            bool supported = snapshot != null && snapshot.AbiVersion >= 8;
+            SensorsRefreshButton.IsEnabled = supported && client != null &&
+                !sensorsRefreshing;
+            if (supported)
+            {
+                SensorsDriverText.Text =
+                    "Sensor branch ready · PCA9546A channel 1 is selected only for each guarded sample, then restored.";
+                return;
+            }
+
+            SensorsDriverText.Text = snapshot == null
+                ? "Connect a Time Card with driver 1.15 / ABI 8 to begin live sampling."
+                : string.Format(CultureInfo.InvariantCulture,
+                    "Driver {0} / ABI {1} does not expose sensor telemetry. Install Time Card driver 1.15 / ABI 8.",
+                    snapshot.DriverVersion, snapshot.AbiVersion);
+            SensorsStatusText.Text = "DRIVER UPDATE REQUIRED";
+            SensorsStatusText.Foreground = (Brush)FindResource("GoldBrush");
+            SensorsStatusDot.Fill = (Brush)FindResource("GoldBrush");
+        }
+
+        private async void RefreshSensors_Click(object sender, RoutedEventArgs e)
+        {
+            await RefreshSensorsAsync(true);
+        }
+
+        private async Task RefreshSensorsAsync(bool logSuccess)
+        {
+            if (sensorsRefreshing || client == null)
+                return;
+            if (lastSnapshot == null || lastSnapshot.AbiVersion < 8)
+            {
+                UpdateSensorsCompatibility(lastSnapshot);
+                return;
+            }
+
+            sensorsRefreshing = true;
+            SensorsRefreshButton.IsEnabled = false;
+            SensorsStatusText.Text = "SAMPLING";
+            SensorsStatusText.Foreground = (Brush)FindResource("CyanBrush");
+            SensorsStatusDot.Fill = (Brush)FindResource("CyanBrush");
+            try
+            {
+                SensorTelemetrySnapshot telemetry = await Task.Run(
+                    () => client.GetSensorTelemetry());
+                ApplySensorTelemetry(telemetry);
+                if (logSuccess)
+                    Log("Environment, power-rail, and IMU telemetry refreshed.");
+            }
+            catch (Exception ex)
+            {
+                SensorsStatusText.Text = "SAMPLE FAILED";
+                SensorsStatusText.Foreground = (Brush)FindResource("DangerBrush");
+                SensorsStatusDot.Fill = (Brush)FindResource("DangerBrush");
+                SensorsLastSampleText.Text = "ERROR";
+                SensorsDriverText.Text = "Sensor read failed: " + ex.Message;
+                Log("Sensor telemetry failed: " + ex.Message);
+            }
+            finally
+            {
+                sensorsRefreshing = false;
+                SensorsRefreshButton.IsEnabled = client != null &&
+                    lastSnapshot != null && lastSnapshot.AbiVersion >= 8;
+            }
+        }
+
+        private void ApplySensorTelemetry(SensorTelemetrySnapshot telemetry)
+        {
+            Brush healthy = (Brush)FindResource("AccentBrush");
+            Brush warning = (Brush)FindResource("GoldBrush");
+            bool anyValid = telemetry.Environment.IsValid ||
+                telemetry.Rail12V.IsValid || telemetry.Rail5V.IsValid ||
+                telemetry.Rail3V3.IsValid || telemetry.Imu.IsValid;
+
+            SensorsStatusText.Text = anyValid ? "LIVE · 1 HZ" : "NO SENSOR DATA";
+            SensorsStatusText.Foreground = anyValid ? healthy : warning;
+            SensorsStatusDot.Fill = anyValid ? healthy : warning;
+            SensorsLastSampleText.Text = DateTime.Now.ToString(
+                "HH:mm:ss", CultureInfo.InvariantCulture);
+            SensorsDriverText.Text = string.Format(CultureInfo.InvariantCulture,
+                "Guarded sensor branch sample · prior mux mask 0x{0:X2} · controller 0x{1:X2} · events 0x{2:X8}",
+                telemetry.MuxChannelMask, telemetry.ControllerStatus,
+                telemetry.InterruptStatus);
+
+            EnvironmentSensorReading environment = telemetry.Environment;
+            if (environment.IsValid)
+            {
+                BmeTemperatureText.Text = environment.TemperatureCelsius.ToString(
+                    "F1", CultureInfo.InvariantCulture) + " °C";
+                BmeHumidityText.Text = environment.HumidityPercent.ToString(
+                    "F1", CultureInfo.InvariantCulture) + " %";
+                BmePressureText.Text = environment.PressureHectopascals.ToString(
+                    "F1", CultureInfo.InvariantCulture) + " hPa";
+                BmeDewPointText.Text = environment.DewPointCelsius.ToString(
+                    "F1", CultureInfo.InvariantCulture) + " °C";
+                BmeDetailText.Text = string.Format(CultureInfo.InvariantCulture,
+                    "BME280 · 0x76 · ID 0x{0:X2} · {1}", environment.ChipId,
+                    environment.IsConversionReady ? "READY" : "CONVERTING");
+                BmeDetailText.Foreground = healthy;
+            }
+            else
+            {
+                SetEnvironmentUnavailable(environment.IsPresent ?
+                    "BME280 · 0x76 · INVALID SAMPLE" :
+                    "BME280 · 0x76 · NOT PRESENT");
+            }
+
+            ApplyPowerRail(telemetry.Rail12V, Rail12VoltageText,
+                Rail12CurrentText, Rail12PowerText, Rail12DetailText,
+                Rail12StatusText);
+            ApplyPowerRail(telemetry.Rail5V, Rail5VoltageText,
+                Rail5CurrentText, Rail5PowerText, Rail5DetailText,
+                Rail5StatusText);
+            ApplyPowerRail(telemetry.Rail3V3, Rail3V3VoltageText,
+                Rail3V3CurrentText, Rail3V3PowerText, Rail3V3DetailText,
+                Rail3V3StatusText);
+            ApplyImu(telemetry.Imu);
+        }
+
+        private void SetEnvironmentUnavailable(string detail)
+        {
+            BmeTemperatureText.Text = "— °C";
+            BmeHumidityText.Text = "— %";
+            BmePressureText.Text = "— hPa";
+            BmeDewPointText.Text = "— °C";
+            BmeDetailText.Text = detail;
+            BmeDetailText.Foreground = (Brush)FindResource("GoldBrush");
+        }
+
+        private void ApplyPowerRail(PowerRailReading rail, TextBlock voltage,
+                                    TextBlock current, TextBlock power,
+                                    TextBlock detail, TextBlock status)
+        {
+            Brush healthy = (Brush)FindResource("AccentBrush");
+            Brush warning = (Brush)FindResource("GoldBrush");
+            if (!rail.IsValid)
+            {
+                voltage.Text = "— V";
+                current.Text = "— A";
+                power.Text = "— W";
+                detail.Text = rail.IsPresent ? "Sample unavailable" :
+                    "INA219 not present";
+                status.Text = string.Format(CultureInfo.InvariantCulture,
+                    "0x{0:X2} · {1}", rail.Address,
+                    rail.IsPresent ? "INVALID" : "NOT PRESENT");
+                status.Foreground = warning;
+                return;
+            }
+
+            voltage.Text = rail.VoltageVolts.ToString("F3",
+                CultureInfo.InvariantCulture) + " V";
+            current.Text = rail.CurrentAmps.ToString("F3",
+                CultureInfo.InvariantCulture) + " A";
+            power.Text = rail.PowerWatts.ToString("F3",
+                CultureInfo.InvariantCulture) + " W";
+            detail.Text = string.Format(CultureInfo.InvariantCulture,
+                "Shunt {0:F3} mV · config 0x{1:X4}",
+                rail.ShuntMillivolts, rail.Configuration);
+            status.Text = string.Format(CultureInfo.InvariantCulture,
+                "0x{0:X2} · {1}", rail.Address,
+                rail.HasOverflow ? "OVERFLOW" :
+                rail.IsConversionReady ? "READY" : "LIVE");
+            status.Foreground = rail.HasOverflow ? warning : healthy;
+        }
+
+        private void ApplyImu(ImuSensorReading imu)
+        {
+            Brush healthy = (Brush)FindResource("AccentBrush");
+            Brush warning = (Brush)FindResource("GoldBrush");
+            if (!imu.IsValid)
+            {
+                ImuHeadingText.Text = "—°";
+                ImuRollText.Text = "—°";
+                ImuPitchText.Text = "—°";
+                ImuQuaternionText.Text = "—, —, —, —";
+                ImuTemperatureText.Text = "— °C";
+                ImuSystemCalibrationText.Text = "—/3";
+                ImuGyroCalibrationText.Text = "—/3";
+                ImuAccelCalibrationText.Text = "—/3";
+                ImuMagCalibrationText.Text = "—/3";
+                ImuAccelerationText.Text = "X —   Y —   Z —";
+                ImuGyroscopeText.Text = "X —   Y —   Z —";
+                ImuMagneticText.Text = "X —   Y —   Z —";
+                ImuLinearAccelerationText.Text = "X —   Y —   Z —";
+                ImuGravityText.Text = "X —   Y —   Z —";
+                ImuStatusText.Text = imu.IsPresent ? "INITIALIZING" :
+                    "NOT PRESENT";
+                ImuStatusText.Foreground = warning;
+                ImuDetailText.Text = imu.IsPresent ?
+                    "BNO055 · 0x29 · INITIALIZING" :
+                    "BNO055 · 0x29 · NOT PRESENT";
+                ImuDetailText.Foreground = warning;
+                ImuRawStatusText.Text = string.Format(CultureInfo.InvariantCulture,
+                    "Mode 0x{0:X2} · Status 0x{1:X2}",
+                    imu.OperationMode, imu.SystemStatus);
+                ImuClockText.Text = "Clock source not available";
+                return;
+            }
+
+            ImuHeadingText.Text = imu.HeadingDegrees.ToString("F1",
+                CultureInfo.InvariantCulture) + "°";
+            ImuRollText.Text = imu.RollDegrees.ToString("F1",
+                CultureInfo.InvariantCulture) + "°";
+            ImuPitchText.Text = imu.PitchDegrees.ToString("F1",
+                CultureInfo.InvariantCulture) + "°";
+            ImuQuaternionText.Text = string.Format(CultureInfo.InvariantCulture,
+                "{0:F4}, {1:F4}, {2:F4}, {3:F4}", imu.QuaternionW,
+                imu.QuaternionX, imu.QuaternionY, imu.QuaternionZ);
+            ImuTemperatureText.Text = imu.TemperatureCelsius.ToString("F1",
+                CultureInfo.InvariantCulture) + " °C";
+            ImuSystemCalibrationText.Text = imu.SystemCalibration + "/3";
+            ImuGyroCalibrationText.Text = imu.GyroscopeCalibration + "/3";
+            ImuAccelCalibrationText.Text = imu.AccelerometerCalibration + "/3";
+            ImuMagCalibrationText.Text = imu.MagnetometerCalibration + "/3";
+            ImuAccelerationText.Text = FormatSensorVector(imu.Acceleration);
+            ImuGyroscopeText.Text = FormatSensorVector(imu.Gyroscope);
+            ImuMagneticText.Text = FormatSensorVector(imu.MagneticField);
+            ImuLinearAccelerationText.Text =
+                FormatSensorVector(imu.LinearAcceleration);
+            ImuGravityText.Text = FormatSensorVector(imu.Gravity);
+            ImuStatusText.Text = imu.SystemError == 0 ? "FUSION LIVE" :
+                "SYSTEM ERROR";
+            ImuStatusText.Foreground = imu.SystemError == 0 ? healthy : warning;
+            ImuDetailText.Text = string.Format(CultureInfo.InvariantCulture,
+                "BNO055 · 0x29 · ID 0x{0:X2} · NDOF", imu.ChipId);
+            ImuDetailText.Foreground = healthy;
+            ImuRawStatusText.Text = string.Format(CultureInfo.InvariantCulture,
+                "Mode 0x{0:X2} · Status 0x{1:X2} · Error 0x{2:X2}",
+                imu.OperationMode, imu.SystemStatus, imu.SystemError);
+            ImuClockText.Text = imu.UsesExternalClock ?
+                "External 32.768 kHz crystal active" :
+                "Internal clock active";
+        }
+
+        private static string FormatSensorVector(SensorVector3 vector)
+        {
+            return vector == null ? "X —   Y —   Z —" :
+                string.Format(CultureInfo.InvariantCulture,
+                    "X {0,7:F3}   Y {1,7:F3}   Z {2,7:F3}",
+                    vector.X, vector.Y, vector.Z);
+        }
+
         private async void Navigate_Checked(object sender, RoutedEventArgs e)
         {
             RadioButton button = sender as RadioButton;
@@ -4730,6 +5169,8 @@ namespace TimeCardControlCenter
                 await RefreshSmaAsync();
             else if (page == "Timing")
                 await RefreshTimingAsync();
+            else if (page == "Sensors")
+                await RefreshSensorsAsync(false);
             else if (page == "I2c")
                 await RefreshI2cAsync(false);
             else if (page == "Subsystems")
@@ -4747,6 +5188,7 @@ namespace TimeCardControlCenter
             UartPage.Visibility = name == "Uart" ? Visibility.Visible : Visibility.Collapsed;
             SmaPage.Visibility = name == "Sma" ? Visibility.Visible : Visibility.Collapsed;
             TimingPage.Visibility = name == "Timing" ? Visibility.Visible : Visibility.Collapsed;
+            SensorsPage.Visibility = name == "Sensors" ? Visibility.Visible : Visibility.Collapsed;
             I2cPage.Visibility = name == "I2c" ? Visibility.Visible : Visibility.Collapsed;
             FlashPage.Visibility = name == "Flash" ? Visibility.Visible : Visibility.Collapsed;
             SubsystemsPage.Visibility = name == "Subsystems" ? Visibility.Visible : Visibility.Collapsed;
@@ -4756,6 +5198,7 @@ namespace TimeCardControlCenter
                 name == "Uart" ? "UART Console" :
                 name == "Sma" ? "SMA Connectors" :
                 name == "Timing" ? "Generators & Frequency" :
+                name == "Sensors" ? "Sensors & IMU" :
                 name == "Flash" ? "FPGA SPI Flash" :
                 name == "I2c" ? "I²C Bus" : name;
             TopPageTitle.Text = title;

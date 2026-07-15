@@ -56,6 +56,7 @@ namespace TimeCardControlCenter
         private static readonly uint IoctlI2cMuxSet = ControlCode(27, FileReadAccess | FileWriteAccess);
         private static readonly uint IoctlLedQuery = ControlCode(28, FileReadAccess | FileWriteAccess);
         private static readonly uint IoctlLedSet = ControlCode(29, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlSensorQuery = ControlCode(30, FileReadAccess | FileWriteAccess);
 
         private readonly object gate = new object();
         private SafeFileHandle handle;
@@ -771,6 +772,21 @@ namespace TimeCardControlCenter
         public BoardLedState SetBoardLed(uint led, byte red, byte green,
                                          byte blue, byte globalCurrent)
         {
+            return SetBoardLed(led, red, green, blue, globalCurrent, false);
+        }
+
+        public BoardLedState SetBoardLed(uint led, byte red, byte green,
+                                         byte blue, byte globalCurrent,
+                                         bool dcTest)
+        {
+            return SetBoardLed(led, red, green, blue, globalCurrent,
+                dcTest, false);
+        }
+
+        public BoardLedState SetBoardLed(uint led, byte red, byte green,
+                                         byte blue, byte globalCurrent,
+                                         bool dcTest, bool resetTest)
+        {
             if (led >= 6)
                 throw new ArgumentOutOfRangeException("led");
             if (globalCurrent == 0 || globalCurrent > 128)
@@ -782,11 +798,18 @@ namespace TimeCardControlCenter
                 Red = red,
                 Green = green,
                 Blue = blue,
-                GlobalCurrent = globalCurrent
+                GlobalCurrent = globalCurrent,
+                Flags = (dcTest ? 8u : 0u) | (resetTest ? 16u : 0u)
             };
             byte[] output = Call(IoctlLedSet, StructToBytes(request),
                 Marshal.SizeOf(typeof(TimeCardLedControlRaw)));
             return new BoardLedState(BytesToStruct<TimeCardLedControlRaw>(output));
+        }
+
+        public SensorTelemetrySnapshot GetSensorTelemetry()
+        {
+            return new SensorTelemetrySnapshot(
+                GetOutput<TimeCardSensorTelemetryRaw>(IoctlSensorQuery));
         }
 
         private TimeCardHierarchyRaw SetHierarchyRaw(uint action, bool persist)

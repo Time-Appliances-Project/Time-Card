@@ -80,8 +80,10 @@
     TIMECARD_IOCTL(28, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 #define IOCTL_TIMECARD_LED_SET \
     TIMECARD_IOCTL(29, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_SENSOR_QUERY \
+    TIMECARD_IOCTL(30, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 
-#define TIMECARD_ABI_VERSION 7u
+#define TIMECARD_ABI_VERSION 8u
 #define TIMECARD_LAYOUT_MSI  1u
 #define TIMECARD_LAYOUT_MSIX 2u
 #define TIMECARD_UART_COUNT  4u
@@ -115,6 +117,9 @@
 
 #define TIMECARD_I2C_DEVICE_BOARD_EEPROM (1u << 0)
 #define TIMECARD_I2C_DEVICE_MAC_EEPROM   (1u << 1)
+#define TIMECARD_BOARD_EEPROM_ADDRESS    0x50u
+#define TIMECARD_IDENTITY_ADDRESS        0x58u
+#define TIMECARD_IDENTITY_EUI48_OFFSET   0x9au
 
 /* U27, PCA9546A at 0x70.  More than one downstream branch may be selected. */
 #define TIMECARD_I2C_MUX_ADDRESS         0x70u
@@ -124,7 +129,11 @@
 #define TIMECARD_I2C_MUX_CHANNEL_DC      (1u << 3)
 #define TIMECARD_I2C_MUX_CHANNEL_MASK    0x0fu
 
-/* U6, IS32FL3207 at 0x6e on the sensor branch. */
+/*
+ * U6, IS32FL3207 on the sensor branch.  The schematic's 0x6e label is
+ * the 8-bit write address; Windows and the XIIC API use 7-bit address 0x37.
+ */
+#define TIMECARD_LED_ADDRESS 0x37u
 #define TIMECARD_LED_COUNT 6u
 #define TIMECARD_LED_GNSS1 0u
 #define TIMECARD_LED_GNSS2 1u
@@ -134,7 +143,26 @@
 #define TIMECARD_LED_IO4   5u
 #define TIMECARD_LED_FLAG_PRESENT (1u << 0)
 #define TIMECARD_LED_FLAG_ENABLED (1u << 1)
+#define TIMECARD_LED_FLAG_FAULT_VALID (1u << 2)
+#define TIMECARD_LED_FLAG_DC_TEST (1u << 3)
+#define TIMECARD_LED_FLAG_RESET_TEST (1u << 4)
+#define TIMECARD_LED_FLAG_SDB_HIGH (1u << 5)
 #define TIMECARD_LED_MAX_GLOBAL_CURRENT 128u
+#define TIMECARD_LED_OUTPUT_MASK ((1u << 18) - 1u)
+
+/* Dedicated telemetry devices on PCA9546A channel 1 (SENS_I2C). */
+#define TIMECARD_SENSOR_BME280_ADDRESS 0x76u
+#define TIMECARD_SENSOR_BNO055_ADDRESS 0x29u
+#define TIMECARD_SENSOR_INA219_12V_ADDRESS 0x40u
+#define TIMECARD_SENSOR_INA219_5V_ADDRESS 0x41u
+#define TIMECARD_SENSOR_INA219_3V3_ADDRESS 0x44u
+#define TIMECARD_SENSOR_INA219_SHUNT_MICROOHMS 2000u
+#define TIMECARD_SENSOR_FLAG_PRESENT          (1u << 0)
+#define TIMECARD_SENSOR_FLAG_VALID            (1u << 1)
+#define TIMECARD_SENSOR_FLAG_CONFIGURED       (1u << 2)
+#define TIMECARD_SENSOR_FLAG_CONVERSION_READY (1u << 3)
+#define TIMECARD_SENSOR_FLAG_OVERFLOW         (1u << 4)
+#define TIMECARD_SENSOR_FLAG_EXTERNAL_CLOCK   (1u << 5)
 
 #define TIMECARD_CLOCK_SOURCE_NONE 0x00u
 #define TIMECARD_CLOCK_SOURCE_TOD  0x01u
@@ -345,8 +373,102 @@ typedef struct _TIMECARD_LED_CONTROL {
     unsigned __int32 MuxChannelMask;
     unsigned __int32 ControllerStatus;
     unsigned __int32 InterruptStatus;
-    unsigned __int32 Reserved[2];
+    /* 18-bit OUT1..OUT18 diagnostic masks from registers 0x72..0x74. */
+    unsigned __int32 OpenOutputMask;
+    unsigned __int32 ShortOutputMask;
 } TIMECARD_LED_CONTROL;
+
+/* BME280 raw sample and factory calibration; all ABI fields are 32-bit. */
+typedef struct _TIMECARD_BME280_READING {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 ChipId;
+    unsigned __int32 Status;
+    signed __int32 RawTemperature;
+    unsigned __int32 RawPressure;
+    unsigned __int32 RawHumidity;
+    unsigned __int32 DigT1;
+    signed __int32 DigT2;
+    signed __int32 DigT3;
+    unsigned __int32 DigP1;
+    signed __int32 DigP2;
+    signed __int32 DigP3;
+    signed __int32 DigP4;
+    signed __int32 DigP5;
+    signed __int32 DigP6;
+    signed __int32 DigP7;
+    signed __int32 DigP8;
+    signed __int32 DigP9;
+    unsigned __int32 DigH1;
+    signed __int32 DigH2;
+    unsigned __int32 DigH3;
+    signed __int32 DigH4;
+    signed __int32 DigH5;
+    signed __int32 DigH6;
+} TIMECARD_BME280_READING;
+
+typedef struct _TIMECARD_INA219_READING {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Address;
+    unsigned __int32 BusMillivolts;
+    signed __int32 ShuntMicrovolts;
+    signed __int32 CurrentMilliamps;
+    signed __int32 PowerMilliwatts;
+    unsigned __int32 Configuration;
+    unsigned __int32 RawBus;
+} TIMECARD_INA219_READING;
+
+/* BNO055 raw axes use the scale selected by UnitSelection. */
+typedef struct _TIMECARD_BNO055_READING {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 ChipId;
+    unsigned __int32 OperationMode;
+    unsigned __int32 PowerMode;
+    unsigned __int32 UnitSelection;
+    unsigned __int32 SystemStatus;
+    unsigned __int32 SystemError;
+    unsigned __int32 Calibration;
+    unsigned __int32 SelfTest;
+    unsigned __int32 SystemClockStatus;
+    signed __int32 Temperature;
+    signed __int32 AccelerationX;
+    signed __int32 AccelerationY;
+    signed __int32 AccelerationZ;
+    signed __int32 MagneticX;
+    signed __int32 MagneticY;
+    signed __int32 MagneticZ;
+    signed __int32 GyroscopeX;
+    signed __int32 GyroscopeY;
+    signed __int32 GyroscopeZ;
+    signed __int32 Heading;
+    signed __int32 Roll;
+    signed __int32 Pitch;
+    signed __int32 QuaternionW;
+    signed __int32 QuaternionX;
+    signed __int32 QuaternionY;
+    signed __int32 QuaternionZ;
+    signed __int32 LinearAccelerationX;
+    signed __int32 LinearAccelerationY;
+    signed __int32 LinearAccelerationZ;
+    signed __int32 GravityX;
+    signed __int32 GravityY;
+    signed __int32 GravityZ;
+} TIMECARD_BNO055_READING;
+
+typedef struct _TIMECARD_SENSOR_TELEMETRY {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 MuxChannelMask;
+    unsigned __int32 ControllerStatus;
+    unsigned __int32 InterruptStatus;
+    TIMECARD_BME280_READING Environment;
+    TIMECARD_INA219_READING Rail12V;
+    TIMECARD_INA219_READING Rail5V;
+    TIMECARD_INA219_READING Rail3V3;
+    TIMECARD_BNO055_READING Imu;
+} TIMECARD_SENSOR_TELEMETRY;
 
 typedef struct _TIMECARD_CLOCK_SOURCE_CONTROL {
     unsigned __int32 Size;

@@ -250,21 +250,22 @@ the 24MAC402 identity EEPROM at `0x58`, can scan all normal 7-bit addresses,
 and displays reads as hex plus ASCII, hex, ASCII, decimal, or binary. Presets,
 previous/next page navigation, a 50/100/250 ms timeout selector, copy, an ACK
 map, and decoded control/status/interrupt flags support bus diagnosis. The six
-bytes at MAC EEPROM offset zero are formatted as the card's unique serial
-number, the same mapping used by Linux `ptp_ocp` and its `serialnum` attribute.
+bytes in the factory EUI-48 area at raw offset `0x9a` are formatted as the
+card's unique serial number. Linux exposes the same identity bytes at NVMEM
+offset zero through the `24mac402` provider to `ptp_ocp`'s `serialnum`
+attribute.
 
 Reads support no subaddress or a one- or two-byte subaddress followed by a
 repeated start. Transfers are limited to 255 bytes and a bounded timeout.
-Driver 1.11 fixes the repeated-start receive race by separating the subaddress
-and receive phases, servicing the AXI IIC receive watermark before interpreting
-its shared `TX_ERROR`/final-NACK bit, advancing the watermark across FIFO-sized
-chunks, and retrying once after controller reset for transient failures. Native
-Win32 error text and a post-failure controller snapshot are shown if a read
-still fails. The Control Center requires driver 1.11 or newer for reads and
-identifies older drivers before they can surface the misleading Windows CRC
-error; the current supported package is driver 1.13.
+Driver 1.14 corrects the dynamic-mode startup handshake by queuing the complete
+command before clearing the stale bus-not-busy latch, matching Linux
+`i2c-xiic`. Receive data is drained whenever available,
+the expected final receive NACK is handled separately from an address NACK,
+and a failed transient transaction is reset and retried once. Native Win32
+error text and a post-failure controller snapshot are shown if a read still
+fails. The Control Center requires driver 1.14 or newer for I2C operations.
 
-Driver 1.13 / ABI 7 adds dedicated controls for the schematic's U27 PCA9546A
+Driver 1.14 / ABI 7 provides dedicated controls for the schematic's U27 PCA9546A
 at `0x70`. Channel 0 is the MAC-clock branch, channel 1 contains the onboard
 sensors and RGB LED driver, channel 2 is the analog/ADC expansion branch, and
 channel 3 is the DC expansion branch. The workspace shows the selected mask,
@@ -277,7 +278,8 @@ U26, the TMUX1072 near the MAC connector, is controlled by the physical
 therefore explains that channel 0 also requires `MACSER=0` instead of exposing
 a non-functional software toggle.
 
-The IS32FL3207 at `0x6e` drives six common-anode RGB indicators: GNSS1 uses
+The IS32FL3207 uses 7-bit address `0x37`; the schematic's `0x6e` label is its
+8-bit write address. It drives six common-anode RGB indicators: GNSS1 uses
 OUT1â€“3, GNSS2 OUT4â€“6, and IO1 through IO4 use OUT7â€“18 in groups of three.
 Manual RGB/current controls and automatic status mapping are available.
 Automatic mode uses green for a GNSS fix or configured SMA output, blue for an
@@ -285,6 +287,27 @@ SMA input, amber for searching/unknown/disabled states, and red for missing or
 failed status. LED transactions temporarily select sensor channel 1 and then
 restore the user's PCA9546A mask. The driver caps global current at 128 and
 does not expose a general data-write or EEPROM-programming IOCTL.
+
+The Electrical test button saves the six colors, verifies that the hardware
+SDB pin permits a device reset, bypasses PWM, and forces all 18 current sinks
+on for five seconds before restoring the saved state. Open/short results are
+shown in the workspace, and automatic mapping marks affected packages as
+`HARDWARE FAULT` instead of reporting a successful visible update.
+
+## Sensors and IMU
+
+Driver 1.15.1 / ABI 8 and the dedicated Sensors & IMU workspace read every
+populated monitor on the schematic's sensor branch. The BME280 cards show
+factory-compensated temperature, relative humidity, pressure, and calculated
+dew point. The three INA219 cards show bus voltage, shunt current, and load
+power for +12 V, +5 V, and +3.3 V using the board's 2 milliohm shunts.
+
+The BNO055 is placed in NDOF fusion mode and uses the V9 schematic's external
+32.768 kHz crystal. The workspace reports heading, roll, pitch, quaternion,
+temperature, calibration levels, acceleration, linear acceleration, gravity,
+angular velocity, and magnetic field. Sampling is live at one hertz while the
+workspace is visible. Each query temporarily selects PCA9546A channel 1,
+reports missing devices separately, and restores the previous mux selection.
 
 ## FPGA SPI flash
 

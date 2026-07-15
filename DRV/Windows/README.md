@@ -17,16 +17,18 @@ Linux `/dev/ptpN`, so applications use the versioned IOCTL ABI through
   and immediate readback.
 - Bounded configuration and readback for four periodic signal generators and
   four frequency counters, including direct SMA input/output routing.
-- Read-only Xilinx AXI IIC controller access with status, address-only probes,
-  7-bit bus discovery, and bounded EEPROM/register reads. The known onboard
-  devices are the board EEPROM at `0x50` and MAC EEPROM at `0x58`.
+- Guarded Xilinx AXI IIC controller access with status, address-only probes,
+  7-bit bus discovery, bounded EEPROM/register reads, PCA9546A branch routing,
+  and dedicated IS32FL3207 LED updates. The known identity devices are the
+  board EEPROM at `0x50` and MAC EEPROM at `0x58`.
 - Guarded Xilinx SPI and SPI-NOR access for FPGA firmware query, 4 KiB erase,
   page programming, and bounded read-back. All offsets are relative to the
   FPGA image region at `0x00400000`; the configuration region is unreachable.
 - Non-destructive UART receive-activity observation for subsystem presence
   checks without removing bytes from the receiver FIFO.
-- A stable six-byte card serial number read from offset zero of the factory
-  24MAC402 identity EEPROM, matching Linux `ptp_ocp`.
+- A stable six-byte card serial number read from the factory-programmed
+  EUI-48 area at raw 24MAC402 offset `0x9a`, matching the identity Linux
+  exposes through the `24mac402` NVMEM provider to `ptp_ocp`.
 - MSI and MSI-X/LitePCIe BAR layouts matching the Linux `ptp_ocp` driver.
 - A dedicated **Time Card** Device Manager class with custom controller and
   subsystem icons.
@@ -202,12 +204,30 @@ cross a 256-byte page, and requires write-enable plus ready polling. The
 Control Center performs a complete read-back comparison after programming.
 
 Driver 1.13 / ABI 7 adds schematic-aware controls for U27, the PCA9546A at
-`0x70`, and U6, the IS32FL3207 at `0x6e` on mux channel 1. The four mux bits
+`0x70`, and U6, the IS32FL3207 on mux channel 1. The four mux bits
 route the MAC clock, sensor, analog/ADC expansion, and DC expansion branches.
 LED IOCTLs are limited to the six RGB indicators (GNSS1, GNSS2, IO1â€“IO4),
 use 8-bit PWM, cap global current at 128, and restore the caller's mux mask
 after every operation. Arbitrary I2C writes and EEPROM programming remain
 unavailable.
+
+Driver 1.14 / ABI 7 corrects the AXI IIC dynamic-mode startup handshake,
+preventing the stale bus-not-busy latch from ending a transaction before its
+START reaches the bus. It also reads the factory
+EUI-48 from raw 24MAC402 offset `0x9a` and uses U6's 7-bit address `0x37`;
+the schematic's `0x6e` label is the corresponding 8-bit write address.
+Driver 1.14.6 also reports the IS32FL3207 per-output open/short masks and
+supports a bounded electrical test. The test proves SDB state through the
+device reset behavior, forces OUT1-18 on in DC mode for five seconds, and then
+restores the prior colors. It does not expose arbitrary I2C writes.
+
+Driver 1.15.1 / ABI 8 adds a guarded sensor-telemetry query for every populated
+device on PCA9546A channel 1. It triggers a compensated BME280 environment
+sample at `0x76`, reads the +12 V, +5 V, and +3.3 V INA219 monitors at `0x40`,
+`0x41`, and `0x44` using the schematic's 2 milliohm shunts, and starts the
+BNO055 at `0x29` in NDOF fusion mode with the fitted 32.768 kHz crystal. A
+failed or absent sensor is reported independently. The driver restores the
+caller's mux mask after every sample and still exposes no arbitrary write API.
 
 The schematic's U26 TMUX1072 is not software-controlled. Its `MACSER` select
 comes only from the physical DIP switch: 0 routes MAC I2C and 1 routes the FPGA

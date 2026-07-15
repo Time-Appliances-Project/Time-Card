@@ -363,6 +363,20 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         break;
     }
 
+    case IOCTL_TIMECARD_SENSOR_QUERY:
+    {
+        TIMECARD_SENSOR_TELEMETRY *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardSensorQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
     case IOCTL_TIMECARD_CLOCK_SOURCE_SET:
     {
         TIMECARD_CLOCK_SOURCE_CONTROL *input;
