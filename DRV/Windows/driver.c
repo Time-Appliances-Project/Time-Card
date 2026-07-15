@@ -104,6 +104,8 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
     context->NmeaOut = NULL;
     context->I2c = NULL;
     context->I2cKnownDeviceMask = 0;
+    context->I2cLastStartTrace = 0;
+    context->I2cLastStartEvents = 0;
     context->Flash = NULL;
     context->FlashJedecId = 0;
     context->FlashCapacity = 0;

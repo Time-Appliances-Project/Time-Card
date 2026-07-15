@@ -144,6 +144,8 @@ typedef struct _DEVICE_CONTEXT {
     ULONG NmeaOutOffset;
     ULONG I2cOffset;
     ULONG I2cKnownDeviceMask;
+    ULONG I2cLastStartTrace;
+    ULONG I2cLastStartEvents;
     ULONG FlashOffset;
     ULONG FlashJedecId;
     ULONG FlashCapacity;
@@ -246,6 +248,8 @@ NTSTATUS TimeCardLedQuery(PDEVICE_CONTEXT context,
 NTSTATUS TimeCardLedSet(PDEVICE_CONTEXT context,
                         const TIMECARD_LED_CONTROL *request,
                         TIMECARD_LED_CONTROL *response);
+NTSTATUS TimeCardSensorQuery(PDEVICE_CONTEXT context,
+                             TIMECARD_SENSOR_TELEMETRY *telemetry);
 NTSTATUS TimeCardGetIdentity(PDEVICE_CONTEXT context,
                              TIMECARD_IDENTITY *identity);
 
