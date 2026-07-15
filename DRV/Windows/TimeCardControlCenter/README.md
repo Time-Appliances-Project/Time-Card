@@ -4,15 +4,22 @@ The Time Card Control Center is a dependency-free Windows desktop dashboard
 for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
-![OCP Time Card Control Center](../assets/timecard-control-center.png)
+![Control Center overview](../assets/timecard-control-center.png)
 
-| Clock source | NMEA output | SMA connectors |
+| Precision clock | GNSS and sky map | Atomic clock |
 | --- | --- | --- |
-| ![Clock-source configuration](../assets/timecard-control-center-clock.png) | ![NMEA generator and UART monitor](../assets/timecard-control-center-nmea.png) | ![SMA connector routing](../assets/timecard-control-center-sma.png) |
+| ![Precision clock workspace](../assets/timecard-control-center-clock.png) | ![GNSS workspace](../assets/timecard-control-center-gnss.png) | ![Atomic clock workspace](../assets/timecard-control-center-atomic.png) |
+| UART and NMEA | SMA connectors | Generators and frequency |
+| ![UART and NMEA workspace](../assets/timecard-control-center-nmea.png) | ![SMA connector workspace](../assets/timecard-control-center-sma.png) | ![Timing generator workspace](../assets/timecard-control-center-timing.png) |
+| Sensors and IMU | I2C and status LEDs | Subsystem map |
+| ![Sensors and IMU workspace](../assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](../assets/timecard-control-center-i2c.png) | ![Subsystem workspace](../assets/timecard-control-center-subsystems.png) |
+
+![FPGA SPI-flash firmware update workspace](../assets/timecard-control-center-flash.png)
 
 ## Current capabilities
 
-- Live PHC time, Windows cross-timestamp, offset, and sampling-window display.
+- Live PHC time, system cross-timestamp, offset, and sampling-window display,
+  with rolling 200-second offset histories and 60-second uncertainty histories.
 - Clock engine, synchronization, PCIe layout, BAR, interrupt status, and a
   guarded selector for all FPGA clock sources exposed by Linux `ptp_ocp`.
 - Decoded GNSS fix and seen/locked satellite counts from the ToD engine.
@@ -40,10 +47,15 @@ it does not shell out to `timecardctl` or scrape Device Manager.
 - A dedicated timing workspace for four PHC-aligned periodic signal generators
   and four frequency counters, with frequency, duty, phase, polarity,
   integration-window, and direct SMA routing controls.
-- A non-programming I2C workbench with AXI IIC health, known-device probing,
-  full 7-bit discovery, EEPROM/register presets and paging, adjustable timeout,
-  hex/ASCII/decimal/binary views, decoded transaction diagnostics, and the
-  unique card serial from the 24MAC402 identity EEPROM.
+- A guarded I2C workbench with AXI IIC health, known-device probing, full 7-bit
+  discovery, EEPROM/register presets and paging, adjustable timeout,
+  hex/ASCII/decimal/binary views, decoded transaction diagnostics, the unique
+  card serial, and direct PCA9546A branch routing.
+- Manual and automatic control of all six IS32FL3207 RGB subsystem indicators,
+  including current limiting, open/short reporting, and a bounded electrical
+  test that restores the previous colors.
+- Live one-hertz BME280 temperature/humidity/pressure, INA219 +12 V/+5 V/+3.3 V
+  rail telemetry, and BNO055 fused orientation plus raw nine-axis IMU data.
 - Runtime and persistent Device Manager subsystem-hierarchy controls.
 - A guarded FPGA SPI-flash workspace with JEDEC/geometry discovery, OCPC
   vendor/device/length/CRC validation, explicit raw-image warnings, protected
@@ -53,6 +65,9 @@ it does not shell out to `timecardctl` or scrape Device Manager.
 - A subsystem capability map using the same artwork as Device Manager, direct
   links to NMEA and generator/frequency configuration, and a non-destructive
   UART activity check that reports GNSS2 as `NOT PRESENT` when it is silent.
+- Polished startup and session behavior with an extended splash screen,
+  aspect-preserving animated Time Card branding, `Time Card Connected` status,
+  and a notification with one-click elevation when started as a non-admin.
 
 ## Build
 
@@ -86,9 +101,14 @@ automation:
 
 ```powershell
 TimeCardControlCenter.exe --page Clock
+TimeCardControlCenter.exe --page Gnss
 TimeCardControlCenter.exe --page Uart --uart-port=3
 TimeCardControlCenter.exe --page Sma
 TimeCardControlCenter.exe --page Timing
+TimeCardControlCenter.exe --page Sensors
+TimeCardControlCenter.exe --page I2c
+TimeCardControlCenter.exe --page Subsystems
+TimeCardControlCenter.exe --page Flash
 ```
 
 For repeatable documentation and visual regression checks, `--capture` renders
@@ -148,10 +168,11 @@ administrator privileges and is blocked when the PHC date is outside 2020 to
 2100, preventing an uninitialized clock such as 1970 from replacing a valid
 system time. Windows accepts this one-shot value at millisecond resolution.
 
-The **Overview** and **Precision Clock** workspaces retain matching 60-second
-histories for measured system-clock offset and cross-timestamp sampling
-uncertainty. Offset plots remain centered on zero with a stable minimum
-vertical range and expand automatically when the measured offset grows.
+The **Overview** and **Precision Clock** workspaces retain rolling 200-second
+histories for measured system-clock offset. Their cross-timestamp sampling
+window and uncertainty histories retain 60 seconds. Detail-focused automatic
+vertical zoom follows the visible data range so small offset changes remain
+easy to see without clipping larger excursions.
 
 ## u-blox GNSS configuration
 

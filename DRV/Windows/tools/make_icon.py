@@ -7,6 +7,7 @@ from PIL import Image
 
 
 SIZE = 256
+APP_ICON_INSET = 24
 
 
 def make_icon(source_path: Path) -> Image.Image:
@@ -103,11 +104,16 @@ def save_icon(image: Image.Image, destination: Path) -> None:
 
 
 def make_app_icon(source_path: Path) -> Image.Image:
-    """Crop the detailed app artwork to a recognizable square taskbar mark."""
+    """Crop the artwork to a square mark with a taskbar-safe clear border."""
     source = Image.open(source_path).convert("RGBA")
     side = min(source.width, source.height)
     source = source.crop((0, 0, side, side))
-    return source.resize((SIZE, SIZE), Image.Resampling.LANCZOS)
+    content_size = SIZE - 2 * APP_ICON_INSET
+    source = source.resize((content_size, content_size), Image.Resampling.LANCZOS)
+
+    image = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    image.alpha_composite(source, (APP_ICON_INSET, APP_ICON_INSET))
+    return image
 
 
 def main() -> None:
