@@ -1,0 +1,244 @@
+<Window x:Class="TimeCardControlCenter.SplashWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OCP Time Card Control Center"
+        Width="760" Height="460"
+        WindowStyle="None" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="True" Icon="Assets/timecard-app.ico"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
+    <Window.Resources>
+        <PowerEase x:Key="EntranceEase" EasingMode="EaseOut" Power="4" />
+        <CubicEase x:Key="ProgressEase" EasingMode="EaseInOut" />
+
+        <Storyboard x:Key="SplashEntrance">
+            <DoubleAnimation Storyboard.TargetName="SplashRoot"
+                             Storyboard.TargetProperty="Opacity"
+                             From="0" To="1" Duration="0:0:0.32" />
+            <DoubleAnimation Storyboard.TargetName="SplashScale"
+                             Storyboard.TargetProperty="ScaleX"
+                             From="0.965" To="1" Duration="0:0:0.48"
+                             EasingFunction="{StaticResource EntranceEase}" />
+            <DoubleAnimation Storyboard.TargetName="SplashScale"
+                             Storyboard.TargetProperty="ScaleY"
+                             From="0.965" To="1" Duration="0:0:0.48"
+                             EasingFunction="{StaticResource EntranceEase}" />
+            <DoubleAnimation Storyboard.TargetName="LogoFloat"
+                             Storyboard.TargetProperty="Y"
+                             From="2" To="-5" BeginTime="0:0:0.45"
+                             Duration="0:0:1.8" AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="LogoGlow"
+                             Storyboard.TargetProperty="Opacity"
+                             From="0.35" To="0.78" BeginTime="0:0:0.35"
+                             Duration="0:0:1.35" AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="StatusPulse"
+                             Storyboard.TargetProperty="Opacity"
+                             From="0.32" To="1" Duration="0:0:0.62"
+                             AutoReverse="True" RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="ProgressFill"
+                             Storyboard.TargetProperty="Width"
+                             From="0" To="296" BeginTime="0:0:0.15"
+                             Duration="0:0:2.75"
+                             EasingFunction="{StaticResource ProgressEase}" />
+            <DoubleAnimation Storyboard.TargetName="ShimmerTranslate"
+                             Storyboard.TargetProperty="X"
+                             From="-180" To="360" BeginTime="0:0:0.18"
+                             Duration="0:0:1.35"
+                             EasingFunction="{StaticResource ProgressEase}" />
+        </Storyboard>
+    </Window.Resources>
+
+    <Window.Triggers>
+        <EventTrigger RoutedEvent="Window.Loaded">
+            <BeginStoryboard Storyboard="{StaticResource SplashEntrance}" />
+        </EventTrigger>
+    </Window.Triggers>
+
+    <Grid x:Name="SplashRoot" Margin="30" Opacity="0"
+          RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform>
+            <ScaleTransform x:Name="SplashScale" ScaleX="0.965" ScaleY="0.965" />
+        </Grid.RenderTransform>
+
+        <Border CornerRadius="28" Background="#06101C">
+            <Border.Effect>
+                <DropShadowEffect Color="#02060C" BlurRadius="32"
+                                  ShadowDepth="10" Opacity="0.75" />
+            </Border.Effect>
+        </Border>
+
+        <Border CornerRadius="28" BorderBrush="#365875" BorderThickness="1">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#0C2135" Offset="0" />
+                    <GradientStop Color="#081522" Offset="0.52" />
+                    <GradientStop Color="#07111D" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+
+            <Grid ClipToBounds="True">
+                <Canvas IsHitTestVisible="False" Opacity="0.72">
+                    <Ellipse Width="360" Height="360" Canvas.Left="-150" Canvas.Top="-120">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0.5,0.5">
+                                <GradientStop Color="#554CC9F0" Offset="0" />
+                                <GradientStop Color="#004CC9F0" Offset="1" />
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <Ellipse Width="300" Height="300" Canvas.Left="520" Canvas.Top="230">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0.5,0.5">
+                                <GradientStop Color="#3069C441" Offset="0" />
+                                <GradientStop Color="#0069C441" Offset="1" />
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <Path Data="M 424,52 L 610,52 Q 630,52 630,72 L 630,92 L 682,92"
+                          Stroke="#344CC9F0" StrokeThickness="1" />
+                    <Path Data="M 468,76 L 560,76 Q 578,76 578,94 L 578,116 L 684,116"
+                          Stroke="#244CC9F0" StrokeThickness="1" />
+                    <Path Data="M 472,342 L 602,342 Q 622,342 622,322 L 622,302 L 684,302"
+                          Stroke="#2869C441" StrokeThickness="1" />
+                    <Ellipse Width="5" Height="5" Canvas.Left="678" Canvas.Top="89" Fill="#684CC9F0" />
+                    <Ellipse Width="5" Height="5" Canvas.Left="678" Canvas.Top="299" Fill="#7069C441" />
+                </Canvas>
+
+                <Grid Margin="42,34">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="250" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Width="238" Height="294" HorizontalAlignment="Left"
+                            VerticalAlignment="Center" CornerRadius="24"
+                            BorderBrush="#294861" BorderThickness="1"
+                            Background="#A00A1929">
+                        <Grid x:Name="LogoPanel" ClipToBounds="True">
+                            <Ellipse x:Name="LogoGlow" Width="172" Height="172" Opacity="0.35">
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush>
+                                        <GradientStop Color="#994CC9F0" Offset="0" />
+                                        <GradientStop Color="#004CC9F0" Offset="1" />
+                                    </RadialGradientBrush>
+                                </Ellipse.Fill>
+                                <Ellipse.Effect>
+                                    <BlurEffect Radius="22" />
+                                </Ellipse.Effect>
+                            </Ellipse>
+
+                            <Image Width="190" Height="136" Source="Assets/timecard-logo.png"
+                                   Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Image.RenderTransform>
+                                    <TranslateTransform x:Name="LogoFloat" />
+                                </Image.RenderTransform>
+                                <Image.Effect>
+                                    <DropShadowEffect Color="#4CC9F0" BlurRadius="16"
+                                                      ShadowDepth="0" Opacity="0.35" />
+                                </Image.Effect>
+                            </Image>
+
+                            <Rectangle Width="92" Height="360" Opacity="0.16"
+                                       HorizontalAlignment="Left" VerticalAlignment="Center">
+                                <Rectangle.Fill>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Color="#00FFFFFF" Offset="0" />
+                                        <GradientStop Color="#B0FFFFFF" Offset="0.5" />
+                                        <GradientStop Color="#00FFFFFF" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Rectangle.Fill>
+                                <Rectangle.RenderTransform>
+                                    <TransformGroup>
+                                        <RotateTransform Angle="14" />
+                                        <TranslateTransform x:Name="ShimmerTranslate" X="-180" />
+                                    </TransformGroup>
+                                </Rectangle.RenderTransform>
+                            </Rectangle>
+
+                            <Border Height="32" Margin="18" Padding="12,0"
+                                    VerticalAlignment="Bottom" CornerRadius="16"
+                                    Background="#CC0C2133" BorderBrush="#31516C"
+                                    BorderThickness="1">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <TextBlock Text="&#xE916;" FontFamily="Segoe MDL2 Assets"
+                                               Foreground="#DAB539" FontSize="13"
+                                               VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBlock Text="PRECISION TIMING" Foreground="#C7D8E6"
+                                               FontFamily="Segoe UI Semibold" FontSize="10"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <Grid Grid.Column="1" Margin="42,8,0,8">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="OPEN COMPUTE PROJECT" Foreground="#69C441"
+                                       FontFamily="Segoe UI Semibold" FontSize="11" />
+                            <TextBlock Text="Time Card" Margin="0,12,0,0"
+                                       Foreground="#F4F8FC" FontFamily="Segoe UI Semibold"
+                                       FontSize="42" />
+                            <TextBlock Text="Control Center" Margin="1,-3,0,0"
+                                       Foreground="#A9BED0" FontFamily="Segoe UI Light"
+                                       FontSize="24" />
+                            <Border Width="58" Height="3" CornerRadius="2" Margin="1,18,0,17"
+                                    HorizontalAlignment="Left" Background="#69C441" />
+                            <TextBlock Width="300" HorizontalAlignment="Left"
+                                       Text="Precision synchronization, hardware control, and diagnostics in one workspace."
+                                       TextWrapping="Wrap" LineHeight="20"
+                                       Foreground="#91A8BC" FontSize="13" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Row="2">
+                            <Grid Margin="0,0,0,11">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Ellipse x:Name="StatusPulse" Width="8" Height="8"
+                                         Fill="#69C441" VerticalAlignment="Center"
+                                         Margin="0,0,10,0">
+                                    <Ellipse.Effect>
+                                        <DropShadowEffect Color="#69C441" BlurRadius="8"
+                                                          ShadowDepth="0" Opacity="0.8" />
+                                    </Ellipse.Effect>
+                                </Ellipse>
+                                <TextBlock x:Name="SplashStatusText" Grid.Column="1"
+                                           Text="Starting Control Center" Foreground="#C7D8E6"
+                                           FontSize="12" VerticalAlignment="Center" />
+                                <TextBlock x:Name="VersionText" Grid.Column="2"
+                                           Foreground="#617A90" FontSize="10"
+                                           VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Border Width="296" Height="4" HorizontalAlignment="Left"
+                                    CornerRadius="2" Background="#1D344A" ClipToBounds="True">
+                                <Border x:Name="ProgressFill" Width="0" Height="4"
+                                        HorizontalAlignment="Left" CornerRadius="2">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Color="#4CC9F0" Offset="0" />
+                                            <GradientStop Color="#69C441" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

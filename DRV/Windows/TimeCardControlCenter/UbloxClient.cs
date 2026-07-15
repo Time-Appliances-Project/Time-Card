@@ -6,6 +6,53 @@ using System.Text;
 
 namespace TimeCardControlCenter
 {
+    public sealed class UbloxSatelliteInfo
+    {
+        internal UbloxSatelliteInfo(byte gnssIdentifier, byte satelliteIdentifier,
+            byte carrierToNoise, int elevationDegrees, int azimuthDegrees,
+            uint flags, string constellation, string displayIdentifier)
+        {
+            GnssIdentifier = gnssIdentifier;
+            SatelliteIdentifier = satelliteIdentifier;
+            CarrierToNoise = carrierToNoise;
+            ElevationDegrees = elevationDegrees;
+            AzimuthDegrees = azimuthDegrees;
+            Flags = flags;
+            Constellation = constellation;
+            DisplayIdentifier = displayIdentifier;
+            IsUsed = (flags & 0x08u) != 0;
+            QualityIndicator = (byte)(flags & 0x07u);
+        }
+
+        public byte GnssIdentifier { get; private set; }
+        public byte SatelliteIdentifier { get; private set; }
+        public byte CarrierToNoise { get; private set; }
+        public int ElevationDegrees { get; private set; }
+        public int AzimuthDegrees { get; private set; }
+        public uint Flags { get; private set; }
+        public string Constellation { get; private set; }
+        public string DisplayIdentifier { get; private set; }
+        public bool IsUsed { get; private set; }
+        public byte QualityIndicator { get; private set; }
+
+        public string QualityDescription
+        {
+            get
+            {
+                switch (QualityIndicator)
+                {
+                    case 0: return "No signal";
+                    case 1: return "Searching";
+                    case 2: return "Acquired";
+                    case 3: return "Unusable";
+                    case 4: return "Code locked";
+                    case 5: return "Carrier locked";
+                    default: return "Tracked";
+                }
+            }
+        }
+    }
+
     public sealed class UbloxReceiverSnapshot
     {
         private readonly Dictionary<uint, ulong> configuration;
@@ -16,6 +63,8 @@ namespace TimeCardControlCenter
             this.configuration = configuration;
             List<string> warningList = warnings as List<string> ?? new List<string>(warnings);
             Warnings = warningList.AsReadOnly();
+            Satellites = new List<UbloxSatelliteInfo>().AsReadOnly();
+            CapturedAtUtc = DateTime.UtcNow;
         }
 
         public string SoftwareVersion { get; internal set; }
@@ -31,6 +80,8 @@ namespace TimeCardControlCenter
         public int SatellitesVisible { get; internal set; }
         public double AverageCno { get; internal set; }
         public string ConstellationSummary { get; internal set; }
+        public IList<UbloxSatelliteInfo> Satellites { get; internal set; }
+        public DateTime CapturedAtUtc { get; internal set; }
         public DateTime? Utc { get; internal set; }
         public uint TimeAccuracyNanoseconds { get; internal set; }
         public double Latitude { get; internal set; }
@@ -348,12 +399,20 @@ namespace TimeCardControlCenter
             int cnoTotal = 0;
             int cnoCount = 0;
             Dictionary<byte, int> constellations = new Dictionary<byte, int>();
+            List<UbloxSatelliteInfo> satellites = new List<UbloxSatelliteInfo>();
             for (int index = 0; index < count; index++)
             {
                 int offset = 8 + index * 12;
                 byte gnss = payload[offset];
+                byte satelliteIdentifier = payload[offset + 1];
                 byte cno = payload[offset + 2];
+                int elevation = unchecked((sbyte)payload[offset + 3]);
+                int azimuth = unchecked((short)ReadUInt16(payload, offset + 4));
                 uint flags = ReadUInt32(payload, offset + 8);
+                satellites.Add(new UbloxSatelliteInfo(gnss,
+                    satelliteIdentifier, cno, elevation, azimuth, flags,
+                    GnssName(gnss), SatellitePrefix(gnss) +
+                    satelliteIdentifier.ToString(CultureInfo.InvariantCulture)));
                 if ((flags & 0x08) != 0)
                     used++;
                 if (cno != 0)
@@ -366,6 +425,8 @@ namespace TimeCardControlCenter
                 constellations[gnss] = value + 1;
             }
             snapshot.SatellitesVisible = count;
+            snapshot.Satellites = satellites.AsReadOnly();
+            snapshot.CapturedAtUtc = DateTime.UtcNow;
             snapshot.AverageCno = cnoCount == 0 ? 0 : cnoTotal / (double)cnoCount;
             snapshot.ConstellationSummary = string.Join(" · ", constellations
                 .OrderBy(item => item.Key)
@@ -452,6 +513,21 @@ namespace TimeCardControlCenter
                 case 6: return "GLONASS";
                 case 7: return "NavIC";
                 default: return "GNSS " + identifier.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        private static string SatellitePrefix(byte identifier)
+        {
+            switch (identifier)
+            {
+                case 0: return "G";
+                case 1: return "S";
+                case 2: return "E";
+                case 3: return "C";
+                case 5: return "Q";
+                case 6: return "R";
+                case 7: return "I";
+                default: return "?";
             }
         }
 

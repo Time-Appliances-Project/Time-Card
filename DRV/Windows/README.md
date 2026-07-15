@@ -15,9 +15,16 @@ Linux `/dev/ptpN`, so applications use the versioned IOCTL ABI through
 - Validated query and routing control for all four SMA connectors, including
   input/output direction, named timing functions, fixed-direction detection,
   and immediate readback.
+- Bounded configuration and readback for four periodic signal generators and
+  four frequency counters, including direct SMA input/output routing.
 - Read-only Xilinx AXI IIC controller access with status, address-only probes,
   7-bit bus discovery, and bounded EEPROM/register reads. The known onboard
   devices are the board EEPROM at `0x50` and MAC EEPROM at `0x58`.
+- Guarded Xilinx SPI and SPI-NOR access for FPGA firmware query, 4 KiB erase,
+  page programming, and bounded read-back. All offsets are relative to the
+  FPGA image region at `0x00400000`; the configuration region is unreachable.
+- Non-destructive UART receive-activity observation for subsystem presence
+  checks without removing bytes from the receiver FIFO.
 - A stable six-byte card serial number read from offset zero of the factory
   24MAC402 identity EEPROM, matching Linux `ptp_ocp`.
 - MSI and MSI-X/LitePCIe BAR layouts matching the Linux `ptp_ocp` driver.
@@ -166,11 +173,46 @@ subaddress. Transfers are limited to 255 bytes. The `serial` command reads the
 same six identity bytes used by the Linux `serialnum` attribute. The ABI
 deliberately provides no I2C data-write or EEPROM-programming operation.
 
+Driver 1.11 fixes the AXI IIC dynamic-receive completion sequence. It waits for
+the optional subaddress message to leave the transmit FIFO, drains data only
+after the receive watermark event, advances that watermark for reads longer
+than one FIFO, and clears the expected final receive NACK with `RX_FULL`. A
+failed transient transaction is reset and retried once within the requested
+bounded timeout. Driver 1.12 also reports controller transport failures as I/O
+device errors instead of the misleading Windows "CRC data error" translation.
+
 The NMEA generator is separate from the UART receiver. Driver 1.9 enables it
 at 9,600 baud on first use when firmware left it disabled, and keeps the UART 3
 receiver divisor synchronized whenever `nmea-set` changes the generator baud.
 Supported rates are 1,200 through 2,000,000 baud using the selector table from
 Linux `ptp_ocp`.
+
+Driver 1.10 / ABI 5 adds dedicated controls for all four periodic signal
+generators and frequency counters. Generator configuration follows the Linux
+`ptp_ocp` register sequence: disable, program a PHC-aligned start, period,
+pulse width and polarity, then assert valid plus enable. Frequency counters
+accept an integration window of 0 (disabled) or 1–255 seconds and report the
+FPGA valid, error, overrun, and 24-bit frequency-result fields.
+
+Driver 1.12 / ABI 6 adds the guarded FPGA flash interface and UART activity
+observation. The SPI controller offsets, Xilinx FIFO sequence, FPGA image
+start, 4 KiB erase geometry, and OCPC image-header format follow Linux
+`ptp_ocp`. Flash programming cannot address bytes below `0x00400000`, cannot
+cross a 256-byte page, and requires write-enable plus ready polling. The
+Control Center performs a complete read-back comparison after programming.
+
+Driver 1.13 / ABI 7 adds schematic-aware controls for U27, the PCA9546A at
+`0x70`, and U6, the IS32FL3207 at `0x6e` on mux channel 1. The four mux bits
+route the MAC clock, sensor, analog/ADC expansion, and DC expansion branches.
+LED IOCTLs are limited to the six RGB indicators (GNSS1, GNSS2, IO1â€“IO4),
+use 8-bit PWM, cap global current at 128, and restore the caller's mux mask
+after every operation. Arbitrary I2C writes and EEPROM programming remain
+unavailable.
+
+The schematic's U26 TMUX1072 is not software-controlled. Its `MACSER` select
+comes only from the physical DIP switch: 0 routes MAC I2C and 1 routes the FPGA
+MAC UART. The Control Center identifies this prerequisite instead of claiming
+that U26 can be changed through the driver.
 
 ## Device Manager
 

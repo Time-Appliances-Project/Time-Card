@@ -283,6 +283,86 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         break;
     }
 
+    case IOCTL_TIMECARD_I2C_MUX_QUERY:
+    {
+        TIMECARD_I2C_MUX_CONTROL *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardI2cMuxQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_I2C_MUX_SET:
+    {
+        TIMECARD_I2C_MUX_CONTROL *input;
+        TIMECARD_I2C_MUX_CONTROL requestValue;
+        TIMECARD_I2C_MUX_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardI2cMuxSet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_LED_QUERY:
+    {
+        TIMECARD_LED_CONTROL *input;
+        TIMECARD_LED_CONTROL requestValue;
+        TIMECARD_LED_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardLedQuery(context, requestValue.Led, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_LED_SET:
+    {
+        TIMECARD_LED_CONTROL *input;
+        TIMECARD_LED_CONTROL requestValue;
+        TIMECARD_LED_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardLedSet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
     case IOCTL_TIMECARD_CLOCK_SOURCE_SET:
     {
         TIMECARD_CLOCK_SOURCE_CONTROL *input;
@@ -349,6 +429,211 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
                                    (PVOID *)&output);
         if (NT_SUCCESS(status)) {
             status = TimeCardGetIdentity(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_SIGNAL_QUERY:
+    {
+        TIMECARD_SIGNAL_CONTROL *input;
+        TIMECARD_SIGNAL_CONTROL requestValue;
+        TIMECARD_SIGNAL_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardSignalQuery(context, requestValue.Generator,
+                                         output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_SIGNAL_SET:
+    {
+        TIMECARD_SIGNAL_CONTROL *input;
+        TIMECARD_SIGNAL_CONTROL requestValue;
+        TIMECARD_SIGNAL_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardSignalSet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_FREQUENCY_QUERY:
+    {
+        TIMECARD_FREQUENCY_CONTROL *input;
+        TIMECARD_FREQUENCY_CONTROL requestValue;
+        TIMECARD_FREQUENCY_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardFrequencyQuery(context, requestValue.Counter,
+                                            output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_FREQUENCY_SET:
+    {
+        TIMECARD_FREQUENCY_CONTROL *input;
+        TIMECARD_FREQUENCY_CONTROL requestValue;
+        TIMECARD_FREQUENCY_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardFrequencySet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_FLASH_QUERY:
+    {
+        TIMECARD_FLASH_STATUS *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardFlashQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_FLASH_READ:
+    {
+        TIMECARD_FLASH_RANGE *input;
+        TIMECARD_FLASH_RANGE requestValue;
+        TIMECARD_FLASH_TRANSFER *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardFlashRead(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = FIELD_OFFSET(TIMECARD_FLASH_TRANSFER, Data) +
+                              output->Length;
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_FLASH_ERASE:
+    {
+        TIMECARD_FLASH_RANGE *input;
+        TIMECARD_FLASH_RANGE requestValue;
+        TIMECARD_FLASH_RESULT *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardFlashErase(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_FLASH_PROGRAM:
+    {
+        TIMECARD_FLASH_TRANSFER *input;
+        TIMECARD_FLASH_TRANSFER requestValue;
+        TIMECARD_FLASH_RESULT *output;
+        size_t actualInputLength = 0;
+        size_t requiredInputLength;
+
+        status = TimeCardGetInput(
+            request, FIELD_OFFSET(TIMECARD_FLASH_TRANSFER, Data),
+            (PVOID *)&input, &actualInputLength);
+        if (!NT_SUCCESS(status))
+            break;
+        if (actualInputLength > sizeof(requestValue)) {
+            status = STATUS_INVALID_BUFFER_SIZE;
+            break;
+        }
+        RtlZeroMemory(&requestValue, sizeof(requestValue));
+        RtlCopyMemory(&requestValue, input, actualInputLength);
+        if (requestValue.Length > TIMECARD_FLASH_MAX_TRANSFER) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        requiredInputLength =
+            FIELD_OFFSET(TIMECARD_FLASH_TRANSFER, Data) +
+            requestValue.Length;
+        if (requestValue.Size < requiredInputLength ||
+            actualInputLength < requiredInputLength) {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardFlashProgram(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_UART_OBSERVE:
+    {
+        TIMECARD_UART_OBSERVE *input;
+        TIMECARD_UART_OBSERVE requestValue;
+        TIMECARD_UART_OBSERVE *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardUartObserve(context, &requestValue, output);
             if (NT_SUCCESS(status))
                 information = sizeof(*output);
         }

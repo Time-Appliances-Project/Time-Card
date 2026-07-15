@@ -15,7 +15,7 @@ From PowerShell in this directory:
 This performs a clean unsigned x64 Release build and creates:
 
 - `submission\TimeCard\` - the driver folder to add to an HLK project.
-- `submission\TimeCard-1.9-x64.cab` - a CAB with the required driver,
+- `submission\TimeCard-1.13-x64.cab` - a CAB with the required driver,
   INF, catalog, subsystem icons, and PDB in a non-root `TimeCard` folder.
 
 The CAB is intentionally unsigned unless a registered code-signing
@@ -55,7 +55,7 @@ Use this route for a retail driver and for Windows Update eligibility:
 Microsoft currently limits attestation signing to supported testing
 scenarios; attestation-signed retail drivers are not published to Windows
 Update. When the Partner Center account is eligible for such a scenario,
-upload the certificate-signed `TimeCard-1.9-x64.cab`, leave both test-signing
+upload the certificate-signed `TimeCard-1.13-x64.cab`, leave both test-signing
 options disabled, and download the Microsoft-signed result.
 
 ## Verify the returned package

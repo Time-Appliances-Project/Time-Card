@@ -23,6 +23,9 @@ namespace TimeCardControlCenter
         private const int MaximumI2cTransfer = 255;
         private const int I2cTransferHeaderSize = 20;
         private const int I2cTransferBufferSize = 276;
+        private const int MaximumFlashTransfer = 256;
+        private const int FlashTransferHeaderSize = 16;
+        private const int FlashTransferBufferSize = 272;
 
         private static readonly uint IoctlSetTime = ControlCode(1, FileWriteAccess);
         private static readonly uint IoctlGetInfo = ControlCode(2, FileReadAccess);
@@ -40,6 +43,19 @@ namespace TimeCardControlCenter
         private static readonly uint IoctlNmeaQuery = ControlCode(14, FileReadAccess | FileWriteAccess);
         private static readonly uint IoctlNmeaSet = ControlCode(15, FileReadAccess | FileWriteAccess);
         private static readonly uint IoctlGetIdentity = ControlCode(16, FileReadAccess);
+        private static readonly uint IoctlSignalQuery = ControlCode(17, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlSignalSet = ControlCode(18, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlFrequencyQuery = ControlCode(19, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlFrequencySet = ControlCode(20, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlFlashQuery = ControlCode(21, FileReadAccess);
+        private static readonly uint IoctlFlashRead = ControlCode(22, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlFlashErase = ControlCode(23, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlFlashProgram = ControlCode(24, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlUartObserve = ControlCode(25, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlI2cMuxQuery = ControlCode(26, FileReadAccess);
+        private static readonly uint IoctlI2cMuxSet = ControlCode(27, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlLedQuery = ControlCode(28, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlLedSet = ControlCode(29, FileReadAccess | FileWriteAccess);
 
         private readonly object gate = new object();
         private SafeFileHandle handle;
@@ -111,7 +127,7 @@ namespace TimeCardControlCenter
             if (utc.Year < 2020 || utc.Year > 2100)
                 throw new InvalidOperationException(
                     "The Time Card PHC does not contain a plausible UTC date. " +
-                    "Set the PHC from Windows or establish GNSS time first.");
+                    "Synchronize the PHC from the system clock or establish GNSS time first.");
 
             NativeSystemTime systemTime = new NativeSystemTime
             {
@@ -168,6 +184,146 @@ namespace TimeCardControlCenter
         {
             return new TimeCardIdentity(
                 GetOutput<TimeCardIdentityRaw>(IoctlGetIdentity));
+        }
+
+        public SignalGeneratorState GetSignalGenerator(uint generator)
+        {
+            return CallSignalGenerator(IoctlSignalQuery, generator, false,
+                0, 0, 0, false);
+        }
+
+        public SignalGeneratorState SetSignalGenerator(uint generator,
+            bool enabled, ulong periodNanoseconds, ulong pulseNanoseconds,
+            ulong phaseNanoseconds, bool inverted)
+        {
+            return CallSignalGenerator(IoctlSignalSet, generator, enabled,
+                periodNanoseconds, pulseNanoseconds, phaseNanoseconds,
+                inverted);
+        }
+
+        private SignalGeneratorState CallSignalGenerator(uint code,
+            uint generator, bool enabled, ulong periodNanoseconds,
+            ulong pulseNanoseconds, ulong phaseNanoseconds, bool inverted)
+        {
+            if (generator == 0 || generator > 4)
+                throw new ArgumentOutOfRangeException("generator");
+            TimeCardSignalControlRaw request = new TimeCardSignalControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardSignalControlRaw)),
+                Generator = generator,
+                Flags = (enabled ? 2u : 0u) | (inverted ? 4u : 0u),
+                PeriodNanoseconds = periodNanoseconds,
+                PulseNanoseconds = pulseNanoseconds,
+                PhaseNanoseconds = phaseNanoseconds
+            };
+            byte[] output = Call(code, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardSignalControlRaw)));
+            return new SignalGeneratorState(
+                BytesToStruct<TimeCardSignalControlRaw>(output));
+        }
+
+        public FrequencyCounterState GetFrequencyCounter(uint counter)
+        {
+            return CallFrequencyCounter(IoctlFrequencyQuery, counter, 0);
+        }
+
+        public FrequencyCounterState SetFrequencyCounter(uint counter,
+                                                          uint integrationSeconds)
+        {
+            if (integrationSeconds > 255)
+                throw new ArgumentOutOfRangeException("integrationSeconds");
+            return CallFrequencyCounter(IoctlFrequencySet, counter,
+                integrationSeconds);
+        }
+
+        private FrequencyCounterState CallFrequencyCounter(uint code,
+            uint counter, uint integrationSeconds)
+        {
+            if (counter == 0 || counter > 4)
+                throw new ArgumentOutOfRangeException("counter");
+            TimeCardFrequencyControlRaw request = new TimeCardFrequencyControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardFrequencyControlRaw)),
+                Counter = counter,
+                IntegrationSeconds = integrationSeconds
+            };
+            byte[] output = Call(code, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardFrequencyControlRaw)));
+            return new FrequencyCounterState(
+                BytesToStruct<TimeCardFrequencyControlRaw>(output));
+        }
+
+        public FlashDeviceStatus GetFlashStatus()
+        {
+            return new FlashDeviceStatus(
+                GetOutput<TimeCardFlashStatusRaw>(IoctlFlashQuery));
+        }
+
+        public byte[] ReadFlash(uint offset, uint length)
+        {
+            if (length == 0 || length > MaximumFlashTransfer)
+                throw new ArgumentOutOfRangeException("length");
+            TimeCardFlashRangeRaw request = new TimeCardFlashRangeRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardFlashRangeRaw)),
+                Offset = offset,
+                Length = length
+            };
+            byte[] output = Call(IoctlFlashRead, StructToBytes(request),
+                FlashTransferBufferSize);
+            if (output.Length < FlashTransferHeaderSize)
+                throw new InvalidOperationException("The driver returned a truncated flash response.");
+            uint returnedOffset = BitConverter.ToUInt32(output, 4);
+            uint returnedLength = BitConverter.ToUInt32(output, 8);
+            if (returnedOffset != offset || returnedLength != length ||
+                output.Length < FlashTransferHeaderSize + returnedLength)
+                throw new InvalidOperationException("The driver returned an invalid flash range.");
+            byte[] data = new byte[returnedLength];
+            Buffer.BlockCopy(output, FlashTransferHeaderSize, data, 0,
+                (int)returnedLength);
+            return data;
+        }
+
+        public void EraseFlashSector(uint offset, uint eraseSize)
+        {
+            if (eraseSize == 0)
+                throw new ArgumentOutOfRangeException("eraseSize");
+            TimeCardFlashRangeRaw request = new TimeCardFlashRangeRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardFlashRangeRaw)),
+                Offset = offset,
+                Length = eraseSize
+            };
+            Call(IoctlFlashErase, StructToBytes(request), 16);
+        }
+
+        public void ProgramFlashPage(uint offset, byte[] data)
+        {
+            if (data == null)
+                throw new ArgumentNullException("data");
+            if (data.Length == 0 || data.Length > MaximumFlashTransfer)
+                throw new ArgumentOutOfRangeException("data");
+            byte[] input = new byte[FlashTransferHeaderSize + data.Length];
+            Buffer.BlockCopy(BitConverter.GetBytes((uint)input.Length), 0, input, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(offset), 0, input, 4, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes((uint)data.Length), 0, input, 8, 4);
+            Buffer.BlockCopy(data, 0, input, FlashTransferHeaderSize, data.Length);
+            Call(IoctlFlashProgram, input, 16);
+        }
+
+        public UartObservation ObserveUart(uint port, uint timeoutMilliseconds)
+        {
+            if (port > 3)
+                throw new ArgumentOutOfRangeException("port");
+            TimeCardUartObserveRaw request = new TimeCardUartObserveRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardUartObserveRaw)),
+                Port = port,
+                TimeoutMilliseconds = Math.Min(timeoutMilliseconds, 5000u)
+            };
+            byte[] output = Call(IoctlUartObserve, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardUartObserveRaw)));
+            return new UartObservation(BytesToStruct<TimeCardUartObserveRaw>(output));
         }
 
         public void ConfigureUart(uint port, uint baud)
@@ -577,6 +733,62 @@ namespace TimeCardControlCenter
                 controllerStatus, interruptStatus);
         }
 
+        public I2cMuxState GetI2cMux()
+        {
+            return new I2cMuxState(
+                GetOutput<TimeCardI2cMuxControlRaw>(IoctlI2cMuxQuery));
+        }
+
+        public I2cMuxState SetI2cMux(uint channelMask)
+        {
+            if ((channelMask & ~0x0fu) != 0)
+                throw new ArgumentOutOfRangeException("channelMask");
+            TimeCardI2cMuxControlRaw request = new TimeCardI2cMuxControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardI2cMuxControlRaw)),
+                ChannelMask = channelMask
+            };
+            byte[] output = Call(IoctlI2cMuxSet, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardI2cMuxControlRaw)));
+            return new I2cMuxState(
+                BytesToStruct<TimeCardI2cMuxControlRaw>(output));
+        }
+
+        public BoardLedState GetBoardLed(uint led)
+        {
+            if (led >= 6)
+                throw new ArgumentOutOfRangeException("led");
+            TimeCardLedControlRaw request = new TimeCardLedControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardLedControlRaw)),
+                Led = led
+            };
+            byte[] output = Call(IoctlLedQuery, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardLedControlRaw)));
+            return new BoardLedState(BytesToStruct<TimeCardLedControlRaw>(output));
+        }
+
+        public BoardLedState SetBoardLed(uint led, byte red, byte green,
+                                         byte blue, byte globalCurrent)
+        {
+            if (led >= 6)
+                throw new ArgumentOutOfRangeException("led");
+            if (globalCurrent == 0 || globalCurrent > 128)
+                throw new ArgumentOutOfRangeException("globalCurrent");
+            TimeCardLedControlRaw request = new TimeCardLedControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardLedControlRaw)),
+                Led = led,
+                Red = red,
+                Green = green,
+                Blue = blue,
+                GlobalCurrent = globalCurrent
+            };
+            byte[] output = Call(IoctlLedSet, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardLedControlRaw)));
+            return new BoardLedState(BytesToStruct<TimeCardLedControlRaw>(output));
+        }
+
         private TimeCardHierarchyRaw SetHierarchyRaw(uint action, bool persist)
         {
             TimeCardHierarchyRaw request = new TimeCardHierarchyRaw
@@ -630,8 +842,13 @@ namespace TimeCardControlCenter
                     input == null ? 0 : input.Length, output, outputSize,
                     out returned, IntPtr.Zero);
                 if (!success)
-                    throw new Win32Exception(Marshal.GetLastWin32Error(),
-                        string.Format("Time Card IOCTL 0x{0:X8} failed.", code));
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    string systemMessage = new Win32Exception(error).Message;
+                    throw new Win32Exception(error, string.Format(
+                        "Time Card IOCTL 0x{0:X8} failed with Win32 error {1}: {2}",
+                        code, error, systemMessage));
+                }
                 if (output != null && returned < outputSize)
                     Array.Resize(ref output, returned);
                 return output ?? new byte[0];

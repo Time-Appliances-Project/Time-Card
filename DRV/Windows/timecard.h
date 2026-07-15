@@ -34,6 +34,13 @@ extern const GUID GUID_DEVCLASS_TIMECARD;
 
 #define TIMECARD_I2C_OFFSET_MSI         0x00150000u
 #define TIMECARD_I2C_OFFSET_MSIX        0x02150000u
+#define TIMECARD_FLASH_OFFSET_MSI       0x00310000u
+#define TIMECARD_FLASH_OFFSET_MSIX      0x02310000u
+
+#define TIMECARD_SIGNAL_BASE_MSI        0x010d0000u
+#define TIMECARD_SIGNAL_BASE_MSIX       0x030d0000u
+#define TIMECARD_FREQUENCY_BASE_MSI     0x01200000u
+#define TIMECARD_FREQUENCY_BASE_MSIX    0x03200000u
 
 #define TIMECARD_REGISTER_WINDOW_SIZE   0x00010000u
 #define TIMECARD_UART_CLOCK_HZ          50000000u
@@ -93,6 +100,31 @@ typedef struct _TIMECARD_GPIO_REG {
     ULONG Reserved1;
 } TIMECARD_GPIO_REG, *PTIMECARD_GPIO_REG;
 
+typedef struct _TIMECARD_SIGNAL_REG {
+    ULONG Enable;
+    ULONG Status;
+    ULONG Polarity;
+    ULONG Version;
+    ULONG Reserved0[4];
+    ULONG CableDelay;
+    ULONG Reserved1[3];
+    ULONG Interrupt;
+    ULONG InterruptMask;
+    ULONG Reserved2[2];
+    ULONG StartNanoseconds;
+    ULONG StartSeconds;
+    ULONG PulseNanoseconds;
+    ULONG PulseSeconds;
+    ULONG PeriodNanoseconds;
+    ULONG PeriodSeconds;
+    ULONG RepeatCount;
+} TIMECARD_SIGNAL_REG, *PTIMECARD_SIGNAL_REG;
+
+typedef struct _TIMECARD_FREQUENCY_REG {
+    ULONG Control;
+    ULONG Status;
+} TIMECARD_FREQUENCY_REG, *PTIMECARD_FREQUENCY_REG;
+
 typedef struct _DEVICE_CONTEXT {
     WDFDEVICE Device;
     volatile UCHAR *Bar0Base;
@@ -102,13 +134,20 @@ typedef struct _DEVICE_CONTEXT {
     volatile TOD_REG *NmeaOut;
     volatile TIMECARD_GPIO_REG *SmaMap1;
     volatile TIMECARD_GPIO_REG *SmaMap2;
+    volatile TIMECARD_SIGNAL_REG *Signal[TIMECARD_SIGNAL_COUNT];
+    volatile TIMECARD_FREQUENCY_REG *Frequency[TIMECARD_FREQUENCY_COUNT];
     volatile UCHAR *I2c;
+    volatile UCHAR *Flash;
     volatile UCHAR *Uart[TIMECARD_UART_COUNT];
     ULONG ClockOffset;
     ULONG TodOffset;
     ULONG NmeaOutOffset;
     ULONG I2cOffset;
     ULONG I2cKnownDeviceMask;
+    ULONG FlashOffset;
+    ULONG FlashJedecId;
+    ULONG FlashCapacity;
+    ULONG FlashFifoDepth;
     ULONG InterruptMessages;
     ULONG Layout;
     BOOLEAN HardwareReady;
@@ -177,6 +216,9 @@ NTSTATUS TimeCardUartWrite(PDEVICE_CONTEXT context,
                            const TIMECARD_UART_TRANSFER *transfer,
                            ULONG inputLength,
                            TIMECARD_UART_RESULT *result);
+NTSTATUS TimeCardUartObserve(PDEVICE_CONTEXT context,
+                             const TIMECARD_UART_OBSERVE *request,
+                             TIMECARD_UART_OBSERVE *response);
 
 NTSTATUS TimeCardSmaQuery(PDEVICE_CONTEXT context,
                           ULONG connector,
@@ -193,6 +235,17 @@ NTSTATUS TimeCardI2cProbe(PDEVICE_CONTEXT context,
 NTSTATUS TimeCardI2cRead(PDEVICE_CONTEXT context,
                          const TIMECARD_I2C_READ_REQUEST *request,
                          TIMECARD_I2C_TRANSFER *transfer);
+NTSTATUS TimeCardI2cMuxQuery(PDEVICE_CONTEXT context,
+                             TIMECARD_I2C_MUX_CONTROL *control);
+NTSTATUS TimeCardI2cMuxSet(PDEVICE_CONTEXT context,
+                           const TIMECARD_I2C_MUX_CONTROL *request,
+                           TIMECARD_I2C_MUX_CONTROL *response);
+NTSTATUS TimeCardLedQuery(PDEVICE_CONTEXT context,
+                          ULONG led,
+                          TIMECARD_LED_CONTROL *control);
+NTSTATUS TimeCardLedSet(PDEVICE_CONTEXT context,
+                        const TIMECARD_LED_CONTROL *request,
+                        TIMECARD_LED_CONTROL *response);
 NTSTATUS TimeCardGetIdentity(PDEVICE_CONTEXT context,
                              TIMECARD_IDENTITY *identity);
 
@@ -202,3 +255,26 @@ NTSTATUS TimeCardNmeaQuery(PDEVICE_CONTEXT context,
 NTSTATUS TimeCardNmeaSet(PDEVICE_CONTEXT context,
                          const TIMECARD_NMEA_CONTROL *request,
                          TIMECARD_NMEA_CONTROL *response);
+
+NTSTATUS TimeCardSignalQuery(PDEVICE_CONTEXT context, ULONG generator,
+                             TIMECARD_SIGNAL_CONTROL *control);
+NTSTATUS TimeCardSignalSet(PDEVICE_CONTEXT context,
+                           const TIMECARD_SIGNAL_CONTROL *request,
+                           TIMECARD_SIGNAL_CONTROL *response);
+NTSTATUS TimeCardFrequencyQuery(PDEVICE_CONTEXT context, ULONG counter,
+                                TIMECARD_FREQUENCY_CONTROL *control);
+NTSTATUS TimeCardFrequencySet(PDEVICE_CONTEXT context,
+                              const TIMECARD_FREQUENCY_CONTROL *request,
+                              TIMECARD_FREQUENCY_CONTROL *response);
+
+NTSTATUS TimeCardFlashQuery(PDEVICE_CONTEXT context,
+                            TIMECARD_FLASH_STATUS *status);
+NTSTATUS TimeCardFlashRead(PDEVICE_CONTEXT context,
+                           const TIMECARD_FLASH_RANGE *request,
+                           TIMECARD_FLASH_TRANSFER *transfer);
+NTSTATUS TimeCardFlashErase(PDEVICE_CONTEXT context,
+                            const TIMECARD_FLASH_RANGE *request,
+                            TIMECARD_FLASH_RESULT *result);
+NTSTATUS TimeCardFlashProgram(PDEVICE_CONTEXT context,
+                              const TIMECARD_FLASH_TRANSFER *request,
+                              TIMECARD_FLASH_RESULT *result);
