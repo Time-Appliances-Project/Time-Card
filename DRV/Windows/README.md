@@ -64,12 +64,23 @@ Build output is written to:
 
 The repository also includes a polished native Windows dashboard covering live
 PHC telemetry and clock synchronization, u-blox GNSS configuration and a sky
-map, Microchip MAC-SA53 atomic-clock control, multi-format UART monitoring,
+map, Microchip MAC-SA53 atomic-clock control, protocol-aware u-blox UART
+decoding, decoded FPGA NMEA sentences, dynamically enumerated Windows COM
+ports, and multi-format raw monitoring,
 NMEA generation, SMA routing, timing generators and frequency counters,
 sensors and IMU telemetry, I2C mux and status-LED control, subsystem hierarchy,
 FPGA firmware updates, and engineering diagnostics. The application includes
 an animated, aspect-preserving Time Card identity, a polished splash screen,
 clear connection state, and one-click administrator restart when required.
+It also includes a clickable end-to-end timing health topology, a timestamped
+Telemetry Studio with CSV/JSON recording, cross-timestamp distribution and
+percentiles, and a gravity-compensated IMU vibration trace with rolling RMS;
+verified configuration profiles with automatic rollback; a read-only guided
+hardware self-test; privacy-conscious ZIP support bundles; responsive themes;
+and a synthetic no-write demo mode.
+The serial laboratory supports complete generic COM framing and flow-control
+settings, filters, counters, capture, offline decoder replay, and text, CSV,
+JSON, or binary export.
 
 ```powershell
 .\build-gui.cmd release
@@ -91,8 +102,8 @@ Driver **1.15.1 / ABI 8** is required for the complete feature set shown below.
 | ![UART and NMEA workspace](assets/timecard-control-center-nmea.png) | ![SMA connector workspace](assets/timecard-control-center-sma.png) | ![Timing generator workspace](assets/timecard-control-center-timing.png) |
 | Sensors and IMU | I2C and status LEDs | Subsystem map |
 | ![Sensors and IMU workspace](assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](assets/timecard-control-center-i2c.png) | ![Subsystem workspace](assets/timecard-control-center-subsystems.png) |
-
-![FPGA SPI-flash firmware update workspace](assets/timecard-control-center-flash.png)
+| Telemetry Studio | Profiles and self-test | FPGA SPI flash |
+| ![Telemetry Studio workspace](assets/timecard-control-center-telemetry.png) | ![Profiles and self-test workspace](assets/timecard-control-center-operations.png) | ![FPGA SPI-flash firmware update workspace](assets/timecard-control-center-flash.png) |
 
 The default Release build is unsigned and ready for Microsoft production
 signing. Use `build.cmd test` only for a local development package. To create

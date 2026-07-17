@@ -13,13 +13,17 @@ it does not shell out to `timecardctl` or scrape Device Manager.
 | ![UART and NMEA workspace](../assets/timecard-control-center-nmea.png) | ![SMA connector workspace](../assets/timecard-control-center-sma.png) | ![Timing generator workspace](../assets/timecard-control-center-timing.png) |
 | Sensors and IMU | I2C and status LEDs | Subsystem map |
 | ![Sensors and IMU workspace](../assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](../assets/timecard-control-center-i2c.png) | ![Subsystem workspace](../assets/timecard-control-center-subsystems.png) |
-
-![FPGA SPI-flash firmware update workspace](../assets/timecard-control-center-flash.png)
+| Telemetry Studio | Profiles and self-test | FPGA SPI flash |
+| ![Telemetry Studio workspace](../assets/timecard-control-center-telemetry.png) | ![Profiles and self-test workspace](../assets/timecard-control-center-operations.png) | ![FPGA SPI-flash firmware update workspace](../assets/timecard-control-center-flash.png) |
 
 ## Current capabilities
 
 - Live PHC time, system cross-timestamp, offset, and sampling-window display,
   with rolling 200-second offset histories and 60-second uncertainty histories.
+- A live, clickable source-to-system topology that evaluates the PCIe
+  controller, GNSS receiver, ToD engine, SA53, PHC, SMA fabric, I2C management
+  bus, and Windows UTC as one health path. Highlighted components open the
+  appropriate corrective workspace.
 - Clock engine, synchronization, PCIe layout, BAR, interrupt status, and a
   guarded selector for all FPGA clock sources exposed by Linux `ptp_ocp`.
 - Decoded GNSS fix and seen/locked satellite counts from the ToD engine.
@@ -32,9 +36,11 @@ it does not shell out to `timecardctl` or scrape Device Manager.
   constellation selection, TP1 timing, and UART 1 message-rate controls.
 - Guarded one-shot synchronization in both directions between system UTC and
   the Time Card PHC.
-- Polled UART configuration and monitoring with Auto, ASCII, hexadecimal,
-  decimal, and binary display modes, plus text or binary transmission for
-  GNSS, GNSS2, atomic-clock, and NMEA ports.
+- A serial laboratory with streaming u-blox and NMEA decoders, dynamically
+  enumerated Windows COM ports, generic-port parity/data/stop/handshake/DTR/RTS
+  settings, line endings, live filtering, RX/TX counters, display pause without
+  receive loss, bounded capture, offline replay, and text, CSV, JSON, or binary
+  export. Auto/ASCII/hexadecimal/decimal/binary raw views remain available.
 - FPGA NMEA sentence-generator enable, baud, and polarity configuration with
   one-click synchronized UART monitoring.
 - A dedicated Microchip MAC-SA53 workspace with live identity, physics-lock,
@@ -62,6 +68,24 @@ it does not shell out to `timecardctl` or scrape Device Manager.
   4 KiB erase and page programming, progress reporting, and full read-back
   verification.
 - Copyable engineering diagnostics and an in-application session log.
+- A Telemetry Studio with timestamped PHC offset, sampling-window, locked-
+  satellite, board-temperature, and gravity-compensated overall-vibration
+  charts. A cross-timestamp histogram reports the median, 95th, and 99th
+  percentile sampling windows. Mouse-wheel zoom, point inspection, pause,
+  session recording, bounded retention, and CSV/JSON export are built in.
+- Configuration profiles for GNSS, external-PPS and PTP discipline, NMEA
+  service, and lab SMA timing outputs. Every apply starts with a live rollback
+  capture, previews exact changes, uses the public IOCTLs, verifies readback,
+  and restores the prior state automatically if verification fails. Custom
+  profiles can be captured, imported, and exported as XML, with a local audit
+  trail.
+- A guided, read-only self-test covering driver/ABI, advancing PHC, lock,
+  GNSS/ToD, card identity, SMA, NMEA, I2C, sensors, UART, and Device Manager
+  hierarchy. Text reports and privacy-conscious ZIP support bundles include
+  diagnostics, compatibility, the session log, self-test, and telemetry.
+- Persistent dark, midnight-blue, and high-contrast themes; responsive compact
+  navigation; keyboard shortcuts; and a complete synthetic demo mode that
+  never writes to hardware.
 - A subsystem capability map using the same artwork as Device Manager, direct
   links to NMEA and generator/frequency configuration, and a non-destructive
   UART activity check that reports GNSS2 as `NOT PRESENT` when it is silent.
@@ -103,13 +127,31 @@ automation:
 TimeCardControlCenter.exe --page Clock
 TimeCardControlCenter.exe --page Gnss
 TimeCardControlCenter.exe --page Uart --uart-port=3
+TimeCardControlCenter.exe --page Uart --com-port=COM3
 TimeCardControlCenter.exe --page Sma
 TimeCardControlCenter.exe --page Timing
 TimeCardControlCenter.exe --page Sensors
 TimeCardControlCenter.exe --page I2c
+TimeCardControlCenter.exe --page Telemetry
+TimeCardControlCenter.exe --page Operations
 TimeCardControlCenter.exe --page Subsystems
 TimeCardControlCenter.exe --page Flash
 ```
+
+Use `--demo` to exercise the topology, telemetry, profiles, and guided test UI
+without opening the kernel device. Demo mode is synthetic and disables profile
+application:
+
+```powershell
+TimeCardControlCenter.exe --demo --page Telemetry
+TimeCardControlCenter.exe --demo --compact --theme=High-contrast
+```
+
+`--theme=Dark`, `--theme=Midnight-blue`, and `--theme=High-contrast` are
+available for repeatable visual validation. `--compact` forces the responsive
+icon-only navigation used on narrower windows. `--width=<pixels>` and
+`--height=<pixels>` set the initial window dimensions while respecting the
+supported minimum size.
 
 For repeatable documentation and visual regression checks, `--capture` renders
 the selected live application window to PNG after the initial connection pass,
@@ -117,6 +159,7 @@ then exits:
 
 ```powershell
 TimeCardControlCenter.exe --page Uart --uart-port=3 --capture=nmea.png
+TimeCardControlCenter.exe --demo --page Telemetry --capture-delay=3000 --capture=telemetry.png
 ```
 
 ## UART console
@@ -130,13 +173,51 @@ Ports use the same stable numbering as the public driver ABI:
 | 2 | Miniature atomic clock |
 | 3 | NMEA output |
 
+The selector also lists every Windows serial device currently returned by
+`SerialPort.GetPortNames()` as entries such as **COM1** or **COM12**. Use the
+refresh button beside the selector after attaching or removing a USB serial
+adapter. The app preserves the current selection when that port remains
+available and falls back to a Time Card hardware UART if it disappears.
+
+Generic COM ports use the selected baud rate, 5–8 data bits, none/even/odd/
+mark/space parity, one/one-and-a-half/two stop bits, optional XON/XOFF or
+RTS/CTS flow control, and explicit DTR/RTS state. **Configure line** verifies
+that Windows can open the selected configuration. The four FPGA UARTs remain
+fixed at 8N1 with no flow control. Read once, continuous monitoring, text/hex
+transmission, byte limits, timeouts, retained history, and every raw display
+format work on both transports. Monitoring holds a generic COM port open until
+stopped; if another program owns it, Windows reports the access error in the
+app. Generic ports do not require the Time Card driver connection.
+The u-blox mixed-stream and NMEA-only decoded views are also available for a
+generic COM port, so an external receiver or USB serial adapter can use the
+same framing, checksum, filtering, replay, and export workflow.
+
+The live filter searches rendered protocol summaries and payload text without
+discarding captured bytes. RX-only and TX-only views, pause/resume, counters,
+and capture ranges do not interrupt the monitor. **Replay** feeds a file of up
+to 16 MiB through the selected display and protocol decoder without
+transmitting it. Exports can preserve the console text, one frame per CSV/JSON
+record, or the concatenated binary payload. Text sends support no ending, CR,
+LF, or CR+LF.
+
 UART framing is currently 8N1. Reads and writes are limited to 256 bytes, and
 timeouts are clamped to five seconds. An idle read is treated as a normal
 zero-byte monitor sample rather than an application error.
 
-The display selector can automatically choose a readable representation or
-show every byte explicitly as ASCII, hexadecimal, decimal, or binary. Changing
-the selection re-renders the retained console history without another read.
+On primary and secondary GNSS, the default **u-blox decoded** view reassembles
+frames split across driver reads, separates back-to-back messages, and displays
+their names and useful fields. It recognizes binary UBX, NMEA sentences, and
+RTCM3 correction frames, validates the applicable UBX checksum, NMEA checksum,
+or RTCM CRC-24Q, and reports stream resynchronization. Common navigation,
+satellite, timing, raw-measurement, receiver-version, acknowledgement, and
+configuration messages receive detailed summaries; unknown valid messages are
+still identified by class and message ID.
+
+The display selector can instead automatically choose a readable raw
+representation or show every byte explicitly as ASCII, hexadecimal, decimal,
+or binary. Changing the selection re-renders the retained console history
+without another read. Selecting the atomic-clock UART returns the display to
+**Auto** because that port does not carry a GNSS protocol stream.
 
 The UART selectors use an application-owned dark template so their selected
 values, editable baud field, and dropdown entries remain readable regardless
@@ -149,6 +230,69 @@ the generator, selects one of the Linux-supported baud rates, applies normal
 or inverted polarity, configures UART 3 to the same baud, and then starts the
 monitor. The driver defaults a disabled generator to 9,600 baud, matching the
 Linux initialization sequence.
+
+UART 3 automatically selects **NMEA decoded**. The streaming decoder preserves
+partial sentences between driver reads, separates consecutive sentences,
+validates XOR checksums, and displays the talker/message identifier plus useful
+fields for RMC, GGA, GSA, GSV, GLL, VTG, GNS, ZDA, GST, TXT, HDT, and THS.
+Unrecognized sentences remain visible with their data fields instead of being
+dropped. Select **ASCII** when the original wire sentence is required.
+
+## Telemetry, profiles, and self-test
+
+**Telemetry Studio** keeps up to 1,800 live samples by default. Recording is
+explicit: the charts continue to show live state while the session recorder is
+stopped, and only recorded samples appear in CSV/JSON export. Pausing freezes
+the visual display while driver polling continues. Hovering a chart reports
+the exact UTC acquisition time and value; the mouse wheel changes the visible
+sample window.
+
+The cross-timestamp distribution uses the same system-sampling-window values
+as the line chart and marks its median and 95th percentile; the summary also
+reports the 99th percentile. Overall vibration is the Euclidean magnitude of
+the BNO055 gravity-compensated linear-acceleration vector,
+`sqrt(x*x + y*y + z*z)`, in m/s². The live label includes a rolling 60-sample
+RMS, and recorded CSV/JSON rows include `vibration_m_s2` /
+`vibrationMetersPerSecondSquared`. These are board-motion indicators, not a
+calibrated structural-vibration measurement.
+
+**Profiles & Self-Test** provides capability-aware operations. A profile only
+touches fields it declares. Before the first write, the app captures clock
+source, NMEA state, and all present SMA routes. Each setter is followed by
+readback verification; any exception or mismatch triggers an automatic
+best-effort restore of that capture. **Restore last known good** can explicitly
+return to the most recently captured pre-change state with the same verification
+and rollback protection. The history stores action summaries, not
+credentials or raw receiver locations, under
+`%LOCALAPPDATA%\OCP\TimeCardControlCenter`.
+
+The guided self-test is intentionally read-only and stops the one-second
+refresh timer while it owns the driver handle. A support ZIP contains plain-
+text application/OS metadata, the public driver diagnostics, test results,
+session log, compatibility matrix, and recorded telemetry. It does not collect
+credentials, browser data, or unrelated files.
+
+Keyboard shortcuts are `F5` refresh, `Ctrl+R` start/stop telemetry recording,
+`Ctrl+E` open Telemetry Studio and export, and `Ctrl+1`, `Ctrl+2`, `Ctrl+3` for
+Overview, Precision Clock, and GNSS respectively.
+
+## Validation
+
+The release build treats warnings as errors. Run the hardware-independent
+product and protocol suites from `DRV\Windows`:
+
+```powershell
+.\tools\test-control-center-product.ps1
+.\tools\test-ublox-decoder.ps1
+```
+
+The first validates the health graph, built-in profile catalog, XML profile
+round-trip, telemetry retention, and CSV/JSON export including vibration. The second validates
+fragmented and back-to-back UBX, NMEA, and RTCM3 streams plus checksum/CRC
+handling. `--demo --capture=<file.png>` provides repeatable visual smoke tests
+for every workspace. `--capture-delay=<milliseconds>` (100 through 10,000)
+allows live charts to populate before capture; `verify.ps1 -ExpectHierarchy
+-TestGnssUart` remains the real-card driver validation.
 
 ## Precision clock source
 
