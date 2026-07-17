@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace TimeCardControlCenter
@@ -36,13 +38,24 @@ namespace TimeCardControlCenter
                 new FrameworkPropertyMetadata(0.0,
                     FrameworkPropertyMetadataOptions.AffectsRender));
 
-        private readonly List<double> samples = new List<double>();
+        private sealed class Sample
+        {
+            public DateTime TimestampUtc;
+            public double Value;
+        }
+
+        private readonly List<Sample> samples = new List<Sample>();
         private int capacity = 60;
+        private int visibleSampleCount;
+        private int hoverIndex = -1;
 
         public RollingTelemetryChart()
         {
             SnapsToDevicePixels = true;
-            Focusable = false;
+            Focusable = true;
+            MouseMove += Chart_MouseMove;
+            MouseLeave += delegate { hoverIndex = -1; ToolTip = null; InvalidateVisual(); };
+            MouseWheel += Chart_MouseWheel;
         }
 
         public Brush LineBrush
@@ -88,15 +101,28 @@ namespace TimeCardControlCenter
 
         public int SampleCount { get { return samples.Count; } }
 
+        public bool IsPaused { get; set; }
+
+        public int VisibleSampleCount
+        {
+            get { return visibleSampleCount <= 0 ? samples.Count : visibleSampleCount; }
+            set
+            {
+                visibleSampleCount = value <= 0 ? 0 : Math.Max(10, value);
+                InvalidateVisual();
+            }
+        }
+
         public double Minimum
         {
             get
             {
                 if (samples.Count == 0)
                     return 0;
-                double value = samples[0];
-                for (int index = 1; index < samples.Count; index++)
-                    value = Math.Min(value, samples[index]);
+                int start = VisibleStart;
+                double value = samples[start].Value;
+                for (int index = start + 1; index < samples.Count; index++)
+                    value = Math.Min(value, samples[index].Value);
                 return value;
             }
         }
@@ -107,9 +133,10 @@ namespace TimeCardControlCenter
             {
                 if (samples.Count == 0)
                     return 0;
-                double value = samples[0];
-                for (int index = 1; index < samples.Count; index++)
-                    value = Math.Max(value, samples[index]);
+                int start = VisibleStart;
+                double value = samples[start].Value;
+                for (int index = start + 1; index < samples.Count; index++)
+                    value = Math.Max(value, samples[index].Value);
                 return value;
             }
         }
@@ -138,17 +165,32 @@ namespace TimeCardControlCenter
 
         public void AddSample(double value)
         {
+            AddSample(DateTime.UtcNow, value);
+        }
+
+        public void AddSample(DateTime timestampUtc, double value)
+        {
             if (double.IsNaN(value) || double.IsInfinity(value))
                 return;
-            samples.Add(value);
+            samples.Add(new Sample { TimestampUtc = timestampUtc, Value = value });
             TrimToCapacity();
-            InvalidateVisual();
+            if (!IsPaused)
+                InvalidateVisual();
         }
 
         public void Clear()
         {
             samples.Clear();
+            hoverIndex = -1;
             InvalidateVisual();
+        }
+
+        public IList<Tuple<DateTime, double>> GetSamples()
+        {
+            List<Tuple<DateTime, double>> result = new List<Tuple<DateTime, double>>();
+            foreach (Sample sample in samples)
+                result.Add(Tuple.Create(sample.TimestampUtc, sample.Value));
+            return result.AsReadOnly();
         }
 
         protected override void OnRender(DrawingContext drawingContext)
@@ -186,13 +228,15 @@ namespace TimeCardControlCenter
                     new Point(plot.Left, zeroY), new Point(plot.Right, zeroY));
             }
 
-            Point[] points = new Point[samples.Count];
-            for (int index = 0; index < samples.Count; index++)
+            int visibleStart = VisibleStart;
+            int visibleCount = samples.Count - visibleStart;
+            Point[] points = new Point[visibleCount];
+            for (int index = 0; index < visibleCount; index++)
             {
-                double x = samples.Count == 1 ? plot.Right :
-                    plot.Left + (plot.Width * index / (samples.Count - 1.0));
+                double x = visibleCount == 1 ? plot.Right :
+                    plot.Left + (plot.Width * index / (visibleCount - 1.0));
                 points[index] = new Point(x,
-                    ValueToY(samples[index], minimum, maximum, plot));
+                    ValueToY(samples[visibleStart + index].Value, minimum, maximum, plot));
             }
 
             drawingContext.PushClip(new RectangleGeometry(plot));
@@ -232,7 +276,54 @@ namespace TimeCardControlCenter
             drawingContext.DrawEllipse(new SolidColorBrush(Color.FromArgb(44, 255, 255, 255)),
                 null, latest, 5.5, 5.5);
             drawingContext.DrawEllipse(LineBrush, null, latest, 2.8, 2.8);
+
+            if (hoverIndex >= visibleStart && hoverIndex < samples.Count && visibleCount > 1)
+            {
+                int localIndex = hoverIndex - visibleStart;
+                Point hover = points[Math.Max(0, Math.Min(points.Length - 1, localIndex))];
+                Pen cursorPen = new Pen(new SolidColorBrush(Color.FromArgb(135, 230, 240, 248)), 1);
+                drawingContext.DrawLine(cursorPen, new Point(hover.X, plot.Top),
+                    new Point(hover.X, plot.Bottom));
+                drawingContext.DrawEllipse(Brushes.White, new Pen(LineBrush, 1.4), hover, 3.6, 3.6);
+            }
             drawingContext.Pop();
+        }
+
+        private int VisibleStart
+        {
+            get
+            {
+                int count = visibleSampleCount <= 0 ? samples.Count :
+                    Math.Min(samples.Count, visibleSampleCount);
+                return Math.Max(0, samples.Count - count);
+            }
+        }
+
+        private void Chart_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (samples.Count == 0 || ActualWidth <= 1)
+                return;
+            int start = VisibleStart;
+            int count = samples.Count - start;
+            double normalized = Math.Max(0, Math.Min(1, e.GetPosition(this).X / ActualWidth));
+            hoverIndex = start + (int)Math.Round(normalized * Math.Max(0, count - 1));
+            Sample sample = samples[Math.Max(0, Math.Min(samples.Count - 1, hoverIndex))];
+            ToolTip = string.Format(CultureInfo.InvariantCulture,
+                "{0:HH:mm:ss.fff} UTC\n{1:R}", sample.TimestampUtc, sample.Value);
+            InvalidateVisual();
+        }
+
+        private void Chart_MouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (samples.Count < 10)
+                return;
+            int current = VisibleSampleCount;
+            if (current <= 0)
+                current = samples.Count;
+            double factor = e.Delta > 0 ? 0.75 : 1.34;
+            VisibleSampleCount = Math.Max(10, Math.Min(samples.Count,
+                (int)Math.Round(current * factor)));
+            e.Handled = true;
         }
 
         private void TrimToCapacity()

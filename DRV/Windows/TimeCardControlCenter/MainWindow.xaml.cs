@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Ports;
 using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -23,11 +24,30 @@ namespace TimeCardControlCenter
     public partial class MainWindow : Window
     {
         private readonly DispatcherTimer refreshTimer;
+        private const string GenericComTagPrefix = "COM:";
         private readonly string[] startupArguments;
         private TimeCardClient client;
         private TimeCardSnapshot lastSnapshot;
         private CancellationTokenSource uartMonitorCancellation;
+        private readonly object genericSerialSync = new object();
+        private SerialPort monitoredGenericSerialPort;
+        private string monitoredGenericSerialPortName;
+        private bool refreshingGenericComPorts;
         private readonly List<UartConsoleEntry> uartConsoleEntries = new List<UartConsoleEntry>();
+        private readonly UbloxStreamDecoder[] uartReceiveDecoders =
+        {
+            new UbloxStreamDecoder(), new UbloxStreamDecoder(), null,
+            new UbloxStreamDecoder()
+        };
+        private readonly UbloxStreamDecoder[] uartTransmitDecoders =
+        {
+            new UbloxStreamDecoder(), new UbloxStreamDecoder(), null,
+            new UbloxStreamDecoder()
+        };
+        private readonly UbloxStreamDecoder genericReceiveDecoder =
+            new UbloxStreamDecoder();
+        private readonly UbloxStreamDecoder genericTransmitDecoder =
+            new UbloxStreamDecoder();
         private int uartConsoleHistoryBytes;
         private bool refreshing;
         private bool connecting;
@@ -90,9 +110,39 @@ namespace TimeCardControlCenter
         private sealed class UartConsoleEntry
         {
             public DateTime Timestamp { get; set; }
+            public uint Port { get; set; }
+            public string PortLabel { get; set; }
+            public bool IsGenericPort { get; set; }
+            public bool HasLineStatus { get; set; }
             public string Direction { get; set; }
             public byte[] Data { get; set; }
             public uint LineStatus { get; set; }
+            public UbloxDecodeBatch Decoded { get; set; }
+        }
+
+        private sealed class GenericSerialSettings
+        {
+            public int Baud { get; set; }
+            public int DataBits { get; set; }
+            public Parity Parity { get; set; }
+            public StopBits StopBits { get; set; }
+            public Handshake Handshake { get; set; }
+            public bool DtrEnable { get; set; }
+            public bool RtsEnable { get; set; }
+
+            public override string ToString()
+            {
+                string parity = Parity == Parity.None ? "N" :
+                    Parity.ToString().Substring(0, 1);
+                string stop = StopBits == StopBits.One ? "1" :
+                    StopBits == StopBits.Two ? "2" : "1.5";
+                return string.Format(CultureInfo.InvariantCulture,
+                    "{0} baud · {1}{2}{3} · {4}{5}{6}", Baud, DataBits,
+                    parity, stop, Handshake == Handshake.None ?
+                    "no flow control" : Handshake.ToString(),
+                    DtrEnable ? " · DTR" : string.Empty,
+                    RtsEnable ? " · RTS" : string.Empty);
+            }
         }
 
         private sealed class I2cRefreshResult
@@ -201,12 +251,18 @@ namespace TimeCardControlCenter
             startupArguments = Environment.GetCommandLineArgs();
             refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             refreshTimer.Tick += RefreshTimer_Tick;
+            RefreshGenericComPorts(false);
+            InitializeProductFeatures();
+            SetGenericSerialControlsEnabled(false);
         }
 
         private void ApplyStartupView(string[] arguments)
         {
             string page = null;
             int? uartPort = null;
+            string comPort = null;
+            double requestedWidth = Width;
+            double requestedHeight = Height;
             for (int index = 1; index < arguments.Length; index++)
             {
                 string argument = arguments[index] ?? string.Empty;
@@ -222,10 +278,26 @@ namespace TimeCardControlCenter
                         CultureInfo.InvariantCulture, out value) && value >= 0 && value <= 3)
                         uartPort = value;
                 }
+                else if (argument.StartsWith("--com-port=",
+                         StringComparison.OrdinalIgnoreCase))
+                    comPort = argument.Substring(11);
+                else if (argument.StartsWith("--width=",
+                         StringComparison.OrdinalIgnoreCase))
+                    double.TryParse(argument.Substring(8), NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out requestedWidth);
+                else if (argument.StartsWith("--height=",
+                         StringComparison.OrdinalIgnoreCase))
+                    double.TryParse(argument.Substring(9), NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out requestedHeight);
             }
+
+            Width = Math.Max(MinWidth, Math.Min(3840, requestedWidth));
+            Height = Math.Max(MinHeight, Math.Min(2160, requestedHeight));
 
             if (uartPort.HasValue)
                 UartPortCombo.SelectedIndex = uartPort.Value;
+            else if (!string.IsNullOrWhiteSpace(comPort))
+                SelectComboTag(UartPortCombo, GenericComTagPrefix + comPort);
             if (string.IsNullOrWhiteSpace(page))
                 return;
             if (page.Equals("Flash", StringComparison.OrdinalIgnoreCase))
@@ -241,6 +313,8 @@ namespace TimeCardControlCenter
                 page.Equals("Timing", StringComparison.OrdinalIgnoreCase) ? TimingNav :
                 page.Equals("Sensors", StringComparison.OrdinalIgnoreCase) ? SensorsNav :
                 page.Equals("I2c", StringComparison.OrdinalIgnoreCase) ? I2cNav :
+                page.Equals("Telemetry", StringComparison.OrdinalIgnoreCase) ? TelemetryNav :
+                page.Equals("Operations", StringComparison.OrdinalIgnoreCase) ? OperationsNav :
                 page.Equals("Subsystems", StringComparison.OrdinalIgnoreCase) ? SubsystemsNav :
                 page.Equals("Diagnostics", StringComparison.OrdinalIgnoreCase) ? DiagnosticsNav :
                 OverviewNav;
@@ -252,7 +326,7 @@ namespace TimeCardControlCenter
         {
             Log("OCP Time Card Control Center started.");
             string capturePath = StartupArgumentValue(startupArguments, "--capture");
-            if (string.IsNullOrWhiteSpace(capturePath) && !HasAdministratorAccess())
+            if (!productSettings.DemoMode && string.IsNullOrWhiteSpace(capturePath) && !HasAdministratorAccess())
             {
                 MessageBoxResult elevationChoice = MessageBox.Show(this,
                     "Time Card Control Center is running without administrator access. " +
@@ -264,11 +338,23 @@ namespace TimeCardControlCenter
                     return;
             }
             refreshTimer.Start();
-            await ConnectAsync();
+            if (productSettings.DemoMode)
+            {
+                SetConnectionState(true, "Demo telemetry", false);
+                UpdateDemoProduct();
+            }
+            else
+                await ConnectAsync();
             ApplyStartupView(startupArguments);
             if (!string.IsNullOrWhiteSpace(capturePath))
             {
-                await Task.Delay(300);
+                int captureDelay = 300;
+                string captureDelayArgument = StartupArgumentValue(startupArguments, "--capture-delay");
+                int parsedCaptureDelay;
+                if (int.TryParse(captureDelayArgument, NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out parsedCaptureDelay))
+                    captureDelay = Math.Max(100, Math.Min(10000, parsedCaptureDelay));
+                await Task.Delay(captureDelay);
                 CaptureWindow(Path.GetFullPath(capturePath));
                 Close();
             }
@@ -317,6 +403,7 @@ namespace TimeCardControlCenter
         {
             refreshTimer.Stop();
             StopUartMonitor();
+            CloseMonitoredGenericComPort();
             if (client != null)
             {
                 client.Dispose();
@@ -326,6 +413,11 @@ namespace TimeCardControlCenter
 
         private async void RefreshTimer_Tick(object sender, EventArgs e)
         {
+            if (productSettings != null && productSettings.DemoMode)
+            {
+                UpdateDemoProduct();
+                return;
+            }
             if (client == null)
             {
                 if (!connecting && DateTime.UtcNow - lastConnectionAttemptUtc > TimeSpan.FromSeconds(5))
@@ -333,7 +425,8 @@ namespace TimeCardControlCenter
                 return;
             }
             await RefreshSnapshotAsync(false);
-            if (SensorsPage.Visibility == Visibility.Visible)
+            if (SensorsPage.Visibility == Visibility.Visible ||
+                TelemetryPage.Visibility == Visibility.Visible)
                 await RefreshSensorsAsync(false);
         }
 
@@ -476,6 +569,7 @@ namespace TimeCardControlCenter
             HierarchyPersistedText.Foreground = snapshot.HierarchyPersisted ? healthyBrush : warningBrush;
             DiagnosticsSummaryText.Text = BuildDiagnostics(snapshot);
             UpdateBoardLedAutomationAsync(false);
+            UpdateProductSnapshot(snapshot);
         }
 
         private void UpdateClockHistory(TimeCardSnapshot snapshot, string offset,
@@ -719,15 +813,116 @@ namespace TimeCardControlCenter
             }
         }
 
-        private async void ConfigureUart_Click(object sender, RoutedEventArgs e)
+        private void RefreshComPorts_Click(object sender, RoutedEventArgs e)
         {
-            if (!EnsureConnected())
+            RefreshGenericComPorts(true);
+        }
+
+        private void RefreshGenericComPorts(bool userInitiated)
+        {
+            if (UartPortCombo == null || refreshingGenericComPorts)
                 return;
+
+            ComboBoxItem selectedItem = UartPortCombo.SelectedItem as ComboBoxItem;
+            string selectedTag = selectedItem == null ? null :
+                Convert.ToString(selectedItem.Tag, CultureInfo.InvariantCulture);
             try
             {
+                string[] portNames = SerialPort.GetPortNames()
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(ComPortNumber)
+                    .ThenBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                refreshingGenericComPorts = true;
+                foreach (ComboBoxItem item in UartPortCombo.Items
+                    .OfType<ComboBoxItem>().Where(IsGenericComPortItem).ToList())
+                    UartPortCombo.Items.Remove(item);
+                foreach (string portName in portNames)
+                {
+                    UartPortCombo.Items.Add(new ComboBoxItem
+                    {
+                        Tag = GenericComTagPrefix + portName,
+                        Content = portName + " · Windows serial port"
+                    });
+                }
+
+                ComboBoxItem restored = UartPortCombo.Items
+                    .OfType<ComboBoxItem>().FirstOrDefault(item =>
+                        string.Equals(Convert.ToString(item.Tag,
+                            CultureInfo.InvariantCulture), selectedTag,
+                            StringComparison.OrdinalIgnoreCase));
+                UartPortCombo.SelectedItem = restored ??
+                    UartPortCombo.Items.OfType<ComboBoxItem>().FirstOrDefault();
+                refreshingGenericComPorts = false;
+
+                ComboBoxItem currentItem = UartPortCombo.SelectedItem as ComboBoxItem;
+                string currentTag = currentItem == null ? null :
+                    Convert.ToString(currentItem.Tag, CultureInfo.InvariantCulture);
+                if (!string.Equals(selectedTag, currentTag,
+                    StringComparison.OrdinalIgnoreCase))
+                    UartPort_SelectionChanged(UartPortCombo, null);
+                if (userInitiated && UartStatusText != null)
+                {
+                    UartStatusText.Text = portNames.Length == 0 ?
+                        "No Windows COM ports found · Time Card UARTs remain available" :
+                        string.Format(CultureInfo.InvariantCulture,
+                            "Found {0} Windows COM port(s): {1}", portNames.Length,
+                            string.Join(", ", portNames));
+                }
+            }
+            catch (Exception ex)
+            {
+                refreshingGenericComPorts = false;
+                if (userInitiated && UartStatusText != null)
+                    UartStatusText.Text = "Unable to enumerate Windows COM ports";
+                Log("COM-port enumeration failed: " + ex.Message);
+            }
+        }
+
+        private static bool IsGenericComPortItem(ComboBoxItem item)
+        {
+            string tag = item == null ? null : Convert.ToString(item.Tag,
+                CultureInfo.InvariantCulture);
+            return tag != null && tag.StartsWith(GenericComTagPrefix,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int ComPortNumber(string portName)
+        {
+            int number;
+            return portName != null &&
+                portName.StartsWith("COM", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(portName.Substring(3), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out number) ?
+                number : int.MaxValue;
+        }
+
+        private async void ConfigureUart_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                uint baud = ParseUnsigned(UartBaudCombo.Text, "baud rate", 1,
+                    int.MaxValue);
+                string genericPort = SelectedGenericComPort();
+                if (genericPort != null)
+                {
+                    GenericSerialSettings settings =
+                        SelectedGenericSerialSettings((int)baud);
+                    await Task.Run(() => ConfigureGenericComPort(genericPort,
+                        settings));
+                    UartStatusText.Text = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0} configured · {1}", genericPort, settings);
+                    Log(UartStatusText.Text + ".");
+                    return;
+                }
+                if (!EnsureConnected())
+                    return;
                 uint port = SelectedUartPort();
-                uint baud = ParseUnsigned(UartBaudCombo.Text, "baud rate", 1, uint.MaxValue);
                 await Task.Run(() => client.ConfigureUart(port, baud));
+                ResetUartDecoder(port);
                 UartStatusText.Text = string.Format("UART {0} configured at {1} baud · 8N1", port, baud);
                 Log(UartStatusText.Text + ".");
             }
@@ -744,15 +939,30 @@ namespace TimeCardControlCenter
 
         private async Task ReadUartOnceAsync()
         {
-            if (!EnsureConnected())
-                return;
             try
             {
-                uint port = SelectedUartPort();
                 uint bytes = ParseUnsigned(UartBytesTextBox.Text, "byte count", 1, 256);
                 uint timeout = ParseUnsigned(UartTimeoutTextBox.Text, "timeout", 0, 5000);
+                string genericPort = SelectedGenericComPort();
+                if (genericPort != null)
+                {
+                    uint baud = ParseUnsigned(UartBaudCombo.Text, "baud rate", 1,
+                        int.MaxValue);
+                    GenericSerialSettings settings =
+                        SelectedGenericSerialSettings((int)baud);
+                    byte[] data = await Task.Run(() => ReadGenericComPort(
+                        genericPort, settings, (int)bytes, (int)timeout));
+                    AppendGenericUart(genericPort, "RX", data);
+                    UartStatusText.Text = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Read {0} byte(s) from {1}", data.Length, genericPort);
+                    return;
+                }
+                if (!EnsureConnected())
+                    return;
+                uint port = SelectedUartPort();
                 UartReadResult result = await Task.Run(() => client.ReadUart(port, bytes, timeout));
-                AppendUart("RX", result.Data, result.LineStatus);
+                AppendUart(port, "RX", result.Data, result.LineStatus);
                 UartStatusText.Text = string.Format("Read {0} byte(s) · LSR 0x{1:X2}", result.Data.Length, result.LineStatus & 0xff);
             }
             catch (Exception ex)
@@ -763,16 +973,31 @@ namespace TimeCardControlCenter
 
         private async void SendUart_Click(object sender, RoutedEventArgs e)
         {
-            if (!EnsureConnected())
-                return;
             try
             {
                 byte[] data = ParseUartSendData();
                 if (data.Length == 0)
                     throw new InvalidOperationException("Enter text or hexadecimal bytes to send.");
+                string genericPort = SelectedGenericComPort();
+                if (genericPort != null)
+                {
+                    uint baud = ParseUnsigned(UartBaudCombo.Text, "baud rate", 1,
+                        int.MaxValue);
+                    GenericSerialSettings settings =
+                        SelectedGenericSerialSettings((int)baud);
+                    await Task.Run(() => WriteGenericComPort(genericPort,
+                        settings, data));
+                    AppendGenericUart(genericPort, "TX", data);
+                    UartStatusText.Text = string.Format(
+                        CultureInfo.InvariantCulture,
+                        "Wrote {0} byte(s) to {1}", data.Length, genericPort);
+                    return;
+                }
+                if (!EnsureConnected())
+                    return;
                 uint port = SelectedUartPort();
                 UartWriteResult result = await Task.Run(() => client.WriteUart(port, data, 1000));
-                AppendUart("TX", data, result.LineStatus);
+                AppendUart(port, "TX", data, result.LineStatus);
                 UartStatusText.Text = string.Format("Wrote {0} byte(s) · LSR 0x{1:X2}",
                     result.BytesTransferred, result.LineStatus & 0xff);
             }
@@ -789,11 +1014,14 @@ namespace TimeCardControlCenter
                 StopUartMonitor();
                 return;
             }
-            if (!EnsureConnected())
+            string genericPort = SelectedGenericComPort();
+            if (genericPort == null && !EnsureConnected())
                 return;
             uartMonitorCancellation = new CancellationTokenSource();
             MonitorButton.Content = "Stop monitor";
-            UartStatusText.Text = "Monitoring UART " + SelectedUartPort();
+            UartStatusText.Text = genericPort == null ?
+                "Monitoring UART " + SelectedUartPort() :
+                "Monitoring " + genericPort;
             MonitorUartAsync(uartMonitorCancellation.Token);
         }
 
@@ -801,14 +1029,25 @@ namespace TimeCardControlCenter
         {
             try
             {
-                uint port = SelectedUartPort();
                 uint bytes = ParseUnsigned(UartBytesTextBox.Text, "byte count", 1, 256);
+                string genericPort = SelectedGenericComPort();
+                if (genericPort != null)
+                {
+                    uint baud = ParseUnsigned(UartBaudCombo.Text, "baud rate", 1,
+                        int.MaxValue);
+                    GenericSerialSettings settings =
+                        SelectedGenericSerialSettings((int)baud);
+                    await MonitorGenericComPortAsync(genericPort, settings,
+                        (int)bytes, cancellationToken);
+                    return;
+                }
+                uint port = SelectedUartPort();
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     UartReadResult result = await Task.Run(() => client.ReadUart(port, bytes, 250));
                     if (result.Data.Length != 0)
                     {
-                        AppendUart("RX", result.Data, result.LineStatus);
+                        AppendUart(port, "RX", result.Data, result.LineStatus);
                         UartStatusText.Text = string.Format("Streaming UART {0} · last packet {1} bytes", port, result.Data.Length);
                     }
                     await Task.Delay(30, cancellationToken);
@@ -819,7 +1058,8 @@ namespace TimeCardControlCenter
             }
             catch (Exception ex)
             {
-                ShowUartError("UART monitor stopped", ex);
+                if (!cancellationToken.IsCancellationRequested)
+                    ShowUartError("UART monitor stopped", ex);
             }
             finally
             {
@@ -839,11 +1079,225 @@ namespace TimeCardControlCenter
                 uartMonitorCancellation.Cancel();
         }
 
+        private static SerialPort CreateGenericSerialPort(string portName,
+            GenericSerialSettings settings)
+        {
+            SerialPort port = new SerialPort(portName);
+            ApplyGenericSerialSettings(port, settings);
+            port.ReadTimeout = 250;
+            port.WriteTimeout = 1000;
+            return port;
+        }
+
+        private static void ApplyGenericSerialSettings(SerialPort port,
+            GenericSerialSettings settings)
+        {
+            port.BaudRate = settings.Baud;
+            port.DataBits = settings.DataBits;
+            port.Parity = settings.Parity;
+            port.StopBits = settings.StopBits;
+            port.Handshake = settings.Handshake;
+            port.DtrEnable = settings.DtrEnable;
+            port.RtsEnable = settings.RtsEnable;
+        }
+
+        private GenericSerialSettings SelectedGenericSerialSettings(int baud)
+        {
+            ComboBoxItem parityItem = UartParityCombo.SelectedItem as ComboBoxItem;
+            ComboBoxItem stopItem = UartStopBitsCombo.SelectedItem as ComboBoxItem;
+            ComboBoxItem handshakeItem = UartHandshakeCombo.SelectedItem as ComboBoxItem;
+            int dataBits;
+            if (!int.TryParse(SelectedComboText(UartDataBitsCombo),
+                NumberStyles.Integer, CultureInfo.InvariantCulture, out dataBits))
+                dataBits = 8;
+            return new GenericSerialSettings
+            {
+                Baud = baud,
+                DataBits = dataBits,
+                Parity = (Parity)Enum.Parse(typeof(Parity),
+                    Convert.ToString(parityItem.Tag, CultureInfo.InvariantCulture)),
+                StopBits = (StopBits)Enum.Parse(typeof(StopBits),
+                    Convert.ToString(stopItem.Tag, CultureInfo.InvariantCulture)),
+                Handshake = (Handshake)Enum.Parse(typeof(Handshake),
+                    Convert.ToString(handshakeItem.Tag, CultureInfo.InvariantCulture)),
+                DtrEnable = UartDtrCheckBox.IsChecked == true,
+                RtsEnable = UartRtsCheckBox.IsChecked == true
+            };
+        }
+
+        private void ConfigureGenericComPort(string portName,
+                                             GenericSerialSettings settings)
+        {
+            lock (genericSerialSync)
+            {
+                if (monitoredGenericSerialPort != null &&
+                    monitoredGenericSerialPort.IsOpen &&
+                    string.Equals(monitoredGenericSerialPortName, portName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    ApplyGenericSerialSettings(monitoredGenericSerialPort, settings);
+                    return;
+                }
+            }
+
+            using (SerialPort port = CreateGenericSerialPort(portName, settings))
+                port.Open();
+        }
+
+        private byte[] ReadGenericComPort(string portName,
+                                          GenericSerialSettings settings,
+                                          int maximumBytes, int timeoutMs)
+        {
+            lock (genericSerialSync)
+            {
+                if (monitoredGenericSerialPort != null &&
+                    monitoredGenericSerialPort.IsOpen &&
+                    string.Equals(monitoredGenericSerialPortName, portName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    ApplyGenericSerialSettings(monitoredGenericSerialPort, settings);
+                    return ReadGenericSerialBytes(monitoredGenericSerialPort,
+                        maximumBytes, timeoutMs);
+                }
+            }
+
+            using (SerialPort port = CreateGenericSerialPort(portName, settings))
+            {
+                port.Open();
+                return ReadGenericSerialBytes(port, maximumBytes, timeoutMs);
+            }
+        }
+
+        private static byte[] ReadGenericSerialBytes(SerialPort port,
+                                                       int maximumBytes,
+                                                       int timeoutMs)
+        {
+            if (timeoutMs == 0 && port.BytesToRead == 0)
+                return new byte[0];
+            port.ReadTimeout = Math.Max(1, timeoutMs);
+            byte[] data = new byte[maximumBytes];
+            int count = 0;
+            try
+            {
+                count = port.Read(data, 0, maximumBytes);
+                while (count < maximumBytes && port.BytesToRead != 0)
+                {
+                    int read = port.Read(data, count, maximumBytes - count);
+                    if (read == 0)
+                        break;
+                    count += read;
+                }
+            }
+            catch (TimeoutException)
+            {
+            }
+            if (count == data.Length)
+                return data;
+            byte[] result = new byte[count];
+            if (count != 0)
+                Array.Copy(data, result, count);
+            return result;
+        }
+
+        private void WriteGenericComPort(string portName,
+                                         GenericSerialSettings settings,
+                                         byte[] data)
+        {
+            lock (genericSerialSync)
+            {
+                if (monitoredGenericSerialPort != null &&
+                    monitoredGenericSerialPort.IsOpen &&
+                    string.Equals(monitoredGenericSerialPortName, portName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    ApplyGenericSerialSettings(monitoredGenericSerialPort, settings);
+                    monitoredGenericSerialPort.Write(data, 0, data.Length);
+                    return;
+                }
+            }
+
+            using (SerialPort port = CreateGenericSerialPort(portName, settings))
+            {
+                port.Open();
+                port.Write(data, 0, data.Length);
+            }
+        }
+
+        private async Task MonitorGenericComPortAsync(string portName,
+            GenericSerialSettings settings,
+            int maximumBytes, CancellationToken cancellationToken)
+        {
+            SerialPort port = CreateGenericSerialPort(portName, settings);
+            try
+            {
+                port.Open();
+                lock (genericSerialSync)
+                {
+                    monitoredGenericSerialPort = port;
+                    monitoredGenericSerialPortName = portName;
+                }
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    byte[] data = await Task.Run(() =>
+                    {
+                        lock (genericSerialSync)
+                        {
+                            if (!port.IsOpen || port.BytesToRead == 0)
+                                return new byte[0];
+                            return ReadGenericSerialBytes(port, maximumBytes, 100);
+                        }
+                    });
+                    if (data.Length != 0)
+                    {
+                        AppendGenericUart(portName, "RX", data);
+                        UartStatusText.Text = string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Streaming {0} · last packet {1} byte(s)",
+                            portName, data.Length);
+                    }
+                    await Task.Delay(30, cancellationToken);
+                }
+            }
+            finally
+            {
+                lock (genericSerialSync)
+                {
+                    if (ReferenceEquals(monitoredGenericSerialPort, port))
+                    {
+                        monitoredGenericSerialPort = null;
+                        monitoredGenericSerialPortName = null;
+                    }
+                    if (port.IsOpen)
+                        port.Close();
+                    port.Dispose();
+                }
+            }
+        }
+
+        private void CloseMonitoredGenericComPort()
+        {
+            lock (genericSerialSync)
+            {
+                if (monitoredGenericSerialPort == null)
+                    return;
+                try
+                {
+                    if (monitoredGenericSerialPort.IsOpen)
+                        monitoredGenericSerialPort.Close();
+                }
+                catch
+                {
+                }
+            }
+        }
+
         private void ClearUart_Click(object sender, RoutedEventArgs e)
         {
             uartConsoleEntries.Clear();
             uartConsoleHistoryBytes = 0;
+            ResetAllUartDecoders();
             UartOutputTextBox.Clear();
+            OnUartConsoleCleared();
             UartStatusText.Text = "UART terminal cleared";
         }
 
@@ -851,6 +1305,27 @@ namespace TimeCardControlCenter
         {
             if (UartOutputTextBox == null)
                 return;
+            if (UartPortCombo != null && UartPortCombo.SelectedIndex >= 0)
+            {
+                string mode = SelectedUartDisplayMode();
+                string genericPort = SelectedGenericComPort();
+                if (genericPort == null)
+                {
+                    uint port = SelectedUartPort();
+                    if (mode == "Nmea" && port != 3)
+                    {
+                        SelectComboTag(UartFormatCombo, port <= 1 ?
+                            "Ublox" : "Auto");
+                        return;
+                    }
+                    if (mode == "Ublox" && port > 1)
+                    {
+                        SelectComboTag(UartFormatCombo, port == 3 ?
+                            "Nmea" : "Auto");
+                        return;
+                    }
+                }
+            }
             RenderUartConsole();
             if (UartStatusText != null && uartConsoleEntries.Count != 0)
                 UartStatusText.Text = "UART display changed to " + SelectedUartDisplayName();
@@ -858,15 +1333,62 @@ namespace TimeCardControlCenter
 
         private async void UartPort_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (refreshingGenericComPorts)
+                return;
             StopUartMonitor();
             if (UartStatusText == null || UartPortCombo.SelectedIndex < 0)
                 return;
+            string genericPort = SelectedGenericComPort();
+            if (genericPort != null)
+            {
+                SetGenericSerialControlsEnabled(true);
+                UartStatusText.Text = genericPort + " selected · Windows serial port";
+                if (NmeaConfigPanel != null)
+                    NmeaConfigPanel.Visibility = Visibility.Collapsed;
+                if (UbloxDecodePanel != null)
+                    UbloxDecodePanel.Visibility = Visibility.Visible;
+                UpdateGenericUartDecoderStatus(genericPort);
+                return;
+            }
+            SetGenericSerialControlsEnabled(false);
             uint port = SelectedUartPort();
             UartStatusText.Text = "UART " + port + " selected";
             if (NmeaConfigPanel != null)
                 NmeaConfigPanel.Visibility = port == 3 ? Visibility.Visible : Visibility.Collapsed;
+            if (UbloxDecodePanel != null)
+                UbloxDecodePanel.Visibility = port <= 1 ? Visibility.Visible : Visibility.Collapsed;
+            if (port <= 1 && SelectedUartDisplayMode() == "Nmea")
+                SelectComboTag(UartFormatCombo, "Ublox");
+            else if (port == 2 &&
+                     (SelectedUartDisplayMode() == "Ublox" ||
+                      SelectedUartDisplayMode() == "Nmea"))
+                SelectComboTag(UartFormatCombo, "Auto");
+            else if (port == 3)
+                SelectComboTag(UartFormatCombo, "Nmea");
+            UpdateUartDecoderStatus(port);
             if (port == 3)
                 await RefreshNmeaAsync(false);
+        }
+
+        private void SetGenericSerialControlsEnabled(bool enabled)
+        {
+            if (UartParityCombo == null)
+                return;
+            UartParityCombo.IsEnabled = enabled;
+            UartDataBitsCombo.IsEnabled = enabled;
+            UartStopBitsCombo.IsEnabled = enabled;
+            UartHandshakeCombo.IsEnabled = enabled;
+            UartDtrCheckBox.IsEnabled = enabled;
+            UartRtsCheckBox.IsEnabled = enabled;
+            if (!enabled)
+            {
+                UartParityCombo.SelectedIndex = 0;
+                UartDataBitsCombo.SelectedIndex = 3;
+                UartStopBitsCombo.SelectedIndex = 0;
+                UartHandshakeCombo.SelectedIndex = 0;
+                UartDtrCheckBox.IsChecked = false;
+                UartRtsCheckBox.IsChecked = false;
+            }
         }
 
         private async void RefreshNmea_Click(object sender, RoutedEventArgs e)
@@ -921,6 +1443,8 @@ namespace TimeCardControlCenter
                     client.SetNmeaOutput(enabled, baud, inverted));
                 ApplyNmeaState(state);
                 UartPortCombo.SelectedIndex = 3;
+                SelectComboTag(UartFormatCombo, "Nmea");
+                ResetUartDecoder(3);
                 UartBaudCombo.Text = state.Baud.ToString(CultureInfo.InvariantCulture);
                 Log(string.Format(CultureInfo.InvariantCulture,
                     "NMEA generator {0} at {1} baud{2}.",
@@ -1005,6 +1529,7 @@ namespace TimeCardControlCenter
                 UbloxReceiverSnapshot snapshot = await Task.Run(
                     () => new UbloxClient(client, port, baud).Refresh());
                 lastUbloxSnapshot = snapshot;
+                UpdateHealthExperience();
                 lastUbloxPort = port;
                 lastUbloxBaud = baud;
                 ApplyUbloxSnapshot(snapshot);
@@ -1664,6 +2189,20 @@ namespace TimeCardControlCenter
             }
         }
 
+        private static void SelectComboTag(ComboBox combo, string value)
+        {
+            foreach (ComboBoxItem item in combo.Items.OfType<ComboBoxItem>())
+            {
+                if (string.Equals(Convert.ToString(item.Tag,
+                        CultureInfo.InvariantCulture), value,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+            }
+        }
+
         private static string SelectedComboText(ComboBox combo)
         {
             ComboBoxItem item = combo.SelectedItem as ComboBoxItem;
@@ -1782,6 +2321,7 @@ namespace TimeCardControlCenter
                 Sa53Snapshot snapshot = await Task.Run(
                     () => new Sa53Client(client).Refresh());
                 lastSa53Snapshot = snapshot;
+                UpdateHealthExperience();
                 ApplyAtomicSnapshot(snapshot);
                 AtomicConnectionText.Text = snapshot.Warnings.Count == 0 ?
                     "LIVE · C3" : "LIVE · PARTIAL";
@@ -4277,7 +4817,19 @@ namespace TimeCardControlCenter
             ComboBoxItem modeItem = UartSendModeCombo.SelectedItem as ComboBoxItem;
             string mode = modeItem == null ? "Text" : Convert.ToString(modeItem.Content, CultureInfo.InvariantCulture);
             if (mode == "Text")
-                return Encoding.ASCII.GetBytes(UartSendTextBox.Text ?? string.Empty);
+            {
+                string text = UartSendTextBox.Text ?? string.Empty;
+                ComboBoxItem endingItem = UartLineEndingCombo.SelectedItem as ComboBoxItem;
+                string ending = endingItem == null ? "None" :
+                    Convert.ToString(endingItem.Tag, CultureInfo.InvariantCulture);
+                if (ending == "CR")
+                    text += "\r";
+                else if (ending == "LF")
+                    text += "\n";
+                else if (ending == "CRLF")
+                    text += "\r\n";
+                return Encoding.ASCII.GetBytes(text);
+            }
 
             string[] tokens = (UartSendTextBox.Text ?? string.Empty)
                 .Split(new[] { ' ', '\t', '\r', '\n', ',', '-', ':' }, StringSplitOptions.RemoveEmptyEntries);
@@ -4289,30 +4841,79 @@ namespace TimeCardControlCenter
             return data;
         }
 
-        private void AppendUart(string direction, byte[] data, uint lineStatus)
+        private void AppendUart(uint port, string direction, byte[] data,
+                                uint lineStatus)
         {
             if (data == null)
                 return;
             byte[] capturedData = (byte[])data.Clone();
+            UbloxDecodeBatch decoded = null;
+            if (port < (uint)uartReceiveDecoders.Length &&
+                uartReceiveDecoders[(int)port] != null)
+            {
+                UbloxStreamDecoder decoder = string.Equals(direction, "TX",
+                    StringComparison.OrdinalIgnoreCase) ?
+                    uartTransmitDecoders[(int)port] :
+                    uartReceiveDecoders[(int)port];
+                decoded = decoder.Feed(capturedData);
+            }
             UartConsoleEntry entry = new UartConsoleEntry
             {
                 Timestamp = DateTime.Now,
+                Port = port,
+                PortLabel = "UART " + port.ToString(CultureInfo.InvariantCulture),
+                HasLineStatus = true,
                 Direction = direction,
                 Data = capturedData,
-                LineStatus = lineStatus
+                LineStatus = lineStatus,
+                Decoded = decoded
             };
+            AppendUartEntry(entry);
+            UpdateUartDecoderStatus(port);
+        }
+
+        private void AppendGenericUart(string portName, string direction,
+                                       byte[] data)
+        {
+            if (data == null)
+                return;
+            byte[] capturedData = (byte[])data.Clone();
+            UbloxDecodeBatch decoded = string.Equals(direction, "TX",
+                StringComparison.OrdinalIgnoreCase) ?
+                genericTransmitDecoder.Feed(capturedData) :
+                genericReceiveDecoder.Feed(capturedData);
+            UartConsoleEntry entry = new UartConsoleEntry
+            {
+                Timestamp = DateTime.Now,
+                PortLabel = portName,
+                IsGenericPort = true,
+                HasLineStatus = false,
+                Direction = direction,
+                Data = capturedData,
+                Decoded = decoded
+            };
+            AppendUartEntry(entry);
+            UpdateGenericUartDecoderStatus(portName);
+        }
+
+        private void AppendUartEntry(UartConsoleEntry entry)
+        {
             uartConsoleEntries.Add(entry);
-            uartConsoleHistoryBytes += capturedData.Length;
+            uartConsoleHistoryBytes += entry.Data.Length;
             while (uartConsoleHistoryBytes > 65536 && uartConsoleEntries.Count > 1)
             {
                 uartConsoleHistoryBytes -= uartConsoleEntries[0].Data.Length;
                 uartConsoleEntries.RemoveAt(0);
             }
-            UartOutputTextBox.AppendText(RenderUartConsoleEntry(entry));
-            if (UartOutputTextBox.Text.Length > 131072)
-                UartOutputTextBox.Text = UartOutputTextBox.Text.Substring(
-                    UartOutputTextBox.Text.Length - 65536);
-            UartOutputTextBox.ScrollToEnd();
+            OnUartEntryAppended(entry);
+            if (!uartDisplayPaused && ShouldRenderUartEntry(entry))
+            {
+                UartOutputTextBox.AppendText(RenderUartConsoleEntry(entry));
+                if (UartOutputTextBox.Text.Length > 131072)
+                    UartOutputTextBox.Text = UartOutputTextBox.Text.Substring(
+                        UartOutputTextBox.Text.Length - 65536);
+                UartOutputTextBox.ScrollToEnd();
+            }
         }
 
         private void RenderUartConsole()
@@ -4323,6 +4924,8 @@ namespace TimeCardControlCenter
             for (int index = uartConsoleEntries.Count - 1; index >= 0; index--)
             {
                 UartConsoleEntry entry = uartConsoleEntries[index];
+                if (!ShouldRenderUartEntry(entry))
+                    continue;
                 string rendered = RenderUartConsoleEntry(entry);
                 if (renderedCharacters != 0 &&
                     renderedCharacters + rendered.Length > maximumCharacters)
@@ -4337,12 +4940,181 @@ namespace TimeCardControlCenter
 
         private string RenderUartConsoleEntry(UartConsoleEntry entry)
         {
+            string mode = SelectedUartDisplayMode();
+            if (entry.IsGenericPort && entry.Decoded != null &&
+                (mode == "Ublox" || mode == "Nmea"))
+                return RenderDecodedGenericUartEntry(entry, mode == "Nmea");
+            if (!entry.IsGenericPort &&
+                ((mode == "Ublox" && entry.Port <= 1) ||
+                 (mode == "Nmea" && entry.Port == 3)))
+                return RenderDecodedUartEntry(entry);
+
             string formatted = FormatUartData(entry.Data);
+            if (!entry.HasLineStatus)
+            {
+                return string.Format(CultureInfo.InvariantCulture,
+                    "[{0:HH:mm:ss.fff}] {1} {2} {3} byte(s)\r\n{4}{5}",
+                    entry.Timestamp, entry.PortLabel, entry.Direction,
+                    entry.Data.Length, formatted,
+                    formatted.EndsWith("\n", StringComparison.Ordinal) ?
+                        string.Empty : "\r\n");
+            }
             return string.Format(CultureInfo.InvariantCulture,
-                "[{0:HH:mm:ss.fff}] {1} {2} byte(s) · LSR 0x{3:X2}\r\n{4}{5}",
-                entry.Timestamp, entry.Direction, entry.Data.Length,
+                "[{0:HH:mm:ss.fff}] {1} {2} {3} byte(s) · LSR 0x{4:X2}\r\n{5}{6}",
+                entry.Timestamp, entry.PortLabel, entry.Direction, entry.Data.Length,
                 entry.LineStatus & 0xff, formatted,
                 formatted.EndsWith("\n", StringComparison.Ordinal) ? string.Empty : "\r\n");
+        }
+
+        private static string RenderDecodedUartEntry(UartConsoleEntry entry)
+        {
+            UbloxDecodeBatch batch = entry.Decoded;
+            bool nmeaOnly = entry.Port == 3;
+            StringBuilder output = new StringBuilder();
+            output.AppendFormat(CultureInfo.InvariantCulture,
+                "[{0:HH:mm:ss.fff}] UART {1} {2} {3} byte(s) · {4} · LSR 0x{5:X2}\r\n",
+                entry.Timestamp, entry.Port, entry.Direction, entry.Data.Length,
+                nmeaOnly ? "NMEA stream" : "u-blox stream",
+                entry.LineStatus & 0xff);
+            if (batch == null)
+            {
+                output.Append("  Decoder unavailable for this sample.\r\n");
+                return output.ToString();
+            }
+
+            foreach (UbloxDecodedMessage message in batch.Messages)
+            {
+                output.Append("  ").Append(message.ToConsoleText()
+                    .Replace("\r\n", "\r\n  ")).Append("\r\n");
+            }
+            if (batch.Messages.Count == 0)
+            {
+                if (batch.BufferedBytes != 0)
+                {
+                    output.AppendFormat(CultureInfo.InvariantCulture,
+                        "  Partial protocol frame buffered ({0} byte(s)); waiting for the next read.\r\n",
+                        batch.BufferedBytes);
+                }
+                else
+                {
+                    output.Append(nmeaOnly ?
+                        "  No complete NMEA sentence in this read.\r\n" :
+                        "  No complete UBX, NMEA, or RTCM3 message in this read.\r\n");
+                }
+            }
+            if (batch.DiscardedBytes != 0)
+            {
+                output.AppendFormat(CultureInfo.InvariantCulture,
+                    "  Stream resynchronized after {0} unframed byte(s).\r\n",
+                    batch.DiscardedBytes);
+            }
+            return output.ToString();
+        }
+
+        private static string RenderDecodedGenericUartEntry(UartConsoleEntry entry,
+                                                             bool nmeaOnly)
+        {
+            StringBuilder output = new StringBuilder();
+            output.AppendFormat(CultureInfo.InvariantCulture,
+                "[{0:HH:mm:ss.fff}] {1} {2} {3} byte(s) · {4}\r\n",
+                entry.Timestamp, entry.PortLabel, entry.Direction,
+                entry.Data.Length, nmeaOnly ? "NMEA stream" : "u-blox mixed stream");
+            IEnumerable<UbloxDecodedMessage> messages = entry.Decoded.Messages;
+            if (nmeaOnly)
+                messages = messages.Where(message => string.Equals(message.Protocol,
+                    "NMEA", StringComparison.OrdinalIgnoreCase));
+            int count = 0;
+            foreach (UbloxDecodedMessage message in messages)
+            {
+                output.Append("  ").Append(message.ToConsoleText()
+                    .Replace("\r\n", "\r\n  ")).Append("\r\n");
+                count++;
+            }
+            if (count == 0)
+                output.Append(entry.Decoded.BufferedBytes != 0 ?
+                    "  Partial protocol frame buffered; waiting for more data.\r\n" :
+                    "  No complete matching message in this read.\r\n");
+            return output.ToString();
+        }
+
+        private void ResetUartDecoder(uint port)
+        {
+            if (port >= (uint)uartReceiveDecoders.Length)
+                return;
+            if (uartReceiveDecoders[(int)port] != null)
+                uartReceiveDecoders[(int)port].Reset();
+            if (uartTransmitDecoders[(int)port] != null)
+                uartTransmitDecoders[(int)port].Reset();
+            UpdateUartDecoderStatus(port);
+        }
+
+        private void ResetAllUartDecoders()
+        {
+            for (int port = 0; port < uartReceiveDecoders.Length; port++)
+            {
+                if (uartReceiveDecoders[port] != null)
+                    uartReceiveDecoders[port].Reset();
+                if (uartTransmitDecoders[port] != null)
+                    uartTransmitDecoders[port].Reset();
+            }
+            genericReceiveDecoder.Reset();
+            genericTransmitDecoder.Reset();
+            if (UartPortCombo != null && UartPortCombo.SelectedIndex >= 0 &&
+                SelectedGenericComPort() == null)
+                UpdateUartDecoderStatus(SelectedUartPort());
+        }
+
+        private void UpdateGenericUartDecoderStatus(string portName)
+        {
+            if (UartDecoderStatusText == null)
+                return;
+            UartDecoderStatusText.Text = string.Format(CultureInfo.InvariantCulture,
+                "{0} · RX {1} message(s) · TX {2} · checksum failures {3} · buffered {4} byte(s)",
+                portName, genericReceiveDecoder.TotalMessages,
+                genericTransmitDecoder.TotalMessages,
+                genericReceiveDecoder.ChecksumFailures +
+                    genericTransmitDecoder.ChecksumFailures,
+                genericReceiveDecoder.BufferedBytes +
+                    genericTransmitDecoder.BufferedBytes);
+        }
+
+        private void UpdateUartDecoderStatus(uint port)
+        {
+            if (port >= (uint)uartReceiveDecoders.Length ||
+                uartReceiveDecoders[(int)port] == null)
+                return;
+            UbloxStreamDecoder receive = uartReceiveDecoders[(int)port];
+            UbloxStreamDecoder transmit = uartTransmitDecoders[(int)port];
+            TextBlock status = port == 3 ? NmeaDecoderStatusText :
+                UartDecoderStatusText;
+            if (status == null)
+                return;
+            if (port == 3)
+            {
+                status.Text = string.Format(CultureInfo.InvariantCulture,
+                    "NMEA decode · {0} sentence(s) · {1} bad · {2} B pending",
+                    receive.TotalMessages,
+                    receive.ChecksumFailures + transmit.ChecksumFailures,
+                    receive.BufferedBytes + transmit.BufferedBytes);
+            }
+            else
+            {
+                status.Text = string.Format(CultureInfo.InvariantCulture,
+                    "UART {0} · RX {1} message(s) · TX {2} · checksum failures {3} · buffered {4} byte(s)",
+                    port, receive.TotalMessages, transmit.TotalMessages,
+                    receive.ChecksumFailures + transmit.ChecksumFailures,
+                    receive.BufferedBytes + transmit.BufferedBytes);
+            }
+        }
+
+        private void UseUbloxDecode_Click(object sender, RoutedEventArgs e)
+        {
+            SelectComboTag(UartFormatCombo, "Ublox");
+        }
+
+        private void UseNmeaDecode_Click(object sender, RoutedEventArgs e)
+        {
+            SelectComboTag(UartFormatCombo, "Nmea");
         }
 
         private string FormatUartData(byte[] data)
@@ -4388,7 +5160,24 @@ namespace TimeCardControlCenter
             ComboBoxItem item = UartPortCombo.SelectedItem as ComboBoxItem;
             if (item == null)
                 throw new InvalidOperationException("Select a UART port.");
-            return uint.Parse(Convert.ToString(item.Tag, CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
+            uint port;
+            if (!uint.TryParse(Convert.ToString(item.Tag,
+                    CultureInfo.InvariantCulture), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out port))
+                throw new InvalidOperationException(
+                    "The selected serial port is not a Time Card hardware UART.");
+            return port;
+        }
+
+        private string SelectedGenericComPort()
+        {
+            ComboBoxItem item = UartPortCombo == null ? null :
+                UartPortCombo.SelectedItem as ComboBoxItem;
+            string tag = item == null ? null : Convert.ToString(item.Tag,
+                CultureInfo.InvariantCulture);
+            return tag != null && tag.StartsWith(GenericComTagPrefix,
+                StringComparison.OrdinalIgnoreCase) ?
+                tag.Substring(GenericComTagPrefix.Length) : null;
         }
 
         private static uint ParseUnsigned(string text, string name, uint minimum, uint maximum)
@@ -4978,6 +5767,8 @@ namespace TimeCardControlCenter
 
         private void ApplySensorTelemetry(SensorTelemetrySnapshot telemetry)
         {
+            lastSensorSnapshot = telemetry;
+            UpdateHealthExperience();
             Brush healthy = (Brush)FindResource("AccentBrush");
             Brush warning = (Brush)FindResource("GoldBrush");
             bool anyValid = telemetry.Environment.IsValid ||
@@ -5181,6 +5972,8 @@ namespace TimeCardControlCenter
         {
             if (OverviewPage == null)
                 return;
+            if (name == "Uart")
+                RefreshGenericComPorts(false);
             OverviewPage.Visibility = name == "Overview" ? Visibility.Visible : Visibility.Collapsed;
             ClockPage.Visibility = name == "Clock" ? Visibility.Visible : Visibility.Collapsed;
             GnssPage.Visibility = name == "Gnss" ? Visibility.Visible : Visibility.Collapsed;
@@ -5190,6 +5983,8 @@ namespace TimeCardControlCenter
             TimingPage.Visibility = name == "Timing" ? Visibility.Visible : Visibility.Collapsed;
             SensorsPage.Visibility = name == "Sensors" ? Visibility.Visible : Visibility.Collapsed;
             I2cPage.Visibility = name == "I2c" ? Visibility.Visible : Visibility.Collapsed;
+            TelemetryPage.Visibility = name == "Telemetry" ? Visibility.Visible : Visibility.Collapsed;
+            OperationsPage.Visibility = name == "Operations" ? Visibility.Visible : Visibility.Collapsed;
             FlashPage.Visibility = name == "Flash" ? Visibility.Visible : Visibility.Collapsed;
             SubsystemsPage.Visibility = name == "Subsystems" ? Visibility.Visible : Visibility.Collapsed;
             DiagnosticsPage.Visibility = name == "Diagnostics" ? Visibility.Visible : Visibility.Collapsed;
@@ -5199,6 +5994,8 @@ namespace TimeCardControlCenter
                 name == "Sma" ? "SMA Connectors" :
                 name == "Timing" ? "Generators & Frequency" :
                 name == "Sensors" ? "Sensors & IMU" :
+                name == "Telemetry" ? "Telemetry Studio" :
+                name == "Operations" ? "Profiles & Self-Test" :
                 name == "Flash" ? "FPGA SPI Flash" :
                 name == "I2c" ? "I²C Bus" : name;
             TopPageTitle.Text = title;
