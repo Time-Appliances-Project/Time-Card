@@ -189,7 +189,8 @@ namespace TimeCardControlCenter
         private void UpdateHealthExperience()
         {
             lastHealthReport = ControlCenterHealth.Evaluate(lastSnapshot,
-                lastUbloxSnapshot, lastSa53Snapshot, lastSensorSnapshot,
+                lastUbloxSnapshot, lastSa53Snapshot, lastMro50Status,
+                lastSensorSnapshot,
                 client != null, productSettings != null && productSettings.DemoMode);
             TimeFlowTopology.Update(lastHealthReport, lastSmaLedStates);
             int attention = lastHealthReport.AttentionCount;
@@ -713,6 +714,11 @@ namespace TimeCardControlCenter
                 return results;
             RunCheck(results, "ABI compatibility", delegate
             {
+                if (first.Layout == "Orolia ART")
+                    return first.AbiVersion >= 9 ?
+                        Pass("ART mRO-50 feature set available") :
+                        Warning("ABI " + first.AbiVersion +
+                            " connected; the direct mRO-50 bridge requires ABI 9");
                 return first.AbiVersion >= 8 ? Pass("Full Control Center feature set available") :
                     Warning("ABI " + first.AbiVersion + " connected; sensor features require ABI 8");
             });
@@ -732,6 +738,9 @@ namespace TimeCardControlCenter
             });
             RunCheck(results, "GNSS / ToD", delegate
             {
+                if (first.Layout == "Orolia ART" &&
+                    !first.GnssTelemetryAvailable)
+                    return Skipped("GNSS/ToD summary registers are not exposed by this ART FPGA image");
                 return first.GnssFixOk ? Pass(first.GnssFix + ", " +
                     first.LockedSatellites + " satellites locked") :
                     Warning(first.GnssFix + "; antenna or sky view may need attention");
@@ -739,6 +748,8 @@ namespace TimeCardControlCenter
             RunCheck(results, "Card identity", delegate
             {
                 TimeCardIdentity identity = client.GetIdentity();
+                if (first.Layout == "Orolia ART" && !identity.IsValid)
+                    return Skipped("ART EEPROM stores oscillator configuration, not an EUI-48 serial");
                 return identity.IsValid ? Pass(identity.SerialNumber) :
                     Warning("MAC EEPROM did not return a valid serial number");
             });
@@ -755,6 +766,8 @@ namespace TimeCardControlCenter
             });
             RunCheck(results, "NMEA generator", delegate
             {
+                if (first.Layout == "Orolia ART")
+                    return Skipped("No FPGA ToD/NMEA generator in the ART profile");
                 if (first.AbiVersion < 4)
                     return Skipped("Requires ABI 4");
                 NmeaOutputState nmea = client.GetNmeaOutput();
@@ -771,6 +784,8 @@ namespace TimeCardControlCenter
             });
             RunCheck(results, "Sensor fabric", delegate
             {
+                if (first.Layout == "Orolia ART")
+                    return Skipped("PCA9546A sensors and status LEDs are not fitted on ART");
                 if (first.AbiVersion < 8)
                     return Skipped("Requires ABI 8");
                 SensorTelemetrySnapshot sensors = client.GetSensorTelemetry();
@@ -780,6 +795,8 @@ namespace TimeCardControlCenter
             RunCheck(results, "UART transport", delegate
             {
                 UartObservation observation = client.ObserveUart(0, 15);
+                if (first.Layout == "Orolia ART" && !observation.IsPresent)
+                    return Skipped("The installed ART FPGA image does not implement the 16550 UART block");
                 return observation.IsPresent ? Pass("GNSS UART present; LSR 0x" +
                     observation.LineStatus.ToString("X2", CultureInfo.InvariantCulture)) :
                     Warning("GNSS UART did not report present");
@@ -943,7 +960,8 @@ namespace TimeCardControlCenter
                 CompatibilityLine("Signal generators / counters", abi >= 5, "ABI 5") + "\n" +
                 CompatibilityLine("Guarded FPGA flash", abi >= 6, "ABI 6") + "\n" +
                 CompatibilityLine("Extended management controls", abi >= 7, "ABI 7") + "\n" +
-                CompatibilityLine("Environment / rails / IMU", abi >= 8, "ABI 8");
+                CompatibilityLine("Environment / rails / IMU", abi >= 8, "ABI 8") + "\n" +
+                CompatibilityLine("Orolia ART mRO-50 bridge", abi >= 9, "ABI 9");
         }
 
         private static string CompatibilityLine(string feature, bool available, string requirement)
@@ -1032,7 +1050,7 @@ namespace TimeCardControlCenter
             ClockChipText.Text = "SIMULATED · IN SYNC";
             ClockChipText.Foreground = healthy;
             HierarchyOverviewText.Text = "DEMO";
-            SidebarDriverText.Text = "Demo data · ABI 8";
+            SidebarDriverText.Text = "Demo data · ABI 9";
             SidebarSerialText.Text = "DEMO-TIMECARD-0001";
             if (!telemetryPaused)
             {

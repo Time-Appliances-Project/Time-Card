@@ -13,6 +13,8 @@ applications use the versioned IOCTL ABI through `timecardctl.exe`.
 ## Features
 
 - PHC read, set, and system-bracketed cross-timestamp operations.
+- Direct Orolia/Safran ART mRO-50 FPGA-bridge telemetry and guarded fine,
+  coarse, and nonvolatile coarse-adjustment controls.
 - FPGA, TOD, synchronization, selectable clock source, UTC/leap, satellite,
   and GNSS status reporting.
 - Polled access to the GNSS, GNSS2, atomic-clock, and NMEA 16550 UARTs, plus
@@ -54,7 +56,7 @@ controller from starting.
 
 ## Hardware compatibility
 
-Driver 1.25 / ABI 8 selects the same three board profiles and resource maps as
+Driver 1.29 / ABI 9 selects the same three board profiles and resource maps as
 the Linux `ptp_ocp` driver. Meta/Facebook and Celestica share the rev1 and rev2
 maps. Older PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or
 32 interrupt messages. Current PCI revision 02 LitePCIe gateware exposes 64
@@ -64,21 +66,36 @@ known Meta/Celestica map before any register access when firmware does not
 report a useful revision.
 
 The Orolia/Safran ART profile uses its Linux-defined fixed map: PHC at
-`0x01000000`, primary GNSS UART at `0x00161000`, atomic-clock UART at
-`0x00190000`, SMA routing at `0x003c0000`, OpenCores I2C at `0x00350000`, and
-Altera SPI at `0x00310000`. Its protected FPGA image begins at `0x01000000` in
-SPI-NOR. The ART profile exposes only the PHC, primary GNSS, atomic-clock, SMA,
-I2C, and flash child nodes because Linux does not map the Meta-specific ToD,
-secondary GNSS, NMEA generator/UART, signal generators, frequency counters, or
-PTM blocks on that card. Missing functions return a supported “not available”
-result rather than aliasing another register window.
+`0x01000000`, primary GNSS UART at `0x00161000`, mRO-50 UART at `0x00190000`,
+board configuration at `0x00210000`, Altera SPI at `0x00310000`, the direct
+mRO-50 bridge at `0x00340000`, OpenCores I2C at `0x00350000`, and fixed SMA
+routing at `0x003c0000`. The PCI parser accepts both the leading `PCI\VEN_`
+field and ampersand-delimited fields, so `VEN_1AD7&DEV_A000` can no longer
+silently fall back to the Meta register map.
 
-ART uses an OpenCores I2C controller and a 24c08 EEPROM. The serial Linux reads
-at absolute EEPROM offset `0x263` is accessed through slave block `0x52`,
-subaddress `0x63`. Its SMA menu is restricted to the ART gateware's PPS1 and
-10 MHz inputs plus atomic-clock, GNSS, and 10 MHz outputs. Its UART 2 device is
-an mRO-50 at 9,600 baud; the Control Center disables MAC-SA53 commands on this
-profile and leaves the generic UART console available.
+The tested ART FPGA v0.0.9 exposes the PHC, direct mRO-50 bridge, primary GNSS
+UART, fixed SMA map, OpenCores I2C/24c08 EEPROM, timestamp inputs, and Altera
+SPI-NOR. It does not implement the Meta-specific ToD/NMEA engine, secondary
+GNSS, signal generators, frequency counters, PTM, PCA9546A sensor branches, or
+IS32FL3207 LEDs. Those capabilities are reported as not implemented or not
+fitted instead of producing failed sensor and LED operations.
+
+The mRO-50 bridge reports enable/lock, raw temperature, and fine/coarse
+adjustment words without depending on the optional 16550 serial bridge. The
+temperature is intentionally displayed as a raw word because its physical
+scale is not published for this gateware image. The mRO serial port is still
+configured for 9,600 baud when present.
+
+Linux assigns no fixed baud to the ART primary-GNSS UART. Driver 1.29 likewise
+preserves its gateware divisor during device start; an operator may still set
+an explicit baud from the UART workspace or `timecardctl uart-config`.
+
+ART's 24c08 responds through bank addresses `0x50` through `0x57`. On the
+tested card it contains two copies of the mRO disciplining configuration,
+beginning with `oscillator=mRO50`, rather than the legacy serial layout at
+absolute offset `0x263`. Driver 1.29 detects that layout and returns an invalid
+identity instead of turning configuration text into a false serial number.
+Its four fixed SMA routes remain read-only in the Control Center.
 
 Subsystem availability still depends on the FPGA image and populated board
 options. Missing optional resources never prevent the controller and PHC from
@@ -139,7 +156,7 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-Driver **1.25 / ABI 8** is required for the complete feature set shown below.
+Driver **1.29 / ABI 9** is required for the complete feature set shown below.
 
 ![Control Center overview](assets/timecard-control-center.png)
 
@@ -215,6 +232,12 @@ timecardctl nmea-set on 9600 normal
 timecardctl uart-read 3 256 1000
 timecardctl uart-config 0 115200
 timecardctl uart-read 0 256 1000
+timecardctl uart-observe 0 25
+timecardctl mro-status
+timecardctl mro-fine 2344
+timecardctl mro-coarse 4186399
+timecardctl mro-save-coarse
+timecardctl flash-status
 timecardctl hierarchy-status
 timecardctl hierarchy-enable
 timecardctl hierarchy-persist
@@ -249,6 +272,11 @@ and repeated-start read; the final argument selects a 0-, 1-, or 2-byte
 subaddress. Transfers are limited to 255 bytes. The `serial` command reads the
 same six identity bytes used by the Linux `serialnum` attribute. The ABI
 deliberately provides no I2C data-write or EEPROM-programming operation.
+On ART configuration-layout EEPROMs, `serial` deliberately reports invalid
+identity data. Use `mro-status` for non-destructive oscillator telemetry.
+`mro-fine` and `mro-coarse` steer the oscillator immediately;
+`mro-save-coarse` persists the current coarse setting and should be used only
+after the desired value has been verified.
 
 Driver 1.11 fixes the AXI IIC dynamic-receive completion sequence. It waits for
 the optional subaddress message to leave the transmit FIFO, drains data only

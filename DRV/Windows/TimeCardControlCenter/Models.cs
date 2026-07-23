@@ -370,6 +370,28 @@ namespace TimeCardControlCenter
         public uint Reserved2;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardMro50StatusRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Control;
+        public uint FineAdjustment;
+        public uint CoarseAdjustment;
+        public uint Temperature;
+        public uint BoardConfig;
+        public uint Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardMro50ControlRaw
+    {
+        public uint Size;
+        public uint Action;
+        public uint Value;
+        public uint Reserved;
+    }
+
     public enum SmaDirection : uint
     {
         Input = 0,
@@ -960,6 +982,36 @@ namespace TimeCardControlCenter
         public bool IsPresent { get; private set; }
         public bool HasActivity { get; private set; }
         public uint LineStatus { get; private set; }
+    }
+
+    public sealed class Mro50Status
+    {
+        internal Mro50Status(TimeCardMro50StatusRaw value)
+        {
+            IsPresent = (value.Flags & 1u) != 0;
+            IsEnabled = (value.Flags & 2u) != 0;
+            IsLocked = (value.Flags & 4u) != 0;
+            IsFineValid = (value.Flags & 8u) != 0;
+            IsCoarseValid = (value.Flags & 16u) != 0;
+            IsSerialRouteEnabled = (value.Flags & 32u) != 0;
+            Control = value.Control;
+            FineAdjustment = value.FineAdjustment;
+            CoarseAdjustment = value.CoarseAdjustment;
+            TemperatureRaw = value.Temperature;
+            BoardConfig = value.BoardConfig;
+        }
+
+        public bool IsPresent { get; private set; }
+        public bool IsEnabled { get; private set; }
+        public bool IsLocked { get; private set; }
+        public bool IsFineValid { get; private set; }
+        public bool IsCoarseValid { get; private set; }
+        public bool IsSerialRouteEnabled { get; private set; }
+        public uint Control { get; private set; }
+        public uint FineAdjustment { get; private set; }
+        public uint CoarseAdjustment { get; private set; }
+        public uint TemperatureRaw { get; private set; }
+        public uint BoardConfig { get; private set; }
     }
 
     public sealed class TimeCardSnapshot

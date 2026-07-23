@@ -76,6 +76,7 @@ namespace TimeCardControlCenter
         private DateTime lastSecondaryLedObservationUtc = DateTime.MinValue;
         private bool atomicRefreshing;
         private Sa53Snapshot lastSa53Snapshot;
+        private Mro50Status lastMro50Status;
         private bool ubloxRefreshing;
         private UbloxReceiverSnapshot lastUbloxSnapshot;
         private uint? lastUbloxPort;
@@ -153,6 +154,7 @@ namespace TimeCardControlCenter
             public I2cProbeResult MacEeprom { get; set; }
             public List<uint> Addresses { get; set; }
             public bool FullScan { get; set; }
+            public bool IsArt { get; set; }
         }
 
         private sealed class BoardLedColor
@@ -519,6 +521,10 @@ namespace TimeCardControlCenter
             LastRefreshText.Text = "Sampled " + DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
             UpdateI2cDriverCompatibility(snapshot);
             UpdateSensorsCompatibility(snapshot);
+            ConfigureAtomicWorkspaceForProfile(
+                snapshot.Layout == "Orolia ART");
+            ConfigureUartWorkspaceForProfile(
+                snapshot.Layout == "Orolia ART");
 
             SyncStatusText.Text = snapshot.IsClockSynchronized ? "IN SYNC" : "NOT LOCKED";
             SyncStatusText.Foreground = snapshot.IsClockSynchronized ? healthyBrush : warningBrush;
@@ -1426,6 +1432,17 @@ namespace TimeCardControlCenter
 
         private async Task RefreshNmeaAsync(bool showError)
         {
+            if (lastSnapshot != null &&
+                lastSnapshot.Layout == "Orolia ART")
+            {
+                NmeaStatusText.Text = "NOT IMPLEMENTED ON ART";
+                NmeaStatusText.Foreground =
+                    (Brush)FindResource("GoldBrush");
+                NmeaApplyButton.IsEnabled = false;
+                NmeaRegisterText.Text =
+                    "The ART FPGA profile has no ToD/NMEA sentence generator or UART 3.";
+                return;
+            }
             if (client == null || lastSnapshot == null || lastSnapshot.AbiVersion < 4)
             {
                 NmeaStatusText.Text = "DRIVER 1.9 / ABI 4 REQUIRED";
@@ -1455,6 +1472,15 @@ namespace TimeCardControlCenter
         {
             if (!EnsureConnected())
                 return;
+            if (lastSnapshot != null &&
+                lastSnapshot.Layout == "Orolia ART")
+            {
+                MessageBox.Show(this,
+                    "The Orolia ART FPGA profile does not implement the Time Card NMEA generator.",
+                    "NMEA not implemented", MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
             try
             {
                 uint baud = ParseUnsigned(SelectedComboText(NmeaBaudCombo),
@@ -1490,7 +1516,8 @@ namespace TimeCardControlCenter
             finally
             {
                 NmeaApplyButton.IsEnabled = client != null &&
-                    lastSnapshot != null && lastSnapshot.AbiVersion >= 4;
+                    lastSnapshot != null && lastSnapshot.AbiVersion >= 4 &&
+                    lastSnapshot.Layout != "Orolia ART";
             }
         }
 
@@ -2334,18 +2361,54 @@ namespace TimeCardControlCenter
             if (lastSnapshot != null &&
                 lastSnapshot.Layout == "Orolia ART")
             {
-                AtomicConnectionText.Text = "OROLIA ART · MRO-50";
+                if (lastSnapshot.AbiVersion < 9)
+                {
+                    AtomicConnectionText.Text = "DRIVER 1.29 / ABI 9 REQUIRED";
+                    AtomicConnectionText.Foreground =
+                        (Brush)FindResource("GoldBrush");
+                    AtomicRefreshButton.IsEnabled = false;
+                    return;
+                }
+                if (client == null)
+                {
+                    AtomicConnectionText.Text = "DRIVER ACCESS REQUIRED";
+                    AtomicConnectionText.Foreground =
+                        (Brush)FindResource("GoldBrush");
+                    if (showError)
+                        EnsureConnected();
+                    return;
+                }
+
+                atomicRefreshing = true;
+                AtomicRefreshButton.IsEnabled = false;
+                AtomicConnectionText.Text = "QUERYING FPGA BRIDGE";
                 AtomicConnectionText.Foreground =
                     (Brush)FindResource("GoldBrush");
-                AtomicLockDetailText.Text =
-                    "Use UART 2 at 9,600 baud for the ART oscillator console";
-                AtomicRefreshButton.IsEnabled = false;
-                if (showError)
+                try
                 {
-                    MessageBox.Show(this,
-                        "The Orolia ART card uses an mRO-50 oscillator, not the Microchip MAC-SA53 command set. Use the UART workspace on port 2 at 9,600 baud; SA53 writes are disabled for this card profile.",
-                        "Different atomic clock",
-                        MessageBoxButton.OK, MessageBoxImage.Information);
+                    Mro50Status status = await Task.Run(
+                        () => client.GetMro50Status());
+                    lastMro50Status = status;
+                    lastSa53Snapshot = null;
+                    ApplyMro50Status(status);
+                    UpdateHealthExperience();
+                    Log("Orolia ART mRO-50 FPGA telemetry refreshed.");
+                }
+                catch (Exception ex)
+                {
+                    AtomicConnectionText.Text = "MRO-50 UNAVAILABLE";
+                    AtomicConnectionText.Foreground =
+                        (Brush)FindResource("DangerBrush");
+                    Log("mRO-50 refresh failed: " + ex.Message);
+                    if (showError)
+                        MessageBox.Show(this, ex.Message,
+                            "mRO-50 unavailable", MessageBoxButton.OK,
+                            MessageBoxImage.Error);
+                }
+                finally
+                {
+                    AtomicRefreshButton.IsEnabled = true;
+                    atomicRefreshing = false;
                 }
                 return;
             }
@@ -2387,6 +2450,220 @@ namespace TimeCardControlCenter
                     MessageBox.Show(this, ex.Message +
                         "\r\n\r\nVerify that UART 2 is connected to a Microchip MAC-SA53 and is using its default 57,600-baud C3 interface.",
                         "Atomic clock unavailable", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                AtomicRefreshButton.IsEnabled = true;
+                atomicRefreshing = false;
+            }
+        }
+
+        private void ConfigureAtomicWorkspaceForProfile(bool isArt)
+        {
+            AtomicEyebrowText.Text = isArt ?
+                "SAFRAN / OROLIA MRO-50" : "MICROCHIP MAC-SA53";
+            AtomicTitleText.Text = isArt ?
+                "ART atomic oscillator" : "Atomic clock configuration";
+            AtomicDescriptionText.Text = isArt ?
+                "Live lock, temperature word, and frequency steering through the ART FPGA's direct mRO-50 bridge." :
+                "Live physics-package telemetry, frequency steering, 1PPS geometry, and disciplined timing control over the C3 serial interface.";
+            AtomicRefreshButton.Content = isArt ? "Refresh mRO-50" : "Refresh SA53";
+            AtomicLockLabelText.Text = isArt ? "OSCILLATOR LOCK" : "PHYSICS LOCK";
+            AtomicTemperatureLabelText.Text = isArt ? "RAW TEMPERATURE" : "TEMPERATURE";
+            AtomicSupplyLabelText.Text = isArt ? "FINE ADJUSTMENT" : "POWER SUPPLY";
+            AtomicAlarmLabelText.Text = isArt ? "COARSE ADJUSTMENT" : "ACTIVE ALARMS";
+            AtomicIdentityProtocolText.Text = isArt ?
+                "Direct FPGA bridge at BAR + 0x00340000" :
+                "UART 2 \u00B7 57,600 baud \u00B7 C3 protocol";
+            AtomicTelemetryDescriptionText.Text = isArt ?
+                "Read-only operating values reported by the ART gateware." :
+                "Read-only operating values reported directly by the SA53.";
+            AtomicSa53ControlGrid.Visibility = isArt ?
+                Visibility.Collapsed : Visibility.Visible;
+            AtomicMroPanel.Visibility = isArt ?
+                Visibility.Visible : Visibility.Collapsed;
+            AtomicSa53DisciplinePanel.Visibility = isArt ?
+                Visibility.Collapsed : Visibility.Visible;
+            AtomicSa53ProtectedGrid.Visibility = isArt ?
+                Visibility.Collapsed : Visibility.Visible;
+        }
+
+        private void ConfigureUartWorkspaceForProfile(bool isArt)
+        {
+            if (UartPortCombo == null)
+                return;
+            string[] standard =
+            {
+                "0 \u00B7 Primary GNSS",
+                "1 \u00B7 Secondary GNSS",
+                "2 \u00B7 Atomic clock",
+                "3 \u00B7 NMEA output"
+            };
+            string[] art =
+            {
+                "0 \u00B7 ART GNSS (gateware baud)",
+                "1 \u00B7 Not implemented on ART",
+                "2 \u00B7 mRO-50 serial (9600)",
+                "3 \u00B7 No NMEA UART on ART"
+            };
+            for (uint port = 0; port < 4; port++)
+            {
+                ComboBoxItem item = UartPortCombo.Items
+                    .OfType<ComboBoxItem>().FirstOrDefault(candidate =>
+                        string.Equals(Convert.ToString(candidate.Tag,
+                            CultureInfo.InvariantCulture),
+                            port.ToString(CultureInfo.InvariantCulture),
+                            StringComparison.Ordinal));
+                if (item == null)
+                    continue;
+                item.Content = isArt ? art[port] : standard[port];
+                item.IsEnabled = !isArt || port == 0 || port == 2;
+            }
+            if (isArt && SelectedGenericComPort() == null)
+            {
+                uint selected = SelectedUartPort();
+                if (selected == 1 || selected == 3)
+                    UartPortCombo.SelectedIndex = 0;
+            }
+        }
+
+        private void ApplyMro50Status(Mro50Status status)
+        {
+            Brush healthy = (Brush)FindResource("AccentBrush");
+            Brush warning = (Brush)FindResource("GoldBrush");
+            AtomicConnectionText.Text = status.IsPresent ?
+                "LIVE \u00B7 FPGA BRIDGE" : "NOT PRESENT";
+            AtomicConnectionText.Foreground = status.IsPresent ?
+                healthy : warning;
+            AtomicLockText.Text = status.IsLocked ? "LOCKED" :
+                status.IsEnabled ? "ENABLED" : "DISABLED";
+            AtomicLockText.Foreground = status.IsLocked ? healthy : warning;
+            AtomicLockDetailText.Text = string.Format(
+                CultureInfo.InvariantCulture, "Control 0x{0:X8}",
+                status.Control);
+
+            AtomicTemperatureText.Text = string.Format(
+                CultureInfo.InvariantCulture, "0x{0:X8}",
+                status.TemperatureRaw);
+            AtomicTemperatureDetailText.Text =
+                "Raw ART gateware word; no physical scale is published";
+            AtomicSupplyText.Text = status.IsFineValid ?
+                status.FineAdjustment.ToString(CultureInfo.InvariantCulture) :
+                "NOT VALID";
+            AtomicSupplyDetailText.Text = status.IsFineValid ?
+                "0x" + status.FineAdjustment.ToString(
+                    "X8", CultureInfo.InvariantCulture) :
+                "FPGA read did not complete";
+            AtomicAlarmText.Text = status.IsCoarseValid ?
+                status.CoarseAdjustment.ToString(CultureInfo.InvariantCulture) :
+                "NOT VALID";
+            AtomicAlarmText.Foreground = status.IsCoarseValid ?
+                healthy : warning;
+            AtomicAlarmDetailText.Text = status.IsCoarseValid ?
+                "0x" + status.CoarseAdjustment.ToString(
+                    "X8", CultureInfo.InvariantCulture) :
+                "FPGA read did not complete";
+
+            AtomicDeviceText.Text = "mRO-50";
+            AtomicPartText.Text = "Safran / Orolia ART";
+            AtomicSerialText.Text =
+                "Not exposed by this EEPROM image";
+            AtomicFirmwareText.Text = lastSnapshot == null ?
+                "ART FPGA bridge" : "ART FPGA " + lastSnapshot.ClockVersion;
+            AtomicHardwareText.Text = "PCI 1AD7:A000";
+
+            AtomicRuntimeText.Text = status.IsPresent ? "FPGA bridge active" : "\u2014";
+            AtomicLocktimeText.Text = "Not exposed";
+            AtomicPpsDetectedText.Text = "Not exposed";
+            AtomicDisciplineStateText.Text = status.IsEnabled ?
+                "ENABLED" : "DISABLED";
+            AtomicPhaseText.Text = "Control 0x" +
+                status.Control.ToString("X8", CultureInfo.InvariantCulture);
+            AtomicEffectiveTuningText.Text = status.IsFineValid ?
+                status.FineAdjustment.ToString(CultureInfo.InvariantCulture) :
+                "\u2014";
+            AtomicDisciplineTuningText.Text = status.IsCoarseValid ?
+                status.CoarseAdjustment.ToString(CultureInfo.InvariantCulture) :
+                "\u2014";
+            AtomicLastCorrectionText.Text = "Board config 0x" +
+                status.BoardConfig.ToString("X8", CultureInfo.InvariantCulture);
+            AtomicMroFineTextBox.Text = status.FineAdjustment.ToString(
+                CultureInfo.InvariantCulture);
+            AtomicMroCoarseTextBox.Text = status.CoarseAdjustment.ToString(
+                CultureInfo.InvariantCulture);
+            AtomicMroSerialRouteText.Text = status.IsSerialRouteEnabled ?
+                "SERIAL ROUTE ENABLED" : "DIRECT BRIDGE ACTIVE";
+            AtomicMroSerialRouteText.Foreground = status.IsPresent ?
+                healthy : warning;
+        }
+
+        private async void ApplyMroFine_Click(object sender, RoutedEventArgs e)
+        {
+            uint value;
+            if (!uint.TryParse(AtomicMroFineTextBox.Text,
+                NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+            {
+                MessageBox.Show(this, "Enter a valid unsigned 32-bit fine adjustment.",
+                    "Invalid mRO-50 value", MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+            await RunMro50OperationAsync(
+                activeClient => activeClient.SetMro50FineAdjustment(value),
+                "mRO-50 fine adjustment updated.");
+        }
+
+        private async void ApplyMroCoarse_Click(object sender, RoutedEventArgs e)
+        {
+            uint value;
+            if (!uint.TryParse(AtomicMroCoarseTextBox.Text,
+                NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+            {
+                MessageBox.Show(this, "Enter a valid unsigned 32-bit coarse adjustment.",
+                    "Invalid mRO-50 value", MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+            await RunMro50OperationAsync(
+                activeClient => activeClient.SetMro50CoarseAdjustment(value),
+                "mRO-50 coarse adjustment updated.");
+        }
+
+        private async void SaveMroCoarse_Click(object sender, RoutedEventArgs e)
+        {
+            if (MessageBox.Show(this,
+                "Save the current mRO-50 coarse adjustment to nonvolatile storage?",
+                "Confirm mRO-50 write", MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+            await RunMro50OperationAsync(
+                activeClient => activeClient.SaveMro50CoarseAdjustment(),
+                "mRO-50 coarse adjustment saved.");
+        }
+
+        private async Task RunMro50OperationAsync(
+            Func<TimeCardClient, Mro50Status> operation, string success)
+        {
+            if (client == null || atomicRefreshing)
+                return;
+            atomicRefreshing = true;
+            AtomicRefreshButton.IsEnabled = false;
+            TimeCardClient activeClient = client;
+            try
+            {
+                Mro50Status status = await Task.Run(
+                    () => operation(activeClient));
+                if (client != activeClient)
+                    return;
+                lastMro50Status = status;
+                ApplyMro50Status(status);
+                Log(success);
+            }
+            catch (Exception ex)
+            {
+                Log("mRO-50 operation failed: " + ex.Message);
+                MessageBox.Show(this, ex.Message, "mRO-50 operation failed",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -3549,7 +3826,9 @@ namespace TimeCardControlCenter
             I2cControllerStateText.Text = fullScan ? "SCANNING" : "REFRESHING";
             I2cScanResultText.Text = fullScan ?
                 "Probing 7-bit addresses 0x08 through 0x77..." :
-                "Probing the two declared onboard devices...";
+                lastSnapshot != null && lastSnapshot.Layout == "Orolia ART" ?
+                    "Probing the ART 24c08 EEPROM banks at 0x50 through 0x57..." :
+                    "Probing the two declared onboard devices...";
             TimeCardClient activeClient = client;
             try
             {
@@ -3558,20 +3837,25 @@ namespace TimeCardControlCenter
                     I2cRefreshResult value = new I2cRefreshResult
                     {
                         Addresses = new List<uint>(),
-                        FullScan = fullScan
+                        FullScan = fullScan,
+                        IsArt = lastSnapshot != null &&
+                            lastSnapshot.Layout == "Orolia ART"
                     };
-                    if (lastSnapshot != null && lastSnapshot.AbiVersion >= 7)
+                    if (!value.IsArt && lastSnapshot != null &&
+                        lastSnapshot.AbiVersion >= 7)
                         value.Mux = activeClient.GetI2cMux();
                     uint first = fullScan ? 0x08u : 0x50u;
-                    uint last = fullScan ? 0x77u : 0x58u;
+                    uint last = fullScan ? 0x77u :
+                        value.IsArt ? 0x57u : 0x58u;
                     for (uint address = first; address <= last; address++)
                     {
-                        if (!fullScan && address != 0x50u && address != 0x58u)
+                        if (!fullScan && !value.IsArt &&
+                            address != 0x50u && address != 0x58u)
                             continue;
                         I2cProbeResult probe = activeClient.ProbeI2c(address);
                         if (address == 0x50u)
                             value.BoardEeprom = probe;
-                        else if (address == 0x58u)
+                        else if (!value.IsArt && address == 0x58u)
                             value.MacEeprom = probe;
                         if (probe.IsPresent)
                             value.Addresses.Add(address);
@@ -3608,7 +3892,15 @@ namespace TimeCardControlCenter
             I2cControllerStatus status = result.Status;
             bool readsSupported = SupportsReliableI2cReads();
 
-            ApplyI2cMuxState(result.Mux);
+            if (result.IsArt)
+            {
+                I2cMuxStatusText.Text = "NOT FITTED ON ART";
+                I2cMuxStatusText.Foreground = warningBrush;
+            }
+            else
+            {
+                ApplyI2cMuxState(result.Mux);
+            }
 
             I2cControllerStateText.Text = status.IsPresent ?
                 (status.IsEnabled ? "ENABLED" : "PRESENT") : "NOT PRESENT";
@@ -3630,9 +3922,11 @@ namespace TimeCardControlCenter
                 result.BoardEeprom.IsPresent ? "PRESENT" : "NO ACK";
             I2cBoardStatusText.Foreground = result.BoardEeprom != null &&
                 result.BoardEeprom.IsPresent ? healthyBrush : warningBrush;
-            I2cMacStatusText.Text = result.MacEeprom != null &&
+            I2cMacStatusText.Text = result.IsArt ? "NOT FITTED" :
+                result.MacEeprom != null &&
                 result.MacEeprom.IsPresent ? "PRESENT" : "NO ACK";
-            I2cMacStatusText.Foreground = result.MacEeprom != null &&
+            I2cMacStatusText.Foreground = result.IsArt ? warningBrush :
+                result.MacEeprom != null &&
                 result.MacEeprom.IsPresent ? healthyBrush : warningBrush;
 
             I2cDeviceCountText.Text = result.Addresses.Count.ToString(
@@ -3644,7 +3938,8 @@ namespace TimeCardControlCenter
             I2cAddressMapText.Text = FormatI2cAddressMap(result);
             I2cDiagnosticsText.Text = FormatI2cControllerDiagnostics(
                 status, result.FullScan ? "Full 7-bit scan completed." :
-                "Known-device probe completed.");
+                result.IsArt ? "ART 24c08 bank probe completed." :
+                    "Known-device probe completed.");
             I2cReadButton.IsEnabled = readsSupported;
             I2cPreviousButton.IsEnabled = readsSupported;
             I2cNextButton.IsEnabled = readsSupported;
@@ -3663,7 +3958,9 @@ namespace TimeCardControlCenter
             bool abiSupported = snapshot.AbiVersion >= 3;
             bool reliableReads = abiSupported &&
                 DriverVersionAtLeast(snapshot.DriverVersion, 1, 14);
-            bool boardControls = snapshot.AbiVersion >= 7 && reliableReads;
+            bool isArt = snapshot.Layout == "Orolia ART";
+            bool boardControls = !isArt &&
+                snapshot.AbiVersion >= 7 && reliableReads;
             Brush stateBrush = (Brush)FindResource(
                 boardControls ? "AccentBrush" : "GoldBrush");
 
@@ -3672,6 +3969,28 @@ namespace TimeCardControlCenter
             I2cLedAutoCheckBox.IsEnabled = boardControls;
             I2cLedManualPanel.IsEnabled = boardControls &&
                 I2cLedAutoCheckBox.IsChecked != true;
+            I2cMuxPanel.IsEnabled = !isArt && boardControls;
+            I2cMuxPanel.Opacity = isArt ? 0.55 : 1.0;
+            I2cLedPanel.IsEnabled = boardControls;
+            I2cLedPanel.Opacity = isArt ? 0.55 : 1.0;
+            foreach (ComboBoxItem preset in
+                I2cPresetCombo.Items.OfType<ComboBoxItem>())
+            {
+                string tag = Convert.ToString(preset.Tag,
+                    CultureInfo.InvariantCulture);
+                preset.IsEnabled = !isArt ||
+                    tag == "custom" || tag == "board" || tag == "direct";
+            }
+            if (isArt && reliableReads)
+            {
+                I2cLedAutoCheckBox.IsChecked = false;
+                I2cDriverBadgeText.Text = "OROLIA ART \u00B7 READS";
+                I2cSafetyBannerText.Text =
+                    "Direct OpenCores I\u00B2C at BAR + 0x00350000 exposes the ART 24c08 EEPROM banks at 0x50-0x57. This board profile has no PCA9546A sensor mux or IS32FL3207 LEDs.";
+                I2cLedOperationText.Text =
+                    "Status LEDs are not fitted on the Orolia ART profile.";
+                return;
+            }
             if (boardControls)
             {
                 I2cDriverBadgeText.Text = "DRIVER " + snapshot.DriverVersion;
@@ -3714,6 +4033,7 @@ namespace TimeCardControlCenter
         private bool SupportsI2cBoardControls()
         {
             return client != null && lastSnapshot != null &&
+                lastSnapshot.Layout != "Orolia ART" &&
                 lastSnapshot.AbiVersion >= 7 &&
                 DriverVersionAtLeast(lastSnapshot.DriverVersion, 1, 14);
         }
@@ -5771,6 +6091,30 @@ namespace TimeCardControlCenter
 
         private void UpdateSensorsCompatibility(TimeCardSnapshot snapshot)
         {
+            if (snapshot != null && snapshot.Layout == "Orolia ART")
+            {
+                lastSensorSnapshot = null;
+                SensorsRefreshButton.IsEnabled = false;
+                SensorsDriverText.Text =
+                    "The Orolia ART profile has no PCA9546A sensor branch. The mRO-50 raw temperature word is available in the Atomic workspace.";
+                SensorsStatusText.Text = "NOT FITTED ON ART";
+                SensorsStatusText.Foreground =
+                    (Brush)FindResource("GoldBrush");
+                SensorsStatusDot.Fill = (Brush)FindResource("GoldBrush");
+                SensorsLastSampleText.Text = "BOARD PROFILE";
+                SetEnvironmentUnavailable(
+                    "ENVIRONMENT SENSOR \u00B7 NOT FITTED ON OROLIA ART");
+                Rail12StatusText.Text = "NOT FITTED";
+                Rail5StatusText.Text = "NOT FITTED";
+                Rail3V3StatusText.Text = "NOT FITTED";
+                ImuStatusText.Text = "NOT FITTED";
+                ImuDetailText.Text =
+                    "IMU sensor branch is not implemented by the Orolia ART profile";
+                ImuDetailText.Foreground =
+                    (Brush)FindResource("GoldBrush");
+                return;
+            }
+
             bool supported = snapshot != null && snapshot.AbiVersion >= 8;
             SensorsRefreshButton.IsEnabled = supported && client != null &&
                 !sensorsRefreshing;
@@ -5805,6 +6149,11 @@ namespace TimeCardControlCenter
                 UpdateSensorsCompatibility(lastSnapshot);
                 return;
             }
+            if (lastSnapshot.Layout == "Orolia ART")
+            {
+                UpdateSensorsCompatibility(lastSnapshot);
+                return;
+            }
 
             sensorsRefreshing = true;
             SensorsRefreshButton.IsEnabled = false;
@@ -5832,7 +6181,8 @@ namespace TimeCardControlCenter
             {
                 sensorsRefreshing = false;
                 SensorsRefreshButton.IsEnabled = client != null &&
-                    lastSnapshot != null && lastSnapshot.AbiVersion >= 8;
+                    lastSnapshot != null && lastSnapshot.AbiVersion >= 8 &&
+                    lastSnapshot.Layout != "Orolia ART";
             }
         }
 

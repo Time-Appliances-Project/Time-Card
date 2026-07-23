@@ -16,6 +16,8 @@ namespace TimeCardControlCenter
         public uint AbiVersion { get; set; }
         public string Layout { get; set; }
         public bool GnssFixOk { get; set; }
+        public bool GnssTelemetryAvailable { get; set; }
+        public bool TodTelemetryAvailable { get; set; }
         public int LockedSatellites { get; set; }
         public uint UtcStatus { get; set; }
         public uint TodStatus { get; set; }
@@ -33,6 +35,10 @@ namespace TimeCardControlCenter
     {
         public bool TryBoolean(string name, out bool value) { value = true; return true; }
     }
+    public sealed class Mro50Status
+    {
+        public bool IsLocked { get; set; }
+    }
     public sealed class SensorTelemetrySnapshot
     {
         public uint ControllerStatus { get; set; }
@@ -46,7 +52,8 @@ namespace TimeCardControlCenter
     {
         public static string Run()
         {
-            HealthReport demo = ControlCenterHealth.Evaluate(null, null, null, null, false, true);
+            HealthReport demo = ControlCenterHealth.Evaluate(
+                null, null, null, null, null, false, true);
             if (demo.Overall != HealthSeverity.Healthy || demo.Nodes.Count != 8)
                 throw new Exception("Demo health graph failed.");
 
@@ -54,14 +61,29 @@ namespace TimeCardControlCenter
             {
                 DriverVersion = "1.15", AbiVersion = 8, Layout = "MSI-X",
                 GnssFixOk = true, LockedSatellites = 12, UtcStatus = 1u << 8,
+                GnssTelemetryAvailable = true, TodTelemetryAvailable = true,
                 IsClockSynchronized = true, OffsetNanoseconds = 4,
                 SamplingWindowNanoseconds = 9000
             };
-            HealthReport health = ControlCenterHealth.Evaluate(live, null, null,
-                new SensorTelemetrySnapshot(), true, false);
+            HealthReport health = ControlCenterHealth.Evaluate(
+                live, null, null, null, new SensorTelemetrySnapshot(),
+                true, false);
             if (health.Find("phc").Severity != HealthSeverity.Healthy ||
                 health.Find("gnss").Severity != HealthSeverity.Healthy)
                 throw new Exception("Live health evaluation failed.");
+
+            TimeCardSnapshot art = new TimeCardSnapshot
+            {
+                DriverVersion = "1.29", AbiVersion = 9,
+                Layout = "Orolia ART", IsClockSynchronized = true,
+                OffsetNanoseconds = 4, SamplingWindowNanoseconds = 9000
+            };
+            HealthReport artHealth = ControlCenterHealth.Evaluate(
+                art, null, null, new Mro50Status { IsLocked = true },
+                null, true, false);
+            if (artHealth.Find("atomic").Severity != HealthSeverity.Healthy ||
+                artHealth.Find("tod").Severity != HealthSeverity.Informational)
+                throw new Exception("Orolia ART capability health evaluation failed.");
 
             IList<ConfigurationProfile> profiles = BuiltInProfiles.Create();
             if (profiles.Count < 5 || !profiles.Any(item => item.HasNmea) ||

@@ -153,7 +153,11 @@ namespace TimeCardControlCenter
                     hot ? 1.8 : 1.0), layout.Bounds, 11, 11);
             dc.DrawEllipse(new SolidColorBrush(color), null,
                 new Point(layout.Bounds.Left + 15, layout.Bounds.Top + 17), 4.5, 4.5);
-            dc.DrawText(Text(layout.Title, 11, Colors.White, FontWeights.SemiBold),
+            string title = layout.Key == "atomic" && node != null &&
+                node.Name.StartsWith("mRO-50",
+                    StringComparison.OrdinalIgnoreCase) ?
+                "MRO-50 ATOMIC" : layout.Title;
+            dc.DrawText(Text(title, 11, Colors.White, FontWeights.SemiBold),
                 new Point(layout.Bounds.Left + 27, layout.Bounds.Top + 9));
             string status = node == null ? "WAITING" : node.Status;
             dc.DrawText(Text(status, 9, color, FontWeights.SemiBold),

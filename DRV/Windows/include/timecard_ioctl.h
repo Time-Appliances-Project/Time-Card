@@ -82,8 +82,12 @@
     TIMECARD_IOCTL(29, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 #define IOCTL_TIMECARD_SENSOR_QUERY \
     TIMECARD_IOCTL(30, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_MRO50_QUERY \
+    TIMECARD_IOCTL(31, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_MRO50_CONTROL \
+    TIMECARD_IOCTL(32, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 
-#define TIMECARD_ABI_VERSION 8u
+#define TIMECARD_ABI_VERSION 9u
 #define TIMECARD_LAYOUT_MSI  1u
 #define TIMECARD_LAYOUT_MSIX 2u
 #define TIMECARD_LAYOUT_ART  3u
@@ -95,6 +99,19 @@
 #define TIMECARD_UART_GNSS2 1u
 #define TIMECARD_UART_MAC   2u
 #define TIMECARD_UART_NMEA  3u
+
+#define TIMECARD_MRO50_FLAG_PRESENT        (1u << 0)
+#define TIMECARD_MRO50_FLAG_ENABLED        (1u << 1)
+#define TIMECARD_MRO50_FLAG_LOCKED         (1u << 2)
+#define TIMECARD_MRO50_FLAG_FINE_VALID     (1u << 3)
+#define TIMECARD_MRO50_FLAG_COARSE_VALID   (1u << 4)
+#define TIMECARD_MRO50_FLAG_SERIAL_ENABLED (1u << 5)
+
+#define TIMECARD_MRO50_ACTION_QUERY         0u
+#define TIMECARD_MRO50_ACTION_ADJUST_FINE   1u
+#define TIMECARD_MRO50_ACTION_ADJUST_COARSE 2u
+#define TIMECARD_MRO50_ACTION_SAVE_COARSE   3u
+#define TIMECARD_MRO50_ACTION_SERIAL_ENABLE 4u
 
 #define TIMECARD_HIERARCHY_QUERY   0u
 #define TIMECARD_HIERARCHY_ENABLE  1u
@@ -480,6 +497,28 @@ typedef struct _TIMECARD_SENSOR_TELEMETRY {
     TIMECARD_INA219_READING Rail3V3;
     TIMECARD_BNO055_READING Imu;
 } TIMECARD_SENSOR_TELEMETRY;
+
+/*
+ * Orolia/Safran ART mRO-50 FPGA bridge. Temperature is the raw gateware
+ * telemetry word; its physical scaling depends on the installed ART image.
+ */
+typedef struct _TIMECARD_MRO50_STATUS {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Control;
+    unsigned __int32 FineAdjustment;
+    unsigned __int32 CoarseAdjustment;
+    unsigned __int32 Temperature;
+    unsigned __int32 BoardConfig;
+    unsigned __int32 Reserved;
+} TIMECARD_MRO50_STATUS;
+
+typedef struct _TIMECARD_MRO50_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Action;
+    unsigned __int32 Value;
+    unsigned __int32 Reserved;
+} TIMECARD_MRO50_CONTROL;
 
 typedef struct _TIMECARD_CLOCK_SOURCE_CONTROL {
     unsigned __int32 Size;

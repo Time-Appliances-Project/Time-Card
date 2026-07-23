@@ -57,6 +57,8 @@ namespace TimeCardControlCenter
         private static readonly uint IoctlLedQuery = ControlCode(28, FileReadAccess | FileWriteAccess);
         private static readonly uint IoctlLedSet = ControlCode(29, FileReadAccess | FileWriteAccess);
         private static readonly uint IoctlSensorQuery = ControlCode(30, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlMro50Query = ControlCode(31, FileReadAccess);
+        private static readonly uint IoctlMro50Control = ControlCode(32, FileReadAccess | FileWriteAccess);
 
         private readonly object gate = new object();
         private SafeFileHandle handle;
@@ -810,6 +812,46 @@ namespace TimeCardControlCenter
         {
             return new SensorTelemetrySnapshot(
                 GetOutput<TimeCardSensorTelemetryRaw>(IoctlSensorQuery));
+        }
+
+        public Mro50Status GetMro50Status()
+        {
+            return new Mro50Status(
+                GetOutput<TimeCardMro50StatusRaw>(IoctlMro50Query));
+        }
+
+        public Mro50Status SetMro50FineAdjustment(uint value)
+        {
+            return ControlMro50(1, value);
+        }
+
+        public Mro50Status SetMro50CoarseAdjustment(uint value)
+        {
+            return ControlMro50(2, value);
+        }
+
+        public Mro50Status SaveMro50CoarseAdjustment()
+        {
+            return ControlMro50(3, 0);
+        }
+
+        public Mro50Status SetMro50SerialRoute(bool enabled)
+        {
+            return ControlMro50(4, enabled ? 1u : 0u);
+        }
+
+        private Mro50Status ControlMro50(uint action, uint value)
+        {
+            TimeCardMro50ControlRaw request = new TimeCardMro50ControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardMro50ControlRaw)),
+                Action = action,
+                Value = value
+            };
+            byte[] output = Call(IoctlMro50Control, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardMro50StatusRaw)));
+            return new Mro50Status(
+                BytesToStruct<TimeCardMro50StatusRaw>(output));
         }
 
         private TimeCardHierarchyRaw SetHierarchyRaw(uint action, bool persist)

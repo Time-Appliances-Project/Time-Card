@@ -21,14 +21,23 @@ TimeCardFindPciField(const WCHAR *hardwareIds, ULONG characters,
 {
     ULONG i;
 
-    for (i = 0; i + 5u + digits <= characters; ++i) {
+    for (i = 0; i + 4u + digits <= characters; ++i) {
         ULONG parsed = 0;
         ULONG j;
 
-        if (hardwareIds[i] != L'&')
+        /*
+         * A PCI hardware ID begins with "PCI\VEN_"; subsequent fields begin
+         * after '&'.  Requiring '&' for every field silently discarded the
+         * vendor ID and made all non-Facebook cards fall back to that board
+         * profile even when their INF match was exact.
+         */
+        if (i == 0 ||
+            (hardwareIds[i - 1u] != L'\\' &&
+             hardwareIds[i - 1u] != L'&')) {
             continue;
+        }
         for (j = 0; j < 4u; ++j) {
-            WCHAR actual = hardwareIds[i + 1u + j];
+            WCHAR actual = hardwareIds[i + j];
             WCHAR expected = field[j];
 
             if (actual >= L'a' && actual <= L'z')
@@ -39,7 +48,7 @@ TimeCardFindPciField(const WCHAR *hardwareIds, ULONG characters,
         if (j != 4u)
             continue;
         for (j = 0; j < digits; ++j) {
-            int digit = TimeCardHexDigit(hardwareIds[i + 5u + j]);
+            int digit = TimeCardHexDigit(hardwareIds[i + 4u + j]);
 
             if (digit < 0)
                 break;
@@ -157,6 +166,8 @@ TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
     context->SmaMap1 = NULL;
     context->SmaMap2 = NULL;
     context->ArtSma = NULL;
+    context->ArtBoardConfig = NULL;
+    context->Mro50 = NULL;
     context->I2c = NULL;
     context->Flash = NULL;
     context->I2cKnownDeviceMask = 0;
@@ -196,6 +207,18 @@ TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
                           sizeof(TIMECARD_ART_SMA_REG))) {
         context->ArtSma = (volatile TIMECARD_ART_SMA_REG *)(
             context->Bar0Base + TIMECARD_SMA_OFFSET_ART);
+    }
+    if (TimeCardRangeFits(context->Bar0Length,
+                          TIMECARD_BOARD_CONFIG_OFFSET_ART,
+                          sizeof(ULONG))) {
+        context->ArtBoardConfig = (volatile ULONG *)(
+            context->Bar0Base + TIMECARD_BOARD_CONFIG_OFFSET_ART);
+    }
+    if (TimeCardRangeFits(context->Bar0Length,
+                          TIMECARD_MRO50_OFFSET_ART,
+                          sizeof(TIMECARD_MRO50_REG))) {
+        context->Mro50 = (volatile TIMECARD_MRO50_REG *)(
+            context->Bar0Base + TIMECARD_MRO50_OFFSET_ART);
     }
     if (TimeCardRangeFits(context->Bar0Length, context->I2cOffset, 0x100u))
         context->I2c = context->Bar0Base + context->I2cOffset;
@@ -322,6 +345,8 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
     context->SmaMap1 = NULL;
     context->SmaMap2 = NULL;
     context->ArtSma = NULL;
+    context->ArtBoardConfig = NULL;
+    context->Mro50 = NULL;
     context->NmeaOut = NULL;
     context->I2c = NULL;
     context->I2cKnownDeviceMask = 0;
@@ -545,6 +570,8 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
     context->SmaMap1 = NULL;
     context->SmaMap2 = NULL;
     context->ArtSma = NULL;
+    context->ArtBoardConfig = NULL;
+    context->Mro50 = NULL;
     context->I2c = NULL;
     context->Flash = NULL;
     context->FlashJedecId = 0;
@@ -568,9 +595,36 @@ NTSTATUS
 TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 {
     PDEVICE_CONTEXT context = DeviceGetContext(device);
+    TIMECARD_UART_CONFIG uartConfig;
     NTSTATUS status;
 
     UNREFERENCED_PARAMETER(previousState);
+
+    if (context->BoardProfile == TIMECARD_BOARD_ART) {
+        /*
+         * ART gateware keeps the mRO-50 UART disconnected until this board
+         * configuration bit is asserted.  This is also done by the upstream
+         * Linux ptp_ocp ART initializer.
+         */
+        if (context->ArtBoardConfig != NULL) {
+            WdfWaitLockAcquire(context->RegisterLock, NULL);
+            WRITE_REGISTER_ULONG((PULONG)context->ArtBoardConfig, 1u);
+            WdfWaitLockRelease(context->RegisterLock);
+        }
+
+        /*
+         * Unlike the Meta/Celestica resources, Linux deliberately provides
+         * no fixed baud for the ART GNSS UART. Preserve the gateware divisor
+         * so cards populated with different receiver images remain usable.
+         */
+        uartConfig.Port = TIMECARD_UART_MAC;
+        uartConfig.Baud = 9600u;
+        status = TimeCardUartConfigure(context, &uartConfig);
+        if (!NT_SUCCESS(status)) {
+            KdPrint(("timecard: ART mRO-50 UART initialization unavailable, "
+                     "status 0x%08lx\n", status));
+        }
+    }
 
     status = TimeCardNmeaInitialize(context);
     if (!NT_SUCCESS(status)) {

@@ -4,12 +4,13 @@ The Time Card Control Center is a dependency-free Windows desktop dashboard
 for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
-Driver 1.25 recognizes the Meta/Facebook, Celestica, and Orolia/Safran ART
-profiles from the Linux driver. The application labels the ART layout,
-suppresses unavailable ToD/GNSS-summary fields, uses the ART-specific SMA
-function menu, and prevents the MAC-SA53 panel from sending commands to the
-ART card's mRO-50 oscillator. Its generic UART 2 console remains available at
-the ART default of 9,600 baud.
+Driver 1.29 / ABI 9 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
+ART profiles from the Linux driver. On ART, the application switches to a
+native mRO-50 FPGA-bridge workspace, probes all 24c08 banks at `0x50-0x57`,
+uses the fixed ART SMA map, and labels the absent ToD/NMEA, secondary-GNSS,
+sensor-mux, and RGB-LED capabilities as not implemented or not fitted.
+The ART GNSS console preserves the baud selected by gateware until the operator
+explicitly chooses a new divisor.
 
 ![Control Center overview](../assets/timecard-control-center.png)
 
@@ -369,7 +370,7 @@ updates receiver firmware. Parameter keys, bounds, frame formats, and ACK/NAK
 handling follow the official
 [RCB-F9T Interface Description](https://content.u-blox.com/sites/default/files/RCB-F9T_InterfaceDescription_%28UBX-19003606%29.pdf).
 
-## Microchip MAC-SA53 atomic clock
+## Atomic clocks: MAC-SA53 and ART mRO-50
 
 The **Atomic Clock** workspace talks directly to UART 2 using Microchip's C3
 protocol at the factory-default 57,600 baud, 8N1. It uses the documented
@@ -379,9 +380,18 @@ The general UART monitor is stopped before an SA53 transaction and the complete
 command/response exchange is serialized so monitor reads cannot consume C3
 responses.
 
-On an Orolia/Safran ART card, the SA53 refresh and write actions are disabled
-because ART uses an mRO-50 rather than a MAC-SA53. Use the generic UART
-workspace, select UART 2, and configure 9,600 baud, 8N1.
+On an Orolia/Safran ART card, the workspace changes automatically to the
+mRO-50 direct FPGA bridge. It reports oscillator enable and lock, the raw
+gateware temperature word, fine adjustment, coarse adjustment, bridge control,
+and board-configuration state. Fine and coarse writes are available from the
+ART panel; saving coarse adjustment to nonvolatile storage requires explicit
+confirmation. The application does not invent a Celsius conversion for the
+raw temperature word because ART FPGA v0.0.9 does not publish its scale.
+
+The optional ART 16550 mRO serial route remains configured for 9,600 baud, 8N1
+when implemented. The direct bridge is authoritative and continues to work on
+the tested FPGA v0.0.9 image even though its mRO UART block reports line status
+`0x00`.
 
 Digital tuning and discipline settings take effect immediately. Enabling PPS
 disciplining can initiate a JamSync and move the 1PPS phase; the application
@@ -483,8 +493,9 @@ shown in the workspace, and automatic mapping marks affected packages as
 
 ## Sensors and IMU
 
-Driver 1.25 / ABI 8 and the dedicated Sensors & IMU workspace read every
-populated monitor on the auto-detected sensor branch. BME280 and BMP280 are
+On Meta/Facebook and Celestica profiles, driver 1.25 / ABI 8 and the dedicated
+Sensors & IMU workspace read every populated monitor on the auto-detected
+sensor branch. BME280 and BMP280 are
 auto-detected at `0x76` or `0x77`; BME280 cards show factory-compensated
 temperature, relative humidity, pressure, and calculated dew point, while a
 BMP280 correctly reports humidity and dew point as unavailable. The three
@@ -511,6 +522,11 @@ Driver 1.25 additionally probes SH-2 report `0x0e` and displays its signed-Q7
 ambient temperature when the installed BNO08x firmware publishes it. Firmware
 without that optional report continues to show an em dash rather than a
 fabricated die-temperature value.
+
+The Orolia ART profile has no PCA9546A environmental/power/IMU branch and no
+IS32FL3207 status-LED controller. These workspaces therefore show **not fitted
+on ART** and do not issue unsupported sensor, mux, or LED IOCTLs. The mRO-50
+raw temperature word remains available in the Atomic workspace.
 
 ## FPGA SPI flash
 
