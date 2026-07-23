@@ -982,9 +982,9 @@
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="MICROCHIP MAC-SA53" Style="{StaticResource Eyebrow}" />
-                                    <TextBlock Text="Atomic clock configuration" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
-                                    <TextBlock Text="Live physics-package telemetry, frequency steering, 1PPS geometry, and disciplined timing control over the C3 serial interface."
+                                    <TextBlock x:Name="AtomicEyebrowText" Text="MICROCHIP MAC-SA53" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock x:Name="AtomicTitleText" Text="Atomic clock configuration" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
+                                    <TextBlock x:Name="AtomicDescriptionText" Text="Live physics-package telemetry, frequency steering, 1PPS geometry, and disciplined timing control over the C3 serial interface."
                                                Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -998,22 +998,22 @@
 
                             <UniformGrid Grid.Row="1" Columns="4" Margin="0,26,0,22">
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
-                                    <TextBlock Text="PHYSICS LOCK" Style="{StaticResource Label}" />
+                                    <TextBlock x:Name="AtomicLockLabelText" Text="PHYSICS LOCK" Style="{StaticResource Label}" />
                                     <TextBlock x:Name="AtomicLockText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="AtomicLockDetailText" Text="Awaiting SA53" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
-                                    <TextBlock Text="TEMPERATURE" Style="{StaticResource Label}" />
+                                    <TextBlock x:Name="AtomicTemperatureLabelText" Text="TEMPERATURE" Style="{StaticResource Label}" />
                                     <TextBlock x:Name="AtomicTemperatureText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="AtomicTemperatureDetailText" Text="Baseplate must remain ≤ 75 °C" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
-                                    <TextBlock Text="POWER SUPPLY" Style="{StaticResource Label}" />
+                                    <TextBlock x:Name="AtomicSupplyLabelText" Text="POWER SUPPLY" Style="{StaticResource Label}" />
                                     <TextBlock x:Name="AtomicSupplyText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="AtomicSupplyDetailText" Text="SA53 input telemetry" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource Panel}"><StackPanel>
-                                    <TextBlock Text="ACTIVE ALARMS" Style="{StaticResource Label}" />
+                                    <TextBlock x:Name="AtomicAlarmLabelText" Text="ACTIVE ALARMS" Style="{StaticResource Label}" />
                                     <TextBlock x:Name="AtomicAlarmText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="AtomicAlarmDetailText" Text="Alarm word pending" Foreground="{DynamicResource MutedBrush}"
                                                TextTrimming="CharacterEllipsis" ToolTip="{Binding RelativeSource={RelativeSource Self}, Path=Text}" />
@@ -1025,7 +1025,7 @@
                                 <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
                                     <StackPanel>
                                         <TextBlock Text="Clock identity" Style="{StaticResource SectionTitle}" />
-                                        <TextBlock Text="UART 2 · 57,600 baud · C3 protocol" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,17" />
+                                        <TextBlock x:Name="AtomicIdentityProtocolText" Text="UART 2 · 57,600 baud · C3 protocol" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,17" />
                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                             <TextBlock Text="Device" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicDeviceText" Grid.Column="1" Text="—" FontFamily="Segoe UI Semibold" /></Grid>
                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -1041,7 +1041,7 @@
                                 <Border Grid.Column="1" Style="{StaticResource Panel}">
                                     <StackPanel>
                                         <TextBlock Text="Oscillator &amp; discipline telemetry" Style="{StaticResource SectionTitle}" />
-                                        <TextBlock Text="Read-only operating values reported directly by the SA53." Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,15" />
+                                        <TextBlock x:Name="AtomicTelemetryDescriptionText" Text="Read-only operating values reported directly by the SA53." Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,15" />
                                         <UniformGrid Columns="2">
                                             <StackPanel Margin="0,5,16,10"><TextBlock Text="TOTAL RUNTIME" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicRuntimeText" Text="—" Margin="0,5,0,0" /></StackPanel>
                                             <StackPanel Margin="0,5,0,10"><TextBlock Text="TOTAL LOCK TIME" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicLocktimeText" Text="—" Margin="0,5,0,0" /></StackPanel>
@@ -1056,7 +1056,7 @@
                                 </Border>
                             </Grid>
 
-                            <Grid Grid.Row="3" Margin="0,18,0,0">
+                            <Grid x:Name="AtomicSa53ControlGrid" Grid.Row="3" Margin="0,18,0,0">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions>
                                 <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
                                     <StackPanel>
@@ -1103,7 +1103,43 @@
                                 </Border>
                             </Grid>
 
-                            <Border Grid.Row="4" Style="{StaticResource Panel}" Margin="0,18,0,0">
+                            <Border x:Name="AtomicMroPanel" Grid.Row="3" Style="{StaticResource Panel}" Margin="0,18,0,0"
+                                    Visibility="Collapsed">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="mRO-50 FPGA bridge" Style="{StaticResource SectionTitle}" />
+                                            <TextBlock Text="ART FPGA v0.0.9 exposes oscillator status and steering registers directly. Values are shown exactly as reported by gateware; the temperature word has no published physical scale."
+                                                       Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,18,17" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1" Style="{StaticResource StatusChip}" VerticalAlignment="Top">
+                                            <TextBlock x:Name="AtomicMroSerialRouteText" Text="SERIAL ROUTE UNKNOWN"
+                                                       Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" />
+                                        </Border>
+                                    </Grid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,14,0">
+                                            <TextBlock Text="FINE ADJUSTMENT (UINT32)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <TextBox x:Name="AtomicMroFineTextBox" Text="0" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="0,0,14,0">
+                                            <TextBlock Text="COARSE ADJUSTMENT (UINT32)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <TextBox x:Name="AtomicMroCoarseTextBox" Text="0" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom">
+                                            <Button Content="Set fine" Click="ApplyMroFine_Click" Margin="0,0,8,0" />
+                                            <Button Content="Set coarse" Click="ApplyMroCoarse_Click" Margin="0,0,8,0" />
+                                            <Button Content="Save coarse" Click="SaveMroCoarse_Click" Style="{StaticResource DangerButton}" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBlock Text="Fine and coarse writes immediately steer the oscillator. Saving coarse adjustment writes the mRO-50 nonvolatile setting and always requires confirmation."
+                                               Foreground="{DynamicResource GoldBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,13,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border x:Name="AtomicSa53DisciplinePanel" Grid.Row="4" Style="{StaticResource Panel}" Margin="0,18,0,0">
                                 <StackPanel>
                                     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                         <StackPanel><TextBlock Text="1PPS disciplining &amp; phase measurement" Style="{StaticResource SectionTitle}" />
@@ -1133,7 +1169,7 @@
                                 </StackPanel>
                             </Border>
 
-                            <Grid Grid.Row="5" Margin="0,18,0,0">
+                            <Grid x:Name="AtomicSa53ProtectedGrid" Grid.Row="5" Margin="0,18,0,0">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
                                 <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
                                     <StackPanel>
@@ -1796,7 +1832,7 @@
 
                             <Grid Grid.Row="3" Margin="0,0,0,18">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.25*" /><ColumnDefinition Width="0.75*" /></Grid.ColumnDefinitions>
-                                <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
+                                <Border x:Name="I2cMuxPanel" Style="{StaticResource Panel}" Margin="0,0,18,0">
                                     <StackPanel>
                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="PCA9546A downstream routing" Style="{StaticResource SectionTitle}" /><TextBlock Text="U27 &#x00B7; upstream address 0x70 &#x00B7; channels may be combined by the device" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,3,0,0" /></StackPanel><TextBlock x:Name="I2cMuxStatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" VerticalAlignment="Center" /></Grid>
                                         <WrapPanel Margin="0,16,0,14">
@@ -1824,7 +1860,7 @@
                                 </Border>
                             </Grid>
 
-                            <Border Grid.Row="4" Style="{StaticResource Panel}" Margin="0,0,0,18">
+                            <Border x:Name="I2cLedPanel" Grid.Row="4" Style="{StaticResource Panel}" Margin="0,0,0,18">
                                 <StackPanel>
                                     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Subsystem RGB status indicators" Style="{StaticResource SectionTitle}" /><TextBlock Text="IS32FL3207 at 7-bit 0x37 on sensor channel 1 &#x00B7; GNSS 1/2 and IO 1&#x2013;4" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,3,0,0" /></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="I2cLedTestButton" Content="Electrical test" Click="TestI2cLeds_Click" Style="{StaticResource SecondaryButton}" Padding="12,6" Margin="0,0,14,0" /><CheckBox x:Name="I2cLedAutoCheckBox" Content="Automatic status mapping" IsChecked="True" Click="I2cLedAuto_Click" VerticalAlignment="Center" /></StackPanel></Grid>
                                     <Grid Margin="0,18,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="1.05*" /><ColumnDefinition Width="0.95*" /></Grid.ColumnDefinitions>

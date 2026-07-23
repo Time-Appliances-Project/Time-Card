@@ -9,6 +9,8 @@ $driverSource = Get-Content -Raw (Join-Path $windows 'driver.c')
 $headerSource = Get-Content -Raw (Join-Path $windows 'timecard.h')
 $infSource = Get-Content -Raw (Join-Path $windows 'timecard.inf')
 $projectSource = Get-Content -Raw (Join-Path $windows 'timecard.vcxproj')
+$abiSource = Get-Content -Raw (Join-Path $windows 'include\timecard_ioctl.h')
+$mroSource = Get-Content -Raw (Join-Path $windows 'mro50.c')
 
 function Assert-Match {
     param(
@@ -67,10 +69,22 @@ Assert-Match $driverSource 'TIMECARD_I2C_CONTROLLER_OCORES' `
     'ART does not select the OpenCores I2C transport'
 Assert-Match $driverSource 'TIMECARD_FLASH_CONTROLLER_ALTERA' `
     'ART does not select the Altera SPI transport'
+Assert-Match $driverSource ([regex]::Escape("hardwareIds[i - 1u] != L'\\'")) `
+    'PCI parser does not accept the leading PCI\VEN_ field'
+Assert-Match $headerSource 'TIMECARD_MRO50_OFFSET_ART\s+0x00340000u' `
+    'ART direct mRO-50 bridge offset is missing'
+Assert-Match $headerSource 'TIMECARD_BOARD_CONFIG_OFFSET_ART\s+0x00210000u' `
+    'ART board-configuration offset is missing'
+Assert-Match $abiSource 'TIMECARD_ABI_VERSION\s+9u' `
+    'mRO-50 support did not advance the public ABI'
+Assert-Match $mroSource 'TimeCardMro50Query' `
+    'ART mRO-50 query implementation is missing'
 Assert-Match $projectSource 'i2c_ocores\.c' `
     'OpenCores I2C implementation is not in the driver build'
 Assert-Match $projectSource 'flash_altera\.c' `
     'Altera SPI implementation is not in the driver build'
+Assert-Match $projectSource 'mro50\.c' `
+    'mRO-50 implementation is not in the driver build'
 Assert-Match $headerSource 'TIMECARD_SUBSYSTEM_MASK_ART' `
     'ART subsystem capability mask is missing'
 

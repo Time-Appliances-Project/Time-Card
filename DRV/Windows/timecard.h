@@ -48,6 +48,8 @@ extern const GUID GUID_DEVCLASS_TIMECARD;
 #define TIMECARD_SMA_OFFSET_ART         0x003c0000u
 #define TIMECARD_I2C_OFFSET_ART         0x00350000u
 #define TIMECARD_FLASH_OFFSET_ART       0x00310000u
+#define TIMECARD_BOARD_CONFIG_OFFSET_ART 0x00210000u
+#define TIMECARD_MRO50_OFFSET_ART       0x00340000u
 
 #define TIMECARD_REGISTER_WINDOW_SIZE   0x00010000u
 #define TIMECARD_UART_CLOCK_HZ          50000000u
@@ -153,6 +155,13 @@ typedef struct _TIMECARD_ART_SMA_REG {
     TIMECARD_ART_SMA_ENTRY Map[TIMECARD_SMA_COUNT];
 } TIMECARD_ART_SMA_REG, *PTIMECARD_ART_SMA_REG;
 
+typedef struct _TIMECARD_MRO50_REG {
+    ULONG Control;
+    ULONG Value;
+    ULONG Adjust;
+    ULONG Temperature;
+} TIMECARD_MRO50_REG, *PTIMECARD_MRO50_REG;
+
 typedef struct _DEVICE_CONTEXT {
     WDFDEVICE Device;
     volatile UCHAR *Bar0Base;
@@ -163,6 +172,8 @@ typedef struct _DEVICE_CONTEXT {
     volatile TIMECARD_GPIO_REG *SmaMap1;
     volatile TIMECARD_GPIO_REG *SmaMap2;
     volatile TIMECARD_ART_SMA_REG *ArtSma;
+    volatile ULONG *ArtBoardConfig;
+    volatile TIMECARD_MRO50_REG *Mro50;
     volatile TIMECARD_SIGNAL_REG *Signal[TIMECARD_SIGNAL_COUNT];
     volatile TIMECARD_FREQUENCY_REG *Frequency[TIMECARD_FREQUENCY_COUNT];
     volatile UCHAR *I2c;
@@ -323,6 +334,11 @@ NTSTATUS TimeCardLedSet(PDEVICE_CONTEXT context,
                         TIMECARD_LED_CONTROL *response);
 NTSTATUS TimeCardSensorQuery(PDEVICE_CONTEXT context,
                              TIMECARD_SENSOR_TELEMETRY *telemetry);
+NTSTATUS TimeCardMro50Query(PDEVICE_CONTEXT context,
+                            TIMECARD_MRO50_STATUS *status);
+NTSTATUS TimeCardMro50Control(PDEVICE_CONTEXT context,
+                              const TIMECARD_MRO50_CONTROL *control,
+                              TIMECARD_MRO50_STATUS *status);
 NTSTATUS TimeCardGetIdentity(PDEVICE_CONTEXT context,
                              TIMECARD_IDENTITY *identity);
 

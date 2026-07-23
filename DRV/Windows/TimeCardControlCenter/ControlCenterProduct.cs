@@ -66,7 +66,8 @@ namespace TimeCardControlCenter
     {
         public static HealthReport Evaluate(TimeCardSnapshot snapshot,
             UbloxReceiverSnapshot ublox, Sa53Snapshot atomic,
-            SensorTelemetrySnapshot sensors, bool connected, bool demoMode)
+            Mro50Status mro50, SensorTelemetrySnapshot sensors,
+            bool connected, bool demoMode)
         {
             List<HealthNode> nodes = new List<HealthNode>();
             if (demoMode)
@@ -114,28 +115,53 @@ namespace TimeCardControlCenter
                 "ACTIVE", string.Format(CultureInfo.InvariantCulture,
                     "Driver {0} / ABI {1} / {2}", snapshot.DriverVersion,
                     snapshot.AbiVersion, snapshot.Layout)));
+            bool isArt = snapshot.Layout == "Orolia ART";
             bool gnssOk = snapshot.GnssFixOk || (ublox != null && ublox.FixValid);
             int used = ublox == null ? snapshot.LockedSatellites : ublox.SatellitesUsed;
-            nodes.Add(Node("gnss", "GNSS receiver", "Gnss", gnssOk,
-                gnssOk ? "FIX VALID" : "NO FIX",
-                used.ToString(CultureInfo.InvariantCulture) + " satellites used"));
+            if (isArt && !snapshot.GnssTelemetryAvailable && ublox == null)
+                nodes.Add(new HealthNode("gnss", "GNSS receiver", "Gnss",
+                    HealthSeverity.Informational, "NOT EXPOSED",
+                    "The installed ART FPGA image does not publish GNSS summary registers."));
+            else
+                nodes.Add(Node("gnss", "GNSS receiver", "Gnss", gnssOk,
+                    gnssOk ? "FIX VALID" : "NO FIX",
+                    used.ToString(CultureInfo.InvariantCulture) + " satellites used"));
             bool utcValid = (snapshot.UtcStatus & (1u << 8)) != 0;
-            nodes.Add(Node("tod", "Time-of-Day engine", "Gnss", utcValid,
-                utcValid ? "UTC VALID" : "UTC INVALID",
-                string.Format(CultureInfo.InvariantCulture, "ToD status 0x{0:X8}", snapshot.TodStatus)));
+            if (!snapshot.TodTelemetryAvailable)
+                nodes.Add(new HealthNode("tod", "Time-of-Day engine", "Gnss",
+                    HealthSeverity.Informational, "NOT IMPLEMENTED",
+                    "This board profile has no FPGA ToD/NMEA engine."));
+            else
+                nodes.Add(Node("tod", "Time-of-Day engine", "Gnss", utcValid,
+                    utcValid ? "UTC VALID" : "UTC INVALID",
+                    string.Format(CultureInfo.InvariantCulture,
+                        "ToD status 0x{0:X8}", snapshot.TodStatus)));
 
             bool atomicLocked = false;
-            string atomicDetail = "Open the Atomic workspace to sample the SA53.";
-            if (atomic != null)
+            string atomicName = isArt ? "mRO-50 atomic oscillator" :
+                "SA53 atomic clock";
+            string atomicDetail = isArt ?
+                "Open the Atomic workspace to sample the ART FPGA bridge." :
+                "Open the Atomic workspace to sample the SA53.";
+            bool atomicSampled = isArt ? mro50 != null : atomic != null;
+            if (isArt && mro50 != null)
+            {
+                atomicLocked = mro50.IsLocked;
+                atomicDetail = atomicLocked ?
+                    "mRO-50 lock is asserted by ART gateware." :
+                    "mRO-50 is present but lock is not asserted.";
+            }
+            else if (atomic != null)
             {
                 atomic.TryBoolean("Locked", out atomicLocked);
                 atomicDetail = atomicLocked ? "SA53 reports oscillator lock." :
                     "SA53 is present but has not asserted lock.";
             }
-            nodes.Add(new HealthNode("atomic", "SA53 atomic clock", "Atomic",
-                atomic == null ? HealthSeverity.Informational :
+            nodes.Add(new HealthNode("atomic", atomicName, "Atomic",
+                !atomicSampled ? HealthSeverity.Informational :
                     atomicLocked ? HealthSeverity.Healthy : HealthSeverity.Attention,
-                atomic == null ? "NOT SAMPLED" : atomicLocked ? "LOCKED" : "UNLOCKED",
+                !atomicSampled ? "NOT SAMPLED" :
+                    atomicLocked ? "LOCKED" : "UNLOCKED",
                 atomicDetail));
             nodes.Add(Node("phc", "Precision hardware clock", "Clock",
                 snapshot.IsClockSynchronized,
@@ -153,6 +179,7 @@ namespace TimeCardControlCenter
                     i2cValid ? HealthSeverity.Healthy : HealthSeverity.Attention,
                 !i2cAvailable ? "ABI UPDATE" : i2cValid ? "READY" : "CHECK BUS",
                 !i2cAvailable ? "I2C controls require ABI 3 or newer." :
+                    isArt ? "OpenCores controller and ART 24c08 EEPROM banks." :
                     "Identity, LEDs, environmental sensors and power rails."));
             bool offsetReasonable = Math.Abs(snapshot.OffsetNanoseconds) < 1000000000L;
             nodes.Add(Node("system", "Windows system clock", "Clock", offsetReasonable,

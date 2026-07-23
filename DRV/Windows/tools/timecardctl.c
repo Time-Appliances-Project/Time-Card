@@ -331,6 +331,63 @@ cmd_uart_read(HANDLE handle, int argc, char **argv)
 }
 
 static int
+cmd_uart_read_hex(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_UART_READ_REQUEST request;
+    TIMECARD_UART_TRANSFER transfer;
+    DWORD returned;
+    unsigned long i;
+
+    if (argc < 3 || argc > 5)
+        return 2;
+    request.Port = (unsigned __int32)parse_ulong(argv[2], "port");
+    request.MaximumBytes = argc >= 4 ?
+        (unsigned __int32)parse_ulong(argv[3], "byte count") : 256u;
+    request.TimeoutMilliseconds = argc >= 5 ?
+        (unsigned __int32)parse_ulong(argv[4], "timeout") : 1000u;
+    request.Reserved = 0;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_UART_READ,
+                       &request, sizeof(request), &transfer,
+                       sizeof(transfer), &returned))
+        return 1;
+    for (i = 0; i < transfer.Length; ++i) {
+        if (i != 0)
+            putchar(' ');
+        printf("%02X", transfer.Data[i]);
+    }
+    putchar('\n');
+    printf("[%lu byte(s), LSR 0x%02lx]\n",
+           (unsigned long)transfer.Length,
+           (unsigned long)(transfer.LineStatus & 0xff));
+    return 0;
+}
+
+static int
+cmd_uart_observe(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_UART_OBSERVE request;
+    TIMECARD_UART_OBSERVE response;
+
+    if (argc < 3 || argc > 4)
+        return 2;
+    RtlZeroMemory(&request, sizeof(request));
+    request.Size = sizeof(request);
+    request.Port = (unsigned __int32)parse_ulong(argv[2], "port");
+    request.TimeoutMilliseconds = argc == 4 ?
+        (unsigned __int32)parse_ulong(argv[3], "timeout") : 0u;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_UART_OBSERVE,
+                       &request, sizeof(request), &response,
+                       sizeof(response), NULL))
+        return 1;
+    printf("UART %lu: %s, LSR 0x%02lx\n",
+           (unsigned long)response.Port,
+           (response.Flags & TIMECARD_UART_OBSERVE_FLAG_ACTIVITY) ?
+               "receive data ready" : "idle",
+           (unsigned long)(response.LineStatus & 0xffu));
+    return 0;
+}
+
+static int
 cmd_uart_write(HANDLE handle, int argc, char **argv)
 {
     TIMECARD_UART_TRANSFER transfer;
@@ -358,6 +415,113 @@ cmd_uart_write(HANDLE handle, int argc, char **argv)
     printf("Wrote %lu byte(s), LSR 0x%02lx\n",
            (unsigned long)result.BytesTransferred,
            (unsigned long)(result.LineStatus & 0xff));
+    return 0;
+}
+
+static void
+print_mro50(const TIMECARD_MRO50_STATUS *status)
+{
+    printf("mRO-50 bridge:    %s%s\n",
+           (status->Flags & TIMECARD_MRO50_FLAG_ENABLED) ?
+               "enabled" : "disabled",
+           (status->Flags & TIMECARD_MRO50_FLAG_LOCKED) ?
+               ", locked" : ", acquiring");
+    printf("Control:          0x%08lx\n",
+           (unsigned long)status->Control);
+    printf("Fine adjustment:  ");
+    if ((status->Flags & TIMECARD_MRO50_FLAG_FINE_VALID) != 0)
+        printf("0x%08lx\n", (unsigned long)status->FineAdjustment);
+    else
+        printf("unavailable\n");
+    printf("Coarse adjustment:");
+    if ((status->Flags & TIMECARD_MRO50_FLAG_COARSE_VALID) != 0)
+        printf(" 0x%08lx\n", (unsigned long)status->CoarseAdjustment);
+    else
+        printf(" unavailable\n");
+    printf("Temperature raw:  0x%08lx\n",
+           (unsigned long)status->Temperature);
+    printf("Board config:     0x%08lx (serial route %s)\n",
+           (unsigned long)status->BoardConfig,
+           (status->Flags & TIMECARD_MRO50_FLAG_SERIAL_ENABLED) ?
+               "enabled" : "disabled");
+}
+
+static int
+cmd_mro50_status(HANDLE handle)
+{
+    TIMECARD_MRO50_STATUS status;
+
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_MRO50_QUERY,
+                       NULL, 0, &status, sizeof(status), NULL))
+        return 1;
+    print_mro50(&status);
+    return 0;
+}
+
+static int
+cmd_mro50_control(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_MRO50_CONTROL control;
+    TIMECARD_MRO50_STATUS status;
+
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    if (strcmp(argv[1], "mro-fine") == 0 && argc == 3) {
+        control.Action = TIMECARD_MRO50_ACTION_ADJUST_FINE;
+        control.Value = (unsigned __int32)parse_ulong(argv[2], "fine value");
+    } else if (strcmp(argv[1], "mro-coarse") == 0 && argc == 3) {
+        control.Action = TIMECARD_MRO50_ACTION_ADJUST_COARSE;
+        control.Value = (unsigned __int32)parse_ulong(argv[2], "coarse value");
+    } else if (strcmp(argv[1], "mro-save-coarse") == 0 && argc == 2) {
+        control.Action = TIMECARD_MRO50_ACTION_SAVE_COARSE;
+    } else if (strcmp(argv[1], "mro-serial") == 0 && argc == 3) {
+        control.Action = TIMECARD_MRO50_ACTION_SERIAL_ENABLE;
+        if (_stricmp(argv[2], "on") == 0)
+            control.Value = 1u;
+        else if (_stricmp(argv[2], "off") != 0)
+            return 2;
+    } else {
+        return 2;
+    }
+
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_MRO50_CONTROL,
+                       &control, sizeof(control), &status,
+                       sizeof(status), NULL))
+        return 1;
+    print_mro50(&status);
+    return 0;
+}
+
+static int
+cmd_flash_status(HANDLE handle)
+{
+    TIMECARD_FLASH_STATUS status;
+
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_FLASH_QUERY,
+                       NULL, 0, &status, sizeof(status), NULL))
+        return 1;
+    printf("FPGA flash:        %s%s%s\n",
+           (status.Flags & TIMECARD_FLASH_FLAG_PRESENT) ?
+               "present" : "not present",
+           (status.Flags & TIMECARD_FLASH_FLAG_IDENTIFIED) ?
+               ", identified" : "",
+           (status.Flags & TIMECARD_FLASH_FLAG_SUPPORTED) ?
+               ", writable geometry supported" : "");
+    printf("Controller offset: 0x%08lx\n",
+           (unsigned long)status.Offset);
+    printf("JEDEC ID:          0x%06lx\n",
+           (unsigned long)(status.JedecId & 0xffffffu));
+    printf("Capacity:          %lu bytes\n",
+           (unsigned long)status.CapacityBytes);
+    printf("Firmware offset:   0x%08lx\n",
+           (unsigned long)status.FirmwareOffset);
+    printf("Erase / page:      %lu / %lu bytes\n",
+           (unsigned long)status.EraseSize,
+           (unsigned long)status.PageSize);
+    printf("Controller status: 0x%08lx\n",
+           (unsigned long)status.ControllerStatus);
+    printf("Flash status:      0x%08lx\n",
+           (unsigned long)status.FlashStatus);
     return 0;
 }
 
@@ -928,7 +1092,15 @@ usage(void)
             "  timecardctl nmea-set <on|off> <baud> [normal|inverted]\n"
             "  timecardctl uart-config <port 0..3> <baud>\n"
             "  timecardctl uart-read <port> [bytes] [timeout-ms]\n"
+            "  timecardctl uart-read-hex <port> [bytes] [timeout-ms]\n"
+            "  timecardctl uart-observe <port> [timeout-ms]\n"
             "  timecardctl uart-write <port> <text>\n"
+            "  timecardctl mro-status\n"
+            "  timecardctl mro-fine <value>\n"
+            "  timecardctl mro-coarse <value>\n"
+            "  timecardctl mro-save-coarse\n"
+            "  timecardctl mro-serial <on|off>\n"
+            "  timecardctl flash-status\n"
             "  timecardctl hierarchy-status\n"
             "  timecardctl hierarchy-enable\n"
             "  timecardctl hierarchy-persist\n"
@@ -976,8 +1148,18 @@ main(int argc, char **argv)
         result = cmd_uart_config(handle, argc, argv);
     else if (strcmp(argv[1], "uart-read") == 0)
         result = cmd_uart_read(handle, argc, argv);
+    else if (strcmp(argv[1], "uart-read-hex") == 0)
+        result = cmd_uart_read_hex(handle, argc, argv);
+    else if (strcmp(argv[1], "uart-observe") == 0)
+        result = cmd_uart_observe(handle, argc, argv);
     else if (strcmp(argv[1], "uart-write") == 0)
         result = cmd_uart_write(handle, argc, argv);
+    else if (strcmp(argv[1], "mro-status") == 0 && argc == 2)
+        result = cmd_mro50_status(handle);
+    else if (strncmp(argv[1], "mro-", 4) == 0)
+        result = cmd_mro50_control(handle, argc, argv);
+    else if (strcmp(argv[1], "flash-status") == 0 && argc == 2)
+        result = cmd_flash_status(handle);
     else if (strcmp(argv[1], "hierarchy-status") == 0 && argc == 2)
         result = cmd_hierarchy(handle, TIMECARD_HIERARCHY_QUERY, 0);
     else if (strcmp(argv[1], "hierarchy-enable") == 0 && argc == 2)

@@ -2391,6 +2391,7 @@ Exit:
 NTSTATUS
 TimeCardGetIdentity(PDEVICE_CONTEXT context, TIMECARD_IDENTITY *identity)
 {
+    static const UCHAR artConfigurationHeader[] = "oscillator=";
     TIMECARD_I2C_READ_REQUEST request;
     TIMECARD_I2C_TRANSFER transfer;
     BOOLEAN allZero = TRUE;
@@ -2404,6 +2405,30 @@ TimeCardGetIdentity(PDEVICE_CONTEXT context, TIMECARD_IDENTITY *identity)
     RtlZeroMemory(&request, sizeof(request));
     request.Size = sizeof(request);
     if (context->BoardProfile == TIMECARD_BOARD_ART) {
+        /*
+         * Some production ART images use the entire 24c08 for the mRO-50
+         * disciplining configuration.  In that layout offset 0x263 is text
+         * inside "ctrl_drift_coeffs_factory", not a six-byte serial.  Detect
+         * the configuration header so we never present those text bytes as a
+         * plausible card identity.
+         */
+        request.Address = 0x50u;
+        request.Subaddress = 0u;
+        request.SubaddressLength = 1u;
+        request.Length = sizeof(artConfigurationHeader) - 1u;
+        request.TimeoutMilliseconds = TIMECARD_I2C_DEFAULT_TIMEOUT_MS;
+        status = TimeCardI2cRead(context, &request, &transfer);
+        if (NT_SUCCESS(status) &&
+            transfer.Length == sizeof(artConfigurationHeader) - 1u &&
+            RtlCompareMemory(transfer.Data, artConfigurationHeader,
+                             sizeof(artConfigurationHeader) - 1u) ==
+                sizeof(artConfigurationHeader) - 1u) {
+            identity->Flags = TIMECARD_IDENTITY_FLAG_PRESENT;
+            return STATUS_SUCCESS;
+        }
+
+        RtlZeroMemory(&request, sizeof(request));
+        request.Size = sizeof(request);
         /*
          * Linux's ART EEPROM map stores the serial at absolute 24c08
          * offset 0x263. The high address block selects slave 0x52.

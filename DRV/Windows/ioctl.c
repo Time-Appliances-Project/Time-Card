@@ -654,6 +654,41 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         break;
     }
 
+    case IOCTL_TIMECARD_MRO50_QUERY:
+    {
+        TIMECARD_MRO50_STATUS *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardMro50Query(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_MRO50_CONTROL:
+    {
+        TIMECARD_MRO50_CONTROL *input;
+        TIMECARD_MRO50_CONTROL requestValue;
+        TIMECARD_MRO50_STATUS *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardMro50Control(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
     default:
         status = STATUS_INVALID_DEVICE_REQUEST;
         break;
