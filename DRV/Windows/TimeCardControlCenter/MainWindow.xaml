@@ -1646,7 +1646,7 @@
                                 <StackPanel>
                                     <TextBlock Text="ENVIRONMENT &amp; MOTION" Style="{StaticResource Eyebrow}" />
                                     <TextBlock Text="Board sensors &amp; inertial telemetry" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
-                                    <TextBlock Text="Live BME280 environment, INA219 power-rail, and BNO055 nine-axis readings from the sensor branch."
+                                    <TextBlock Text="Live BME280/BMP280 environment, INA219 power-rail, and BNO055/BNO08x nine-axis readings from the auto-detected sensor branch."
                                                Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -1671,8 +1671,8 @@
 
                             <StackPanel Grid.Row="2">
                                 <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <StackPanel><TextBlock Text="Environment" Style="{StaticResource SectionTitle}" /><TextBlock Text="Compensated BME280 measurements" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0" /></StackPanel>
-                                    <TextBlock x:Name="BmeDetailText" Grid.Column="1" Text="BME280 &#x00B7; 0x76 &#x00B7; NOT SAMPLED" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" VerticalAlignment="Center" />
+                                    <StackPanel><TextBlock Text="Environment" Style="{StaticResource SectionTitle}" /><TextBlock Text="Auto-detected BME280/BMP280 measurements" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0" /></StackPanel>
+                                    <TextBlock x:Name="BmeDetailText" Grid.Column="1" Text="BME280/BMP280 &#x00B7; 0x76/0x77 &#x00B7; NOT SAMPLED" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" VerticalAlignment="Center" />
                                 </Grid>
                                 <UniformGrid Columns="4">
                                     <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="TEMPERATURE" Style="{StaticResource Label}" /><TextBlock x:Name="BmeTemperatureText" Text="&#x2014; &#x00B0;C" Style="{StaticResource MetricValue}" Margin="0,8,0,0" /><TextBlock Text="Ambient board sensor" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Border>
@@ -1716,8 +1716,8 @@
 
                             <StackPanel Grid.Row="4" Margin="0,10,0,0">
                                 <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <StackPanel><TextBlock Text="Inertial measurement unit" Style="{StaticResource SectionTitle}" /><TextBlock Text="BNO055 fused orientation and raw nine-axis vectors" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0" /></StackPanel>
-                                    <TextBlock x:Name="ImuDetailText" Grid.Column="1" Text="BNO055 &#x00B7; 0x29 &#x00B7; NOT SAMPLED" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" VerticalAlignment="Center" />
+                                    <StackPanel><TextBlock Text="Inertial measurement unit" Style="{StaticResource SectionTitle}" /><TextBlock Text="BNO055 NDOF or BNO08x SH-2 fused orientation and nine-axis vectors" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0" /></StackPanel>
+                                    <TextBlock x:Name="ImuDetailText" Grid.Column="1" Text="BNO055/BNO08x &#x00B7; AUTO ROUTE &#x00B7; NOT SAMPLED" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" VerticalAlignment="Center" />
                                 </Grid>
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="1.15*" /><ColumnDefinition Width="0.85*" /></Grid.ColumnDefinitions>
@@ -1808,7 +1808,7 @@
                                         </WrapPanel>
                                         <UniformGrid Columns="2">
                                             <Border Background="#0B1926" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,0,8,8"><StackPanel><TextBlock Text="CH0  MAC CLOCK" FontFamily="Segoe UI Semibold" /><TextBlock Text="Atomic-clock connector I&#x00B2;C; also requires MACSER DIP = I&#x00B2;C." Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" /></StackPanel></Border>
-                                            <Border Background="#0B1926" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="8,0,0,8"><StackPanel><TextBlock Text="CH1  SENSORS + LEDS" FontFamily="Segoe UI Semibold" /><TextBlock Text="0x29 BNO055 &#x00B7; 0x40/41/44 INA219 &#x00B7; 0x37 IS32FL3207 &#x00B7; 0x76 BME280" Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" /></StackPanel></Border>
+                                            <Border Background="#0B1926" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="8,0,0,8"><StackPanel><TextBlock Text="AUTO-ROUTED SENSOR BRANCH + LEDS" FontFamily="Segoe UI Semibold" /><TextBlock Text="0x28/29 BNO055 or 0x4A/4B BNO08x &#x00B7; 0x40/41/44 INA219 &#x00B7; 0x34-37 IS32FL3207 &#x00B7; 0x76/77 BME/BMP280" Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" /></StackPanel></Border>
                                             <Border Background="#0B1926" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="0,8,8,0"><StackPanel><TextBlock Text="CH2  AN / ADC" FontFamily="Segoe UI Semibold" /><TextBlock Text="Analog/ADC expansion I&#x00B2;C branch exposed by the card headers." Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" /></StackPanel></Border>
                                             <Border Background="#0B1926" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="12" Margin="8,8,0,0"><StackPanel><TextBlock Text="CH3  DC" FontFamily="Segoe UI Semibold" /><TextBlock Text="DC expansion I&#x00B2;C branch exposed by the card headers." Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" /></StackPanel></Border>
                                         </UniformGrid>
@@ -1894,7 +1894,7 @@
                                         </Border>
                                         <Grid Grid.Row="1" Margin="18,14,18,4">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="1.15*" /><ColumnDefinition Width="0.9*" /><ColumnDefinition Width="0.7*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <StackPanel Margin="0,0,10,0"><TextBlock Text="PRESET" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="I2cPresetCombo" SelectedIndex="0" SelectionChanged="I2cPreset_SelectionChanged"><ComboBoxItem Tag="custom">Custom transaction</ComboBoxItem><ComboBoxItem Tag="board">Board EEPROM page</ComboBoxItem><ComboBoxItem Tag="identity">MAC identity bytes</ComboBoxItem><ComboBoxItem Tag="imu">BNO055 identity (CH1)</ComboBoxItem><ComboBoxItem Tag="power12">INA219 12 V config (CH1)</ComboBoxItem><ComboBoxItem Tag="environment">BME280 chip ID (CH1)</ComboBoxItem><ComboBoxItem Tag="leddriver">IS32FL3207 control (CH1)</ComboBoxItem><ComboBoxItem Tag="direct">Direct receive</ComboBoxItem></ComboBox></StackPanel>
+                                            <StackPanel Margin="0,0,10,0"><TextBlock Text="PRESET" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="I2cPresetCombo" SelectedIndex="0" SelectionChanged="I2cPreset_SelectionChanged"><ComboBoxItem Tag="custom">Custom transaction</ComboBoxItem><ComboBoxItem Tag="board">Board EEPROM page</ComboBoxItem><ComboBoxItem Tag="identity">MAC identity bytes</ComboBoxItem><ComboBoxItem Tag="imu">BNO055 register identity</ComboBoxItem><ComboBoxItem Tag="power12">INA219 12 V config</ComboBoxItem><ComboBoxItem Tag="environment">BME280 chip ID</ComboBoxItem><ComboBoxItem Tag="leddriver">IS32FL3207 control</ComboBoxItem><ComboBoxItem Tag="direct">Direct receive</ComboBoxItem></ComboBox></StackPanel>
                                             <StackPanel Grid.Column="1" Margin="0,0,10,0"><TextBlock Text="DATA VIEW" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="I2cDisplayModeCombo" SelectedIndex="0" SelectionChanged="I2cDisplayMode_SelectionChanged"><ComboBoxItem Tag="hexascii">Hex + ASCII</ComboBoxItem><ComboBoxItem Tag="hex">Hex</ComboBoxItem><ComboBoxItem Tag="ascii">ASCII</ComboBoxItem><ComboBoxItem Tag="decimal">Decimal</ComboBoxItem><ComboBoxItem Tag="binary">Binary</ComboBoxItem></ComboBox></StackPanel>
                                             <StackPanel Grid.Column="2" Margin="0,0,10,0"><TextBlock Text="TIMEOUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="I2cTimeoutCombo" SelectedIndex="1"><ComboBoxItem Tag="50">50 ms</ComboBoxItem><ComboBoxItem Tag="100">100 ms</ComboBoxItem><ComboBoxItem Tag="250">250 ms</ComboBoxItem></ComboBox></StackPanel>
                                             <Button x:Name="I2cPreviousButton" Grid.Column="3" Content="Previous" ToolTip="Read the previous page" Click="I2cPrevious_Click" Style="{StaticResource SecondaryButton}" Padding="10,7" Margin="0,19,6,0" />
@@ -2154,7 +2154,7 @@
                                         <local:RollingTelemetryChart x:Name="ProductVibrationChart" Grid.Row="1" Margin="0,16,0,10"
                                                                      Capacity="1800" MinimumRange="0.05" LineBrush="{DynamicResource CyanBrush}"
                                                                      AreaBrush="#204CC9F0" AutomationProperties.Name="Overall vibration chart" />
-                                        <TextBlock Grid.Row="2" Text="MAGNITUDE OF BNO055 LINEAR ACCELERATION · M/S²" Foreground="{DynamicResource MutedBrush}" FontSize="9" />
+                                        <TextBlock Grid.Row="2" Text="MAGNITUDE OF IMU LINEAR ACCELERATION · M/S²" Foreground="{DynamicResource MutedBrush}" FontSize="9" />
                                     </Grid>
                                 </Border>
                                 <Border Grid.Row="2" Style="{StaticResource Panel}" Margin="0,0,9,0">

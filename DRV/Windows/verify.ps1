@@ -3,6 +3,8 @@
 param(
     [switch]$SetFromSystem,
     [switch]$TestGnssUart,
+    [switch]$TestSensors,
+    [switch]$TestLeds,
     [switch]$ExpectHierarchy
 )
 
@@ -101,6 +103,18 @@ try {
         & $tool uart-read 0 64 1000
         if ($LASTEXITCODE -ne 0) {
             Write-Warning 'GNSS UART produced no data during the one-second smoke test.'
+        }
+    }
+    if ($TestSensors) {
+        & $tool sensors
+        if ($LASTEXITCODE -ne 0) {
+            throw 'No valid sensor telemetry was returned.'
+        }
+    }
+    if ($TestLeds) {
+        & $tool led-test
+        if ($LASTEXITCODE -ne 0) {
+            throw 'IS32FL3207 electrical test failed.'
         }
     }
 }

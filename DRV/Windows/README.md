@@ -28,8 +28,9 @@ applications use the versioned IOCTL ABI through `timecardctl.exe`.
   dedicated IS32FL3207 LED updates, open/short diagnostics, and a bounded
   electrical test. The known identity devices are the board EEPROM at `0x50`
   and MAC EEPROM at `0x58`.
-- Guarded one-shot telemetry for the BME280 environment sensor, three INA219
-  power monitors, and BNO055 nine-axis IMU on the sensor branch.
+- Guarded one-shot telemetry for BME280/BMP280 environment sensors, three INA219
+  power monitors, and BNO055 or BNO08x nine-axis IMUs on an auto-detected
+  PCA9546A branch.
 - Guarded Xilinx and Altera SPI/SPI-NOR access for FPGA firmware query,
   4 KiB erase,
   page programming, and bounded read-back. All offsets are relative to the
@@ -53,7 +54,7 @@ controller from starting.
 
 ## Hardware compatibility
 
-Driver 1.17 / ABI 8 selects the same three board profiles and resource maps as
+Driver 1.23 / ABI 8 selects the same three board profiles and resource maps as
 the Linux `ptp_ocp` driver. Meta/Facebook and Celestica share the rev1 and rev2
 maps. Older PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or
 32 interrupt messages. Current PCI revision 02 LitePCIe gateware exposes 64
@@ -138,7 +139,7 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-Driver **1.17 / ABI 8** is required for the complete feature set shown below.
+Driver **1.23 / ABI 8** is required for the complete feature set shown below.
 
 ![Control Center overview](assets/timecard-control-center.png)
 
@@ -226,6 +227,10 @@ timecardctl sma-set 1 disabled
 timecardctl i2c-status
 timecardctl i2c-scan
 timecardctl i2c-read 0x50 0x00 32 1
+timecardctl sensors
+timecardctl led-status
+timecardctl led-set 1 0 180 30 96
+timecardctl led-test
 ```
 
 UART ports are `0=GNSS`, `1=GNSS2`, `2=atomic clock`, and `3=NMEA`.
@@ -298,6 +303,33 @@ sample at `0x76`, reads the +12 V, +5 V, and +3.3 V INA219 monitors at `0x40`,
 BNO055 at `0x29` in NDOF fusion mode with the fitted 32.768 kHz crystal. A
 failed or absent sensor is reported independently. The driver restores the
 caller's mux mask after every sample and still exposes no arbitrary write API.
+
+Driver 1.18 / ABI 8 corrects the short-transfer completion ordering to match
+Linux `i2c-xiic`: START/address is queued, stale completion state is cleared,
+and only then is the register payload appended. This prevents a fast
+one-register transaction from losing its real TX-empty event. The driver
+auto-detects BME280 or BMP280 at `0x76`/`0x77`, BNO055 at `0x28`/`0x29`, and
+all four IS32FL3207 AD strap addresses (`0x34`-`0x37`), while continuing to
+prefer the V9 schematic's `0x76`, `0x29`, and `0x37` choices. LED programming
+now reads back control, global current, per-channel scaling, PWM, and DC-mode
+registers before reporting success.
+
+Driver 1.19 / ABI 8 initializes any responding INA219 that firmware left in
+reset/power-down. It programs the safe 32 V, +/-320 mV, 12-bit continuous
+bus-and-shunt configuration, verifies the configuration readback, waits for a
+conversion, and then reports voltage/current/power from the board's 2 milliohm
+shunt.
+
+Driver 1.23 / ABI 8 adds the verified Rev00/MSI indicator wiring map without
+changing the original Rev02/MSI-X card: GNSS1/GNSS2 exchange physical groups
+with IO3/IO4, IO1/IO2 remain direct, and red/green sink channels are exchanged.
+Logical names and RGB values therefore remain consistent in the Control
+Center on both assemblies. It also auto-discovers the populated sensor branch
+instead of assuming PCA9546A channel 1 and supports the schematic-permitted
+BNO080/BNO08x alternative at `0x4a`/`0x4b`. BNO08x SHTP reports are configured
+and decoded into the existing ABI's fused orientation, acceleration, linear
+acceleration, gravity, angular-velocity, and magnetic-field readings; BNO055
+cards continue to use the NDOF register path.
 
 The schematic's U26 TMUX1072 is not software-controlled. Its `MACSER` select
 comes only from the physical DIP switch: 0 routes MAC I2C and 1 routes the FPGA

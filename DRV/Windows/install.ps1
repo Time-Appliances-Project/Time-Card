@@ -29,17 +29,28 @@ try {
 
     Write-Host 'Staging the TimeCard driver package...'
     if ($StageOnly) {
-        & pnputil.exe /add-driver $package
+        $pnpOutput = & pnputil.exe /add-driver $package 2>&1
     } else {
-        & pnputil.exe /add-driver $package /install
+        $pnpOutput = & pnputil.exe /add-driver $package /install 2>&1
     }
-    if ($LASTEXITCODE -ne 0) {
-        throw "pnputil failed with exit code $LASTEXITCODE"
+    $pnpOutput | Out-Host
+    $pnpExitCode = $LASTEXITCODE
+    $rebootRequired = ($pnpOutput -join "`n") -match
+        'reboot is needed|reboot.*required'
+    if ($pnpExitCode -ne 0 -and $pnpExitCode -ne 3010 -and
+        -not $rebootRequired) {
+        throw "pnputil failed with exit code $pnpExitCode"
     }
 
     Write-Host ''
-    Write-Host 'Driver package staged. Reboot is required before the test-signed'
-    Write-Host 'kernel driver can load. After reboot run verify.ps1 as Administrator.'
+    if ($pnpExitCode -eq 3010 -or $rebootRequired) {
+        Write-Host 'Driver package staged. Windows requires a reboot to replace the'
+        Write-Host 'currently loaded kernel driver.'
+    } else {
+        Write-Host 'Driver package staged. Confirm the running version with'
+        Write-Host '.\out\timecardctl.exe status from an Administrator prompt.'
+    }
+    Write-Host 'After the new driver loads, run verify.ps1 as Administrator.'
 }
 finally {
     Stop-Transcript | Out-Null
