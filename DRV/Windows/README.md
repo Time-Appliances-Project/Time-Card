@@ -1,9 +1,14 @@
 # Windows Time Card Driver
 
-This directory contains the Windows x64 KMDF driver for the Meta/OCP Time Card
-(`PCI\VEN_1D9B&DEV_0400`). Windows does not provide a PHC class equivalent to
-Linux `/dev/ptpN`, so applications use the versioned IOCTL ABI through
-`timecardctl.exe`.
+This directory contains the Windows x64 KMDF driver for every PCI Time Card
+profile enumerated by the repository's Linux `ptp_ocp` driver:
+
+- Meta/Facebook OCP Time Card: `PCI\VEN_1D9B&DEV_0400`
+- Celestica OCP Time Card: `PCI\VEN_18D4&DEV_1008`
+- Orolia/Safran ART Time Card: `PCI\VEN_1AD7&DEV_A000`
+
+Windows does not provide a PHC class equivalent to Linux `/dev/ptpN`, so
+applications use the versioned IOCTL ABI through `timecardctl.exe`.
 
 ## Features
 
@@ -17,14 +22,16 @@ Linux `/dev/ptpN`, so applications use the versioned IOCTL ABI through
   and immediate readback.
 - Bounded configuration and readback for four periodic signal generators and
   four frequency counters, including direct SMA input/output routing.
-- Guarded Xilinx AXI IIC controller access with status, address-only probes,
+- Guarded Xilinx AXI IIC and OpenCores I2C controller access with status,
+  address-only probes,
   7-bit bus discovery, bounded EEPROM/register reads, PCA9546A branch routing,
   dedicated IS32FL3207 LED updates, open/short diagnostics, and a bounded
   electrical test. The known identity devices are the board EEPROM at `0x50`
   and MAC EEPROM at `0x58`.
 - Guarded one-shot telemetry for the BME280 environment sensor, three INA219
   power monitors, and BNO055 nine-axis IMU on the sensor branch.
-- Guarded Xilinx SPI and SPI-NOR access for FPGA firmware query, 4 KiB erase,
+- Guarded Xilinx and Altera SPI/SPI-NOR access for FPGA firmware query,
+  4 KiB erase,
   page programming, and bounded read-back. All offsets are relative to the
   FPGA image region at `0x00400000`; the configuration region is unreachable.
 - Non-destructive UART receive-activity observation for subsystem presence
@@ -43,6 +50,46 @@ the integrated functions; they do not load separate function drivers. Each
 child is auto-named, explicitly secured for Administrators and SYSTEM, and
 created through a fail-open path so an optional child cannot prevent the
 controller from starting.
+
+## Hardware compatibility
+
+Driver 1.17 / ABI 8 selects the same three board profiles and resource maps as
+the Linux `ptp_ocp` driver. Meta/Facebook and Celestica share the rev1 and rev2
+maps. Older PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or
+32 interrupt messages. Current PCI revision 02 LitePCIe gateware exposes 64
+MSI-X messages and uses the rev2 map. The Windows driver also checks that the
+selected PHC and ToD windows fit the assigned BAR and falls back to the other
+known Meta/Celestica map before any register access when firmware does not
+report a useful revision.
+
+The Orolia/Safran ART profile uses its Linux-defined fixed map: PHC at
+`0x01000000`, primary GNSS UART at `0x00161000`, atomic-clock UART at
+`0x00190000`, SMA routing at `0x003c0000`, OpenCores I2C at `0x00350000`, and
+Altera SPI at `0x00310000`. Its protected FPGA image begins at `0x01000000` in
+SPI-NOR. The ART profile exposes only the PHC, primary GNSS, atomic-clock, SMA,
+I2C, and flash child nodes because Linux does not map the Meta-specific ToD,
+secondary GNSS, NMEA generator/UART, signal generators, frequency counters, or
+PTM blocks on that card. Missing functions return a supported “not available”
+result rather than aliasing another register window.
+
+ART uses an OpenCores I2C controller and a 24c08 EEPROM. The serial Linux reads
+at absolute EEPROM offset `0x263` is accessed through slave block `0x52`,
+subaddress `0x63`. Its SMA menu is restricted to the ART gateware's PPS1 and
+10 MHz inputs plus atomic-clock, GNSS, and 10 MHz outputs. Its UART 2 device is
+an mRO-50 at 9,600 baud; the Control Center disables MAC-SA53 commands on this
+profile and leaves the generic UART console available.
+
+Subsystem availability still depends on the FPGA image and populated board
+options. Missing optional resources never prevent the controller and PHC from
+starting.
+
+The rev1 path has been validated on a connected revision 00 implementation
+with a 32 MiB BAR, 16 assigned MSI messages, clock core 1.2.0, and ToD core
+2.0.0.1. Its PHC, primary GNSS/NMEA stream, NMEA generator, four SMA routes,
+I2C controller, board EEPROM, and MAC EEPROM are accessible. That FPGA image
+returns all ones for the optional GNSS summary registers; raw UART access
+continues to work and the Control Center reports those summaries as unavailable
+instead of interpreting them as 255 satellites.
 
 ## Build
 
@@ -91,7 +138,7 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-Driver **1.15.1 / ABI 8** is required for the complete feature set shown below.
+Driver **1.17 / ABI 8** is required for the complete feature set shown below.
 
 ![Control Center overview](assets/timecard-control-center.png)
 

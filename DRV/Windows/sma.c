@@ -6,6 +6,108 @@
 #define TIMECARD_SMA_ENABLE      0x8000u
 #define TIMECARD_SMA_SELECT_MASK 0x7fffu
 
+static ULONG
+TimeCardArtSmaDefaultFunction(ULONG connector)
+{
+    static const ULONG defaults[TIMECARD_SMA_COUNT] = {
+        TIMECARD_SMA_INPUT_TS2,
+        TIMECARD_SMA_INPUT_PPS1,
+        TIMECARD_SMA_OUTPUT_IRIG,
+        TIMECARD_SMA_OUTPUT_MAC
+    };
+
+    return defaults[connector - 1u];
+}
+
+static ULONG
+TimeCardArtSmaFunctionDirection(ULONG function)
+{
+    return function == TIMECARD_SMA_INPUT_PPS1 ||
+           function == TIMECARD_SMA_INPUT_TS2 ?
+           TIMECARD_SMA_DIRECTION_INPUT :
+           TIMECARD_SMA_DIRECTION_OUTPUT;
+}
+
+static BOOLEAN
+TimeCardArtSmaFunctionValid(ULONG direction, ULONG function)
+{
+    if (direction == TIMECARD_SMA_DIRECTION_INPUT) {
+        return function == TIMECARD_SMA_INPUT_PPS1 ||
+               function == TIMECARD_SMA_INPUT_TS2;
+    }
+    if (direction == TIMECARD_SMA_DIRECTION_OUTPUT) {
+        return function == TIMECARD_SMA_OUTPUT_MAC ||
+               function == TIMECARD_SMA_OUTPUT_GNSS1 ||
+               function == TIMECARD_SMA_OUTPUT_IRIG;
+    }
+    return FALSE;
+}
+
+static NTSTATUS
+TimeCardArtSmaQueryLocked(PDEVICE_CONTEXT context, ULONG connector,
+                          TIMECARD_SMA_CONTROL *control)
+{
+    volatile ULONG *gpio = &context->ArtSma->Map[connector - 1u].Gpio;
+    ULONG raw = READ_REGISTER_ULONG((PULONG)gpio);
+    ULONG function = raw & 0xffu;
+    BOOLEAN fixed = function == 0;
+    ULONG direction;
+
+    if (fixed)
+        function = TimeCardArtSmaDefaultFunction(connector);
+    direction = TimeCardArtSmaFunctionDirection(function);
+
+    RtlZeroMemory(control, sizeof(*control));
+    control->Size = sizeof(*control);
+    control->Connector = connector;
+    control->Direction = direction;
+    control->Function = function;
+    control->Flags = TIMECARD_SMA_FLAG_PRESENT;
+    if (fixed)
+        control->Flags |= TIMECARD_SMA_FLAG_FIXED_DIRECTION;
+    if (direction == TIMECARD_SMA_DIRECTION_INPUT)
+        control->InputMap = function;
+    else
+        control->OutputMap = function;
+    control->Reserved = raw;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS
+TimeCardArtSmaSetLocked(PDEVICE_CONTEXT context,
+                        const TIMECARD_SMA_CONTROL *request,
+                        TIMECARD_SMA_CONTROL *response)
+{
+    volatile ULONG *gpio =
+        &context->ArtSma->Map[request->Connector - 1u].Gpio;
+    ULONG raw = READ_REGISTER_ULONG((PULONG)gpio);
+    ULONG supported = raw >> 16;
+
+    if ((raw & 0xffu) == 0)
+        return STATUS_NOT_SUPPORTED;
+    if (request->Direction == TIMECARD_SMA_DIRECTION_DISABLED ||
+        !TimeCardArtSmaFunctionValid(request->Direction,
+                                     request->Function)) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if ((supported & request->Function) == 0)
+        return STATUS_NOT_SUPPORTED;
+
+    /*
+     * The ART gateware encodes direction in the selected function. Its
+     * writable field is the low byte, while bits 31:16 report the choices
+     * implemented by the connector.
+     */
+    raw = (raw & 0xff00u) | (request->Function & 0xffu);
+    WRITE_REGISTER_ULONG((PULONG)gpio, raw);
+    TimeCardArtSmaQueryLocked(context, request->Connector, response);
+    if (response->Direction != request->Direction ||
+        response->Function != request->Function) {
+        return STATUS_DEVICE_DATA_ERROR;
+    }
+    return STATUS_SUCCESS;
+}
+
 static volatile ULONG *
 TimeCardSmaInputRegister(PDEVICE_CONTEXT context, ULONG connector)
 {
@@ -150,10 +252,18 @@ TimeCardSmaQuery(PDEVICE_CONTEXT context, ULONG connector,
 
     if (!context->HardwareReady)
         return STATUS_DEVICE_NOT_READY;
-    if (context->SmaMap1 == NULL || context->SmaMap2 == NULL)
-        return STATUS_NOT_SUPPORTED;
     if (connector == 0 || connector > TIMECARD_SMA_COUNT)
         return STATUS_INVALID_PARAMETER;
+    if (context->BoardProfile == TIMECARD_BOARD_ART) {
+        if (context->ArtSma == NULL)
+            return STATUS_NOT_SUPPORTED;
+        WdfWaitLockAcquire(context->RegisterLock, NULL);
+        status = TimeCardArtSmaQueryLocked(context, connector, control);
+        WdfWaitLockRelease(context->RegisterLock);
+        return status;
+    }
+    if (context->SmaMap1 == NULL || context->SmaMap2 == NULL)
+        return STATUS_NOT_SUPPORTED;
 
     WdfWaitLockAcquire(context->RegisterLock, NULL);
     status = TimeCardSmaQueryLocked(context, connector, control);
@@ -176,12 +286,20 @@ TimeCardSmaSet(PDEVICE_CONTEXT context,
 
     if (!context->HardwareReady)
         return STATUS_DEVICE_NOT_READY;
-    if (context->SmaMap1 == NULL || context->SmaMap2 == NULL)
-        return STATUS_NOT_SUPPORTED;
     if (request->Size < sizeof(*request) || request->Connector == 0 ||
         request->Connector > TIMECARD_SMA_COUNT ||
         request->Direction > TIMECARD_SMA_DIRECTION_DISABLED)
         return STATUS_INVALID_PARAMETER;
+    if (context->BoardProfile == TIMECARD_BOARD_ART) {
+        if (context->ArtSma == NULL)
+            return STATUS_NOT_SUPPORTED;
+        WdfWaitLockAcquire(context->RegisterLock, NULL);
+        status = TimeCardArtSmaSetLocked(context, request, response);
+        WdfWaitLockRelease(context->RegisterLock);
+        return status;
+    }
+    if (context->SmaMap1 == NULL || context->SmaMap2 == NULL)
+        return STATUS_NOT_SUPPORTED;
     if (request->Direction == TIMECARD_SMA_DIRECTION_INPUT &&
         !TimeCardSmaInputFunctionValid(request->Function))
         return STATUS_INVALID_PARAMETER;

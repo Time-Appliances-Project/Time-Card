@@ -77,7 +77,9 @@ cmd_status(HANDLE handle)
     printf("BAR length:       0x%08lx\n", (unsigned long)info.BarLength);
     printf("Interrupts:       %lu\n", (unsigned long)info.InterruptMessages);
     printf("Register layout:  %s\n",
-           info.Layout == TIMECARD_LAYOUT_MSIX ? "MSI-X" : "MSI");
+           info.Layout == TIMECARD_LAYOUT_MSIX ? "MSI-X" :
+           info.Layout == TIMECARD_LAYOUT_MSI ? "MSI" :
+           info.Layout == TIMECARD_LAYOUT_ART ? "Orolia ART" : "Unknown");
     printf("Clock offset:     0x%08lx\n", (unsigned long)info.ClockOffset);
     printf("Clock version:    %lu.%lu.%lu (0x%08lx)\n",
            (unsigned long)(info.ClockVersion >> 24),
@@ -322,9 +324,9 @@ cmd_uart_read(HANDLE handle, int argc, char **argv)
     fwrite(transfer.Data, 1, transfer.Length, stdout);
     if (transfer.Length == 0 || transfer.Data[transfer.Length - 1] != '\n')
         putchar('\n');
-    fprintf(stderr, "[%lu byte(s), LSR 0x%02lx]\n",
-            (unsigned long)transfer.Length,
-            (unsigned long)(transfer.LineStatus & 0xff));
+    printf("[%lu byte(s), LSR 0x%02lx]\n",
+           (unsigned long)transfer.Length,
+           (unsigned long)(transfer.LineStatus & 0xff));
     return 0;
 }
 

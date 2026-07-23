@@ -141,6 +141,10 @@ TimeCardCreateSubsystemDevices(PDEVICE_CONTEXT context)
         return STATUS_SUCCESS;
 
     for (i = 0; i < ARRAYSIZE(TimeCardChildren); ++i) {
+        if ((context->SubsystemMask &
+             TIMECARD_SUBSYSTEM_BIT(TimeCardChildren[i].Subsystem)) == 0) {
+            continue;
+        }
         if (context->ChildDevices[i] != NULL)
             continue;
         status = TimeCardCreateChild(context->Device, &TimeCardChildren[i],

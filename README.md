@@ -171,7 +171,7 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
   [`DRV/Windows`](DRV/Windows)
 * CAD files for the custom PCIe bracket 
 
-The Windows package currently ships driver **1.15.1 / ABI 8** and a native
+The Windows package currently ships driver **1.17 / ABI 8** and a native
 Control Center that brings the complete Time Card into one application:
 
 * Precision-clock telemetry, detail-focused rolling offset graphs, clock-source
@@ -183,6 +183,8 @@ Control Center that brings the complete Time Card into one application:
 * Schematic-aware I2C routing, card identity, automatic/manual RGB status LEDs,
   electrical diagnostics, live environmental sensors, power rails, and IMU.
 * Device hierarchy controls and guarded, verified FPGA SPI-flash updates.
+* Explicit Meta/Facebook, Celestica, and Orolia/Safran ART board profiles
+  matching the PCI identities and resource maps in the Linux driver.
 
 See the [Windows driver guide](DRV/Windows/README.md) and the
 [Control Center guide](DRV/Windows/TimeCardControlCenter/README.md) for build,

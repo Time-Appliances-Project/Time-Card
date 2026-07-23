@@ -418,7 +418,8 @@
                                                                                  ToolTip="Rolling 200-second Time Card offset with detail-focused automatic vertical zoom" />
                                                     <Grid Grid.Row="2">
                                                         <TextBlock x:Name="OffsetHistoryScaleText" Text="WAITING FOR SAMPLES"
-                                                                   Foreground="{DynamicResource MutedBrush}" FontSize="9" />
+                                                                   Foreground="{DynamicResource MutedBrush}" FontSize="9"
+                                                                   Margin="0,0,86,0" TextTrimming="CharacterEllipsis" />
                                                         <TextBlock Text="ROLLING &#x00B7; 200 S" HorizontalAlignment="Right"
                                                                    Foreground="#617A90" FontSize="9" />
                                                     </Grid>
@@ -588,7 +589,8 @@
                                                                              ToolTip="Rolling 200-second measured offset with detail-focused automatic vertical zoom" />
                                                 <Grid Grid.Row="2">
                                                     <TextBlock x:Name="ClockOffsetHistoryScaleText" Text="WAITING FOR SAMPLES"
-                                                               Foreground="{DynamicResource MutedBrush}" FontSize="9" />
+                                                               Foreground="{DynamicResource MutedBrush}" FontSize="9"
+                                                               Margin="0,0,86,0" TextTrimming="CharacterEllipsis" />
                                                     <TextBlock Text="ROLLING &#x00B7; 200 S" HorizontalAlignment="Right"
                                                                Foreground="#617A90" FontSize="9" />
                                                 </Grid>

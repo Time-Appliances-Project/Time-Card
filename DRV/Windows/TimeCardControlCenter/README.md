@@ -4,6 +4,13 @@ The Time Card Control Center is a dependency-free Windows desktop dashboard
 for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
+Driver 1.17 recognizes the Meta/Facebook, Celestica, and Orolia/Safran ART
+profiles from the Linux driver. The application labels the ART layout,
+suppresses unavailable ToD/GNSS-summary fields, uses the ART-specific SMA
+function menu, and prevents the MAC-SA53 panel from sending commands to the
+ART card's mRO-50 oscillator. Its generic UART 2 console remains available at
+the ART default of 9,600 baud.
+
 ![Control Center overview](../assets/timecard-control-center.png)
 
 | Precision clock | GNSS and sky map | Atomic clock |
@@ -329,6 +336,11 @@ many other u-blox generations. The recommended RCB-F9T normally uses UART 0 at
 receiver at another existing baud without changing the receiver's own port
 configuration.
 
+Older revision 00 FPGA images can expose a working GNSS UART without
+implementing the ToD GNSS-status and satellite-summary registers. The register
+value `0xffffffff` is treated as “Not available,” while the UART console and
+u-blox/NMEA decoders remain fully usable.
+
 The satellite sky map decodes every repeated `UBX-NAV-SAT` block. It uses the
 standard north-up polar layout with zenith at the center and the horizon at the
 outer ring. Marker color identifies the constellation, marker size follows
@@ -367,6 +379,10 @@ The general UART monitor is stopped before an SA53 transaction and the complete
 command/response exchange is serialized so monitor reads cannot consume C3
 responses.
 
+On an Orolia/Safran ART card, the SA53 refresh and write actions are disabled
+because ART uses an mRO-50 rather than a MAC-SA53. Use the generic UART
+workspace, select UART 2, and configure 9,600 baud, 8N1.
+
 Digital tuning and discipline settings take effect immediately. Enabling PPS
 disciplining can initiate a JamSync and move the 1PPS phase; the application
 therefore asks for confirmation. Analog tuning cannot be enabled from the UI
@@ -388,6 +404,10 @@ MMIO writes. Firmware with fixed connector directions is detected and the
 direction menu is locked accordingly. Driver 1.9 fixes fixed-direction routing
 by never clearing the absent opposite map and verifies every applied route by
 immediate register readback.
+
+For the Orolia/Safran ART profile, the menus automatically switch to the
+gateware's smaller routing table: PPS1 or 10 MHz inputs, and atomic-clock,
+GNSS, or 10 MHz outputs. Fixed ART connector functions remain read-only.
 
 Routing changes are immediate. Disconnect externally driven equipment before
 changing a connector to output. The application asks for confirmation before
