@@ -714,9 +714,15 @@ namespace TimeCardControlCenter
                 ? 180.0 / (Math.PI * 900.0) : 1.0 / 16.0;
             double eulerScale = (value.UnitSelection & 0x08u) != 0
                 ? 180.0 / (Math.PI * 900.0) : 1.0 / 16.0;
-            TemperatureCelsius = (value.UnitSelection & 0x20u) != 0
-                ? (value.Temperature * 2.0 - 32.0) * 5.0 / 9.0
-                : value.Temperature;
+            HasTemperature = ChipId == 0x80u
+                ? (value.Flags & 128u) != 0
+                : IsValid;
+            TemperatureCelsius = ChipId == 0x80u &&
+                (value.Flags & 256u) != 0
+                ? value.Temperature / 128.0
+                : (value.UnitSelection & 0x20u) != 0
+                    ? (value.Temperature * 2.0 - 32.0) * 5.0 / 9.0
+                    : value.Temperature;
             Acceleration = new SensorVector3(
                 value.AccelerationX * accelerationScale,
                 value.AccelerationY * accelerationScale,
@@ -781,6 +787,7 @@ namespace TimeCardControlCenter
         public int GyroscopeCalibration { get; private set; }
         public int AccelerometerCalibration { get; private set; }
         public int MagnetometerCalibration { get; private set; }
+        public bool HasTemperature { get; private set; }
         public double TemperatureCelsius { get; private set; }
         public SensorVector3 Acceleration { get; private set; }
         public SensorVector3 MagneticField { get; private set; }

@@ -4,7 +4,7 @@ The Time Card Control Center is a dependency-free Windows desktop dashboard
 for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
-Driver 1.24 recognizes the Meta/Facebook, Celestica, and Orolia/Safran ART
+Driver 1.25 recognizes the Meta/Facebook, Celestica, and Orolia/Safran ART
 profiles from the Linux driver. The application labels the ART layout,
 suppresses unavailable ToD/GNSS-summary fields, uses the ART-specific SMA
 function menu, and prevents the MAC-SA53 panel from sending commands to the
@@ -483,7 +483,7 @@ shown in the workspace, and automatic mapping marks affected packages as
 
 ## Sensors and IMU
 
-Driver 1.24 / ABI 8 and the dedicated Sensors & IMU workspace read every
+Driver 1.25 / ABI 8 and the dedicated Sensors & IMU workspace read every
 populated monitor on the auto-detected sensor branch. BME280 and BMP280 are
 auto-detected at `0x76` or `0x77`; BME280 cards show factory-compensated
 temperature, relative humidity, pressure, and calculated dew point, while a
@@ -507,6 +507,10 @@ For BNO08x cards, driver 1.24 also detects a silent or reset SH-2 stream,
 re-establishes the six feature subscriptions, and retries the sample
 automatically. The workspace can therefore recover from `INITIALIZING` without
 restarting the application, reloading the driver, or rebooting Windows.
+Driver 1.25 additionally probes SH-2 report `0x0e` and displays its signed-Q7
+ambient temperature when the installed BNO08x firmware publishes it. Firmware
+without that optional report continues to show an em dash rather than a
+fabricated die-temperature value.
 
 ## FPGA SPI flash
 

@@ -121,7 +121,7 @@ TimeCardGetInfo(PDEVICE_CONTEXT context, TIMECARD_INFO *info)
 
     RtlZeroMemory(info, sizeof(*info));
     info->AbiVersion = TIMECARD_ABI_VERSION;
-    info->DriverVersion = 0x00010018u;
+    info->DriverVersion = 0x00010019u;
     info->Layout = context->Layout;
     info->InterruptMessages = context->InterruptMessages;
     info->BarLength = context->Bar0Length;
