@@ -2037,15 +2037,44 @@ TimeCardBno08xParseReports(TIMECARD_BNO055_READING *reading,
         reading->Flags |= TIMECARD_SENSOR_FLAG_VALID;
 }
 
+static BOOLEAN
+TimeCardBno08xDrainReportsLocked(PDEVICE_CONTEXT context, ULONG address,
+                                 TIMECARD_BNO055_READING *reading,
+                                 ULONG *controllerStatus,
+                                 ULONG *interruptStatus)
+{
+    UCHAR packet[TIMECARD_I2C_MAX_TRANSFER];
+    ULONG packetLength;
+    ULONG i;
+    NTSTATUS status;
+
+    for (i = 0; i < 32u; ++i) {
+        status = TimeCardBno08xReadTransferLocked(
+            context, address, packet, &packetLength,
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            break;
+        if (packetLength >= 4u &&
+            packet[2] == TIMECARD_BNO08X_CHANNEL_REPORTS) {
+            /*
+             * I2C first returns a four-byte header.  The required second read
+             * repeats that header with SHTP's continuation bit set and carries
+             * the complete payload, so continuation is expected here.
+             */
+            TimeCardBno08xParseReports(
+                reading, &packet[4], packetLength - 4u);
+        }
+    }
+
+    return (reading->Flags & TIMECARD_SENSOR_FLAG_VALID) != 0;
+}
+
 static VOID
 TimeCardBno08xReadLocked(PDEVICE_CONTEXT context,
                          TIMECARD_BNO055_READING *reading,
                          ULONG *controllerStatus, ULONG *interruptStatus)
 {
-    UCHAR packet[TIMECARD_I2C_MAX_TRANSFER];
     ULONG address = 0;
-    ULONG packetLength;
-    ULONG i;
     NTSTATUS status;
 
     reading->Size = sizeof(*reading);
@@ -2069,22 +2098,41 @@ TimeCardBno08xReadLocked(PDEVICE_CONTEXT context,
     }
     reading->Flags |= TIMECARD_SENSOR_FLAG_CONFIGURED;
 
-    for (i = 0; i < 32u; ++i) {
-        status = TimeCardBno08xReadTransferLocked(
-            context, address, packet, &packetLength,
-            controllerStatus, interruptStatus);
-        if (!NT_SUCCESS(status))
-            break;
-        if (packetLength >= 4u &&
-            packet[2] == TIMECARD_BNO08X_CHANNEL_REPORTS) {
-            /*
-             * I2C first returns a four-byte header.  The required second read
-             * repeats that header with SHTP's continuation bit set and carries
-             * the complete payload, so continuation is expected here.
-             */
-            TimeCardBno08xParseReports(
-                reading, &packet[4], packetLength - 4u);
-        }
+    if (TimeCardBno08xDrainReportsLocked(
+            context, address, reading,
+            controllerStatus, interruptStatus))
+        return;
+
+    /*
+     * A BNO08x can reset internally or stop delivering reports after its
+     * finite output queue fills while the mux branch is not being sampled.
+     * The sensor still acknowledges at 0x4a/0x4b in that state, so presence
+     * alone is not a sufficient liveness check.  Re-establish all SH-2
+     * feature subscriptions and retry immediately instead of leaving the
+     * Control Center permanently stuck at INITIALIZING until a driver reload.
+     *
+     * Reset the host control-channel sequence as well: after an IMU reset the
+     * sensor's SHTP receiver has also returned to its initial sequence state.
+     */
+    context->I2cBno08xConfigured = 0;
+    context->I2cBno08xSequence = 0;
+    reading->Flags &= ~TIMECARD_SENSOR_FLAG_CONFIGURED;
+    TimeCardSensorDelayMilliseconds(10u);
+    status = TimeCardBno08xConfigureLocked(
+        context, address, controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return;
+
+    reading->Flags |= TIMECARD_SENSOR_FLAG_CONFIGURED;
+    if (!TimeCardBno08xDrainReportsLocked(
+            context, address, reading,
+            controllerStatus, interruptStatus)) {
+        /*
+         * Keep the watchdog armed.  A sensor that is still completing a boot
+         * will be configured and sampled again on the next telemetry query.
+         */
+        context->I2cBno08xConfigured = 0;
+        reading->Flags &= ~TIMECARD_SENSOR_FLAG_CONFIGURED;
     }
 }
 
