@@ -231,6 +231,19 @@ namespace TimeCardControlCenter
             new SmaFunctionChoice("VCC", 0x4000)
         };
 
+        private static readonly SmaFunctionChoice[] ArtSmaInputFunctions =
+        {
+            new SmaFunctionChoice("PPS 1", 0x0001),
+            new SmaFunctionChoice("10 MHz reference", 0x0008)
+        };
+
+        private static readonly SmaFunctionChoice[] ArtSmaOutputFunctions =
+        {
+            new SmaFunctionChoice("Atomic clock", 0x0002),
+            new SmaFunctionChoice("GNSS PPS", 0x0004),
+            new SmaFunctionChoice("10 MHz reference", 0x0010)
+        };
+
         public MainWindow()
         {
             InitializeComponent();
@@ -512,7 +525,9 @@ namespace TimeCardControlCenter
             SyncDetailText.Text = string.Format("Status 0x{0:X8}", snapshot.ClockStatus);
             GnssFixMetricText.Text = snapshot.GnssFix;
             GnssFixMetricText.Foreground = snapshot.GnssFixOk ? healthyBrush : warningBrush;
-            SatelliteText.Text = snapshot.SatelliteDataValid
+            SatelliteText.Text = !snapshot.GnssTelemetryAvailable
+                ? "Not exposed by this FPGA image"
+                : snapshot.SatelliteDataValid
                 ? string.Format("{0} seen · {1} locked", snapshot.SeenSatellites, snapshot.LockedSatellites)
                 : "Satellite count not valid";
             InterruptText.Text = snapshot.InterruptMessages.ToString(CultureInfo.InvariantCulture);
@@ -547,14 +562,27 @@ namespace TimeCardControlCenter
 
             GnssFixText.Text = snapshot.GnssFix;
             GnssFixText.Foreground = snapshot.GnssFixOk ? healthyBrush : warningBrush;
-            GnssFixValidityText.Text = snapshot.GnssFixOk ? "Receiver reports a valid fix" : "Fix not currently asserted";
-            SatellitesSeenText.Text = snapshot.SeenSatellites.ToString(CultureInfo.InvariantCulture);
-            SatellitesLockedText.Text = snapshot.LockedSatellites.ToString(CultureInfo.InvariantCulture);
-            SatelliteValidityText.Text = snapshot.SatelliteDataValid ? "Satellite count is valid" : "Satellite count not valid";
-            bool utcValid = (snapshot.UtcStatus & (1u << 8)) != 0;
+            GnssFixValidityText.Text = !snapshot.GnssTelemetryAvailable ?
+                "GNSS summary registers are not exposed by this FPGA image" :
+                snapshot.GnssFixOk ? "Receiver reports a valid fix" :
+                "Fix not currently asserted";
+            SatellitesSeenText.Text = snapshot.GnssTelemetryAvailable ?
+                snapshot.SeenSatellites.ToString(CultureInfo.InvariantCulture) : "—";
+            SatellitesLockedText.Text = snapshot.GnssTelemetryAvailable ?
+                snapshot.LockedSatellites.ToString(CultureInfo.InvariantCulture) : "—";
+            SatelliteValidityText.Text = !snapshot.GnssTelemetryAvailable ?
+                "Satellite summary is not available" :
+                snapshot.SatelliteDataValid ? "Satellite count is valid" :
+                "Satellite count not valid";
+            bool utcValid = snapshot.TodTelemetryAvailable &&
+                (snapshot.UtcStatus & (1u << 8)) != 0;
             int utcOffset = (int)(snapshot.UtcStatus & 0xff);
-            UtcMetricText.Text = utcValid ? "UTC +" + utcOffset : "NOT VALID";
-            LeapMetricText.Text = (snapshot.UtcStatus & (1u << 16)) != 0
+            UtcMetricText.Text = !snapshot.TodTelemetryAvailable ?
+                "NOT AVAILABLE" :
+                utcValid ? "UTC +" + utcOffset : "NOT VALID";
+            LeapMetricText.Text = !snapshot.TodTelemetryAvailable ?
+                "ToD engine not implemented by this card profile" :
+                (snapshot.UtcStatus & (1u << 16)) != 0
                 ? string.Format("Leap info valid · next {0} s", unchecked((int)snapshot.Leap))
                 : "Leap information not valid";
             GnssRawText.Text = string.Format("0x{0:X8}", snapshot.GnssStatus);
@@ -2303,6 +2331,24 @@ namespace TimeCardControlCenter
         {
             if (atomicRefreshing)
                 return;
+            if (lastSnapshot != null &&
+                lastSnapshot.Layout == "Orolia ART")
+            {
+                AtomicConnectionText.Text = "OROLIA ART · MRO-50";
+                AtomicConnectionText.Foreground =
+                    (Brush)FindResource("GoldBrush");
+                AtomicLockDetailText.Text =
+                    "Use UART 2 at 9,600 baud for the ART oscillator console";
+                AtomicRefreshButton.IsEnabled = false;
+                if (showError)
+                {
+                    MessageBox.Show(this,
+                        "The Orolia ART card uses an mRO-50 oscillator, not the Microchip MAC-SA53 command set. Use the UART workspace on port 2 at 9,600 baud; SA53 writes are disabled for this card profile.",
+                        "Different atomic clock",
+                        MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                return;
+            }
             if (client == null)
             {
                 AtomicConnectionText.Text = "DRIVER ACCESS REQUIRED";
@@ -2683,6 +2729,12 @@ namespace TimeCardControlCenter
         {
             if (!EnsureConnected())
                 return;
+            if (lastSnapshot != null &&
+                lastSnapshot.Layout == "Orolia ART")
+            {
+                throw new InvalidOperationException(
+                    "SA53 commands are disabled on the Orolia ART profile. Use UART 2 at 9,600 baud for its mRO-50 oscillator.");
+            }
             if (atomicRefreshing)
                 throw new InvalidOperationException("Wait for the current SA53 operation to finish.");
             atomicRefreshing = true;
@@ -2964,8 +3016,13 @@ namespace TimeCardControlCenter
                 return;
             }
 
-            SmaFunctionChoice[] choices = direction == SmaDirection.Input ?
-                SmaInputFunctions : SmaOutputFunctions;
+            bool art = lastSnapshot != null &&
+                lastSnapshot.Layout == "Orolia ART";
+            SmaFunctionChoice[] choices = art ?
+                (direction == SmaDirection.Input ?
+                    ArtSmaInputFunctions : ArtSmaOutputFunctions) :
+                (direction == SmaDirection.Input ?
+                    SmaInputFunctions : SmaOutputFunctions);
             foreach (SmaFunctionChoice choice in choices)
                 combo.Items.Add(choice);
             if (selectedValue.HasValue &&
@@ -6131,7 +6188,13 @@ namespace TimeCardControlCenter
                 return (nanoseconds / 1000.0).ToString("N3", CultureInfo.InvariantCulture) + " µs";
             if (absolute < 1000000000)
                 return (nanoseconds / 1000000.0).ToString("N3", CultureInfo.InvariantCulture) + " ms";
-            return (nanoseconds / 1000000000.0).ToString("N6", CultureInfo.InvariantCulture) + " s";
+            if (absolute < 60000000000.0)
+                return (nanoseconds / 1000000000.0).ToString("N6", CultureInfo.InvariantCulture) + " s";
+            if (absolute < 3600000000000.0)
+                return (nanoseconds / 60000000000.0).ToString("N3", CultureInfo.InvariantCulture) + " min";
+            if (absolute < 86400000000000.0)
+                return (nanoseconds / 3600000000000.0).ToString("N3", CultureInfo.InvariantCulture) + " h";
+            return (nanoseconds / 86400000000000.0).ToString("N3", CultureInfo.InvariantCulture) + " d";
         }
 
     }

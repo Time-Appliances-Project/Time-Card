@@ -3,6 +3,105 @@
 
 #include "timecard.h"
 
+static int
+TimeCardHexDigit(WCHAR value)
+{
+    if (value >= L'0' && value <= L'9')
+        return value - L'0';
+    if (value >= L'A' && value <= L'F')
+        return value - L'A' + 10;
+    if (value >= L'a' && value <= L'f')
+        return value - L'a' + 10;
+    return -1;
+}
+
+static BOOLEAN
+TimeCardFindPciField(const WCHAR *hardwareIds, ULONG characters,
+                     const WCHAR *field, ULONG digits, PULONG value)
+{
+    ULONG i;
+
+    for (i = 0; i + 5u + digits <= characters; ++i) {
+        ULONG parsed = 0;
+        ULONG j;
+
+        if (hardwareIds[i] != L'&')
+            continue;
+        for (j = 0; j < 4u; ++j) {
+            WCHAR actual = hardwareIds[i + 1u + j];
+            WCHAR expected = field[j];
+
+            if (actual >= L'a' && actual <= L'z')
+                actual -= L'a' - L'A';
+            if (actual != expected)
+                break;
+        }
+        if (j != 4u)
+            continue;
+        for (j = 0; j < digits; ++j) {
+            int digit = TimeCardHexDigit(hardwareIds[i + 5u + j]);
+
+            if (digit < 0)
+                break;
+            parsed = (parsed << 4) | (ULONG)digit;
+        }
+        if (j == digits) {
+            *value = parsed;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static VOID
+TimeCardGetPciIdentity(WDFDEVICE device, PUSHORT vendorId,
+                       PUSHORT deviceId, PUCHAR revision)
+{
+    WCHAR hardwareIds[512];
+    ULONG bytes = 0;
+    ULONG characters;
+    ULONG value;
+    NTSTATUS status;
+
+    *vendorId = MAXUSHORT;
+    *deviceId = MAXUSHORT;
+    *revision = TIMECARD_PCI_REVISION_UNKNOWN;
+    RtlZeroMemory(hardwareIds, sizeof(hardwareIds));
+    status = WdfDeviceQueryProperty(
+        device, DevicePropertyHardwareID, sizeof(hardwareIds),
+        hardwareIds, &bytes);
+    if (!NT_SUCCESS(status))
+        return;
+
+    characters = bytes / sizeof(hardwareIds[0]);
+    if (characters > RTL_NUMBER_OF(hardwareIds))
+        characters = RTL_NUMBER_OF(hardwareIds);
+    if (TimeCardFindPciField(hardwareIds, characters, L"VEN_", 4u, &value))
+        *vendorId = (USHORT)value;
+    if (TimeCardFindPciField(hardwareIds, characters, L"DEV_", 4u, &value))
+        *deviceId = (USHORT)value;
+    if (TimeCardFindPciField(hardwareIds, characters, L"REV_", 2u, &value))
+        *revision = (UCHAR)value;
+}
+
+static VOID
+TimeCardConfigureBoardProfile(PDEVICE_CONTEXT context)
+{
+    if (context->PciVendorId == 0x1ad7u &&
+        context->PciDeviceId == 0xa000u) {
+        context->BoardProfile = TIMECARD_BOARD_ART;
+        context->SubsystemMask = TIMECARD_SUBSYSTEM_MASK_ART;
+    } else {
+        /*
+         * Meta/Facebook (1d9b:0400) and Celestica (18d4:1008) share
+         * the two fb resource maps in Linux. Keep that profile as the
+         * conservative fallback if Windows omits a useful hardware ID.
+         */
+        context->BoardProfile = TIMECARD_BOARD_FB;
+        context->SubsystemMask = TIMECARD_SUBSYSTEM_MASK_ALL;
+    }
+}
+
 static BOOLEAN
 TimeCardRangeFits(ULONG barLength, ULONG offset, ULONG length)
 {
@@ -38,6 +137,73 @@ TimeCardCountInterruptMessages(WDFCMRESLIST resourcesRaw,
 }
 
 static NTSTATUS
+TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
+{
+    ULONG i;
+
+    context->Layout = TIMECARD_LAYOUT_ART;
+    context->ClockOffset = TIMECARD_CLOCK_OFFSET_ART;
+    context->TodOffset = TIMECARD_OFFSET_NONE;
+    context->NmeaOutOffset = TIMECARD_OFFSET_NONE;
+    context->I2cOffset = TIMECARD_I2C_OFFSET_ART;
+    context->FlashOffset = TIMECARD_FLASH_OFFSET_ART;
+    context->FlashFirmwareOffset = TIMECARD_FLASH_FIRMWARE_OFFSET_ART;
+    context->I2cController = TIMECARD_I2C_CONTROLLER_OCORES;
+    context->FlashController = TIMECARD_FLASH_CONTROLLER_ALTERA;
+
+    context->Regs = NULL;
+    context->Tod = NULL;
+    context->NmeaOut = NULL;
+    context->SmaMap1 = NULL;
+    context->SmaMap2 = NULL;
+    context->ArtSma = NULL;
+    context->I2c = NULL;
+    context->Flash = NULL;
+    context->I2cKnownDeviceMask = 0;
+    context->I2cLastStartTrace = 0;
+    context->I2cLastStartEvents = 0;
+    context->FlashJedecId = 0;
+    context->FlashCapacity = 0;
+    context->FlashFifoDepth = 0;
+    for (i = 0; i < TIMECARD_UART_COUNT; ++i)
+        context->Uart[i] = NULL;
+    for (i = 0; i < TIMECARD_SIGNAL_COUNT; ++i) {
+        context->Signal[i] = NULL;
+        context->Frequency[i] = NULL;
+    }
+
+    if (!TimeCardRangeFits(context->Bar0Length, context->ClockOffset,
+                           sizeof(OCP_REG))) {
+        return STATUS_DEVICE_CONFIGURATION_ERROR;
+    }
+    context->Regs = (volatile OCP_REG *)(context->Bar0Base +
+                                         context->ClockOffset);
+
+    if (TimeCardRangeFits(context->Bar0Length,
+                          TIMECARD_UART_GNSS_OFFSET_ART, 0x20u)) {
+        context->Uart[TIMECARD_UART_GNSS] =
+            context->Bar0Base + TIMECARD_UART_GNSS_OFFSET_ART;
+    }
+    if (TimeCardRangeFits(context->Bar0Length,
+                          TIMECARD_UART_MAC_OFFSET_ART, 0x20u)) {
+        context->Uart[TIMECARD_UART_MAC] =
+            context->Bar0Base + TIMECARD_UART_MAC_OFFSET_ART;
+    }
+    if (TimeCardRangeFits(context->Bar0Length, TIMECARD_SMA_OFFSET_ART,
+                          sizeof(TIMECARD_ART_SMA_REG))) {
+        context->ArtSma = (volatile TIMECARD_ART_SMA_REG *)(
+            context->Bar0Base + TIMECARD_SMA_OFFSET_ART);
+    }
+    if (TimeCardRangeFits(context->Bar0Length, context->I2cOffset, 0x100u))
+        context->I2c = context->Bar0Base + context->I2cOffset;
+    if (TimeCardRangeFits(context->Bar0Length, context->FlashOffset,
+                          TIMECARD_REGISTER_WINDOW_SIZE)) {
+        context->Flash = context->Bar0Base + context->FlashOffset;
+    }
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS
 TimeCardSelectLayout(PDEVICE_CONTEXT context)
 {
     ULONG uartOffsets[TIMECARD_UART_COUNT];
@@ -45,8 +211,56 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
     ULONG smaMap2Offset;
     ULONG signalBaseOffset;
     ULONG frequencyBaseOffset;
-    BOOLEAN useMsix = context->InterruptMessages > 1;
+    BOOLEAN useMsix;
     ULONG i;
+
+    if (context->BoardProfile == TIMECARD_BOARD_ART)
+        return TimeCardSelectArtLayout(context);
+
+    /*
+     * The Linux ptp_ocp driver uses its rev1 register map for MSI gateware
+     * and its rev2 map for MSI-X/LitePCIe gateware. PCI MSI can expose up to
+     * 32 messages, while the current MSI-X image exposes 64. Older boards
+     * commonly report PCI revision 00 and either 2 or 32 MSI messages.
+     */
+    if (context->InterruptMessages > 32) {
+        useMsix = TRUE;
+    } else if (context->PciRevision != TIMECARD_PCI_REVISION_UNKNOWN) {
+        useMsix = context->PciRevision >= 2;
+    } else {
+        useMsix = FALSE;
+    }
+
+    /*
+     * Prefer the other known map when the selected core windows cannot fit
+     * in the assigned BAR. This fails safely before any register access and
+     * also covers firmware that does not publish a useful PCI revision.
+     */
+    if (useMsix &&
+        (!TimeCardRangeFits(context->Bar0Length,
+                            TIMECARD_CLOCK_OFFSET_MSIX, sizeof(OCP_REG)) ||
+         !TimeCardRangeFits(context->Bar0Length,
+                            TIMECARD_TOD_OFFSET_MSIX, sizeof(TOD_REG))) &&
+        TimeCardRangeFits(context->Bar0Length,
+                          TIMECARD_CLOCK_OFFSET_MSI, sizeof(OCP_REG)) &&
+        TimeCardRangeFits(context->Bar0Length,
+                          TIMECARD_TOD_OFFSET_MSI, sizeof(TOD_REG))) {
+        useMsix = FALSE;
+    } else if (!useMsix &&
+               (!TimeCardRangeFits(context->Bar0Length,
+                                   TIMECARD_CLOCK_OFFSET_MSI,
+                                   sizeof(OCP_REG)) ||
+                !TimeCardRangeFits(context->Bar0Length,
+                                   TIMECARD_TOD_OFFSET_MSI,
+                                   sizeof(TOD_REG))) &&
+               TimeCardRangeFits(context->Bar0Length,
+                                 TIMECARD_CLOCK_OFFSET_MSIX,
+                                 sizeof(OCP_REG)) &&
+               TimeCardRangeFits(context->Bar0Length,
+                                 TIMECARD_TOD_OFFSET_MSIX,
+                                 sizeof(TOD_REG))) {
+        useMsix = TRUE;
+    }
 
     if (useMsix) {
         context->Layout = TIMECARD_LAYOUT_MSIX;
@@ -79,6 +293,9 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
         context->I2cOffset = TIMECARD_I2C_OFFSET_MSI;
         context->FlashOffset = TIMECARD_FLASH_OFFSET_MSI;
     }
+    context->FlashFirmwareOffset = TIMECARD_FLASH_FIRMWARE_OFFSET_FB;
+    context->I2cController = TIMECARD_I2C_CONTROLLER_XIIC;
+    context->FlashController = TIMECARD_FLASH_CONTROLLER_XILINX;
 
     if (!TimeCardRangeFits(context->Bar0Length, context->ClockOffset,
                            sizeof(OCP_REG)) ||
@@ -101,6 +318,7 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
     /* SMA routing is optional and must never prevent the controller booting. */
     context->SmaMap1 = NULL;
     context->SmaMap2 = NULL;
+    context->ArtSma = NULL;
     context->NmeaOut = NULL;
     context->I2c = NULL;
     context->I2cKnownDeviceMask = 0;
@@ -204,6 +422,10 @@ TimeCardEvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT deviceInit)
     context = DeviceGetContext(device);
     RtlZeroMemory(context, sizeof(*context));
     context->Device = device;
+    TimeCardGetPciIdentity(device, &context->PciVendorId,
+                           &context->PciDeviceId,
+                           &context->PciRevision);
+    TimeCardConfigureBoardProfile(context);
 
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
     attributes.ParentObject = device;
@@ -258,6 +480,10 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
     barStart.QuadPart = 0;
     context->InterruptMessages =
         TimeCardCountInterruptMessages(resourcesRaw, resourcesTranslated);
+    TimeCardGetPciIdentity(device, &context->PciVendorId,
+                           &context->PciDeviceId,
+                           &context->PciRevision);
+    TimeCardConfigureBoardProfile(context);
 
     for (i = 0; i < WdfCmResourceListGetCount(resourcesTranslated); ++i) {
         PCM_PARTIAL_RESOURCE_DESCRIPTOR descriptor;
@@ -288,10 +514,12 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
     }
 
     context->HardwareReady = TRUE;
-    KdPrint(("timecard: BAR length 0x%lx, %lu interrupt message(s), "
-             "layout %s, clock offset 0x%lx\n",
+    KdPrint(("timecard: PCI %04x:%04x revision 0x%02x, BAR length 0x%lx, "
+             "%lu interrupt message(s), layout %lu, clock offset 0x%lx\n",
+             context->PciVendorId, context->PciDeviceId,
+             context->PciRevision,
              context->Bar0Length, context->InterruptMessages,
-             context->Layout == TIMECARD_LAYOUT_MSIX ? "MSI-X" : "MSI",
+             context->Layout,
              context->ClockOffset));
     return STATUS_SUCCESS;
 }
@@ -310,6 +538,7 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
     context->NmeaOut = NULL;
     context->SmaMap1 = NULL;
     context->SmaMap2 = NULL;
+    context->ArtSma = NULL;
     context->I2c = NULL;
     context->Flash = NULL;
     context->FlashJedecId = 0;

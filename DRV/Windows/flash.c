@@ -80,6 +80,8 @@ TimeCardFlashInitialize(PDEVICE_CONTEXT context)
 
     if (!context->HardwareReady || context->Flash == NULL)
         return STATUS_DEVICE_NOT_READY;
+    if (context->FlashController == TIMECARD_FLASH_CONTROLLER_ALTERA)
+        return TimeCardAlteraFlashInitialize(context);
 
     TimeCardFlashWrite32(context, XSPI_RESETR_OFFSET, XSPI_RESET_VALUE);
     TimeCardFlashWrite32(context, XSPI_DGIER_OFFSET, 0);
@@ -124,6 +126,10 @@ TimeCardFlashSpiTransfer(PDEVICE_CONTEXT context, const UCHAR *transmit,
 
     if (length == 0 || context->FlashFifoDepth == 0)
         return STATUS_INVALID_DEVICE_STATE;
+    if (context->FlashController == TIMECARD_FLASH_CONTROLLER_ALTERA) {
+        return TimeCardAlteraFlashTransfer(
+            context, transmit, receive, length);
+    }
 
     TimeCardFlashWrite32(context, XSPI_CR_OFFSET,
                          control | XSPI_CR_TXFIFO_RESET |
@@ -280,7 +286,7 @@ TimeCardFlashIdentify(PDEVICE_CONTEXT context)
         return STATUS_NOT_SUPPORTED;
     }
     capacity = 1ull << capacityCode;
-    if (capacity > MAXULONG || capacity <= TIMECARD_FLASH_FIRMWARE_OFFSET) {
+    if (capacity > MAXULONG || capacity <= context->FlashFirmwareOffset) {
         context->FlashJedecId = 0;
         return STATUS_NOT_SUPPORTED;
     }
@@ -298,11 +304,11 @@ TimeCardFlashValidateRange(PDEVICE_CONTEXT context,
     if (request->Size < sizeof(*request) || request->Length == 0 ||
         request->Length > maximumLength)
         return STATUS_INVALID_PARAMETER;
-    available = context->FlashCapacity - TIMECARD_FLASH_FIRMWARE_OFFSET;
+    available = context->FlashCapacity - context->FlashFirmwareOffset;
     if (request->Offset > available || request->Length >
         available - request->Offset)
         return STATUS_INVALID_PARAMETER;
-    *absoluteOffset = TIMECARD_FLASH_FIRMWARE_OFFSET + request->Offset;
+    *absoluteOffset = context->FlashFirmwareOffset + request->Offset;
     return STATUS_SUCCESS;
 }
 
@@ -334,7 +340,7 @@ TimeCardFlashQuery(PDEVICE_CONTEXT context, TIMECARD_FLASH_STATUS *status)
     RtlZeroMemory(status, sizeof(*status));
     status->Size = sizeof(*status);
     status->Offset = context->FlashOffset;
-    status->FirmwareOffset = TIMECARD_FLASH_FIRMWARE_OFFSET;
+    status->FirmwareOffset = context->FlashFirmwareOffset;
     status->EraseSize = TIMECARD_FLASH_ERASE_SIZE;
     status->PageSize = TIMECARD_FLASH_PAGE_SIZE;
     if (!context->HardwareReady || context->Flash == NULL)
@@ -354,6 +360,8 @@ TimeCardFlashQuery(PDEVICE_CONTEXT context, TIMECARD_FLASH_STATUS *status)
         result = TimeCardFlashReadStatusRegister(context, &flashStatus);
         status->FlashStatus = flashStatus;
         status->ControllerStatus =
+            context->FlashController == TIMECARD_FLASH_CONTROLLER_ALTERA ?
+            TimeCardAlteraFlashStatus(context) :
             TimeCardFlashRead32(context, XSPI_SR_OFFSET);
     }
     WdfWaitLockRelease(context->RegisterLock);

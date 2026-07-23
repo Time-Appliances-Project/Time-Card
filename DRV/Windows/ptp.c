@@ -116,13 +116,12 @@ TimeCardSetClockSource(PDEVICE_CONTEXT context,
 NTSTATUS
 TimeCardGetInfo(PDEVICE_CONTEXT context, TIMECARD_INFO *info)
 {
-    if (!context->HardwareReady || context->Regs == NULL ||
-        context->Tod == NULL)
+    if (!context->HardwareReady || context->Regs == NULL)
         return STATUS_DEVICE_NOT_READY;
 
     RtlZeroMemory(info, sizeof(*info));
     info->AbiVersion = TIMECARD_ABI_VERSION;
-    info->DriverVersion = 0x0001000fu;
+    info->DriverVersion = 0x00010011u;
     info->Layout = context->Layout;
     info->InterruptMessages = context->InterruptMessages;
     info->BarLength = context->Bar0Length;
@@ -132,12 +131,23 @@ TimeCardGetInfo(PDEVICE_CONTEXT context, TIMECARD_INFO *info)
     info->ClockVersion = READ_REGISTER_ULONG((PULONG)&context->Regs->Version);
     info->ClockStatus = READ_REGISTER_ULONG((PULONG)&context->Regs->Status);
     info->ClockSelect = READ_REGISTER_ULONG((PULONG)&context->Regs->Select);
-    info->TodVersion = READ_REGISTER_ULONG((PULONG)&context->Tod->Version);
-    info->TodStatus = READ_REGISTER_ULONG((PULONG)&context->Tod->Status);
-    info->UtcStatus = READ_REGISTER_ULONG((PULONG)&context->Tod->UtcStatus);
-    info->Leap = READ_REGISTER_ULONG((PULONG)&context->Tod->Leap);
-    info->GnssStatus = READ_REGISTER_ULONG((PULONG)&context->Tod->GnssStatus);
-    info->Satellites = READ_REGISTER_ULONG((PULONG)&context->Tod->NumSat);
+    if (context->Tod != NULL) {
+        info->TodVersion = READ_REGISTER_ULONG((PULONG)&context->Tod->Version);
+        info->TodStatus = READ_REGISTER_ULONG((PULONG)&context->Tod->Status);
+        info->UtcStatus = READ_REGISTER_ULONG((PULONG)&context->Tod->UtcStatus);
+        info->Leap = READ_REGISTER_ULONG((PULONG)&context->Tod->Leap);
+        info->GnssStatus =
+            READ_REGISTER_ULONG((PULONG)&context->Tod->GnssStatus);
+        info->Satellites =
+            READ_REGISTER_ULONG((PULONG)&context->Tod->NumSat);
+    } else {
+        info->TodVersion = MAXULONG;
+        info->TodStatus = MAXULONG;
+        info->UtcStatus = MAXULONG;
+        info->Leap = MAXULONG;
+        info->GnssStatus = MAXULONG;
+        info->Satellites = MAXULONG;
+    }
     WdfWaitLockRelease(context->RegisterLock);
     return STATUS_SUCCESS;
 }

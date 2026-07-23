@@ -42,9 +42,28 @@ extern const GUID GUID_DEVCLASS_TIMECARD;
 #define TIMECARD_FREQUENCY_BASE_MSI     0x01200000u
 #define TIMECARD_FREQUENCY_BASE_MSIX    0x03200000u
 
+#define TIMECARD_CLOCK_OFFSET_ART       0x01000000u
+#define TIMECARD_UART_GNSS_OFFSET_ART   0x00161000u
+#define TIMECARD_UART_MAC_OFFSET_ART    0x00190000u
+#define TIMECARD_SMA_OFFSET_ART         0x003c0000u
+#define TIMECARD_I2C_OFFSET_ART         0x00350000u
+#define TIMECARD_FLASH_OFFSET_ART       0x00310000u
+
 #define TIMECARD_REGISTER_WINDOW_SIZE   0x00010000u
 #define TIMECARD_UART_CLOCK_HZ          50000000u
 #define TIMECARD_SUBSYSTEM_COUNT        11u
+#define TIMECARD_PCI_REVISION_UNKNOWN   0xffu
+#define TIMECARD_OFFSET_NONE            MAXULONG
+
+#define TIMECARD_BOARD_FB                1u
+#define TIMECARD_BOARD_ART               2u
+#define TIMECARD_I2C_CONTROLLER_XIIC     1u
+#define TIMECARD_I2C_CONTROLLER_OCORES   2u
+#define TIMECARD_FLASH_CONTROLLER_XILINX 1u
+#define TIMECARD_FLASH_CONTROLLER_ALTERA 2u
+
+#define TIMECARD_FLASH_FIRMWARE_OFFSET_FB  0x00400000u
+#define TIMECARD_FLASH_FIRMWARE_OFFSET_ART 0x01000000u
 
 typedef struct _OCP_REG {
     ULONG Ctrl;
@@ -125,6 +144,15 @@ typedef struct _TIMECARD_FREQUENCY_REG {
     ULONG Status;
 } TIMECARD_FREQUENCY_REG, *PTIMECARD_FREQUENCY_REG;
 
+typedef struct _TIMECARD_ART_SMA_ENTRY {
+    ULONG Gpio;
+    ULONG Reserved[3];
+} TIMECARD_ART_SMA_ENTRY, *PTIMECARD_ART_SMA_ENTRY;
+
+typedef struct _TIMECARD_ART_SMA_REG {
+    TIMECARD_ART_SMA_ENTRY Map[TIMECARD_SMA_COUNT];
+} TIMECARD_ART_SMA_REG, *PTIMECARD_ART_SMA_REG;
+
 typedef struct _DEVICE_CONTEXT {
     WDFDEVICE Device;
     volatile UCHAR *Bar0Base;
@@ -134,6 +162,7 @@ typedef struct _DEVICE_CONTEXT {
     volatile TOD_REG *NmeaOut;
     volatile TIMECARD_GPIO_REG *SmaMap1;
     volatile TIMECARD_GPIO_REG *SmaMap2;
+    volatile TIMECARD_ART_SMA_REG *ArtSma;
     volatile TIMECARD_SIGNAL_REG *Signal[TIMECARD_SIGNAL_COUNT];
     volatile TIMECARD_FREQUENCY_REG *Frequency[TIMECARD_FREQUENCY_COUNT];
     volatile UCHAR *I2c;
@@ -150,8 +179,16 @@ typedef struct _DEVICE_CONTEXT {
     ULONG FlashJedecId;
     ULONG FlashCapacity;
     ULONG FlashFifoDepth;
+    ULONG FlashFirmwareOffset;
     ULONG InterruptMessages;
     ULONG Layout;
+    ULONG BoardProfile;
+    ULONG SubsystemMask;
+    ULONG I2cController;
+    ULONG FlashController;
+    USHORT PciVendorId;
+    USHORT PciDeviceId;
+    UCHAR PciRevision;
     BOOLEAN HardwareReady;
     BOOLEAN HierarchyCreated;
     WDFDEVICE ChildDevices[TIMECARD_SUBSYSTEM_COUNT];
@@ -174,6 +211,17 @@ typedef enum _TIMECARD_SUBSYSTEM {
     TimeCardSubsystemPtm,
     TimeCardSubsystemCount
 } TIMECARD_SUBSYSTEM;
+
+#define TIMECARD_SUBSYSTEM_BIT(subsystem) (1u << (ULONG)(subsystem))
+#define TIMECARD_SUBSYSTEM_MASK_ALL \
+    ((1u << (ULONG)TimeCardSubsystemCount) - 1u)
+#define TIMECARD_SUBSYSTEM_MASK_ART \
+    (TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemPhc) | \
+     TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemGnss) | \
+     TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemAtomicClock) | \
+     TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemSma) | \
+     TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemI2c) | \
+     TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemFlash))
 
 typedef struct _TIMECARD_CHILD_CONTEXT {
     TIMECARD_SUBSYSTEM Subsystem;
@@ -237,6 +285,24 @@ NTSTATUS TimeCardI2cProbe(PDEVICE_CONTEXT context,
 NTSTATUS TimeCardI2cRead(PDEVICE_CONTEXT context,
                          const TIMECARD_I2C_READ_REQUEST *request,
                          TIMECARD_I2C_TRANSFER *transfer);
+NTSTATUS TimeCardOcoresI2cGetStatusLocked(
+    PDEVICE_CONTEXT context,
+    TIMECARD_I2C_STATUS *status);
+NTSTATUS TimeCardOcoresI2cProbeLocked(
+    PDEVICE_CONTEXT context,
+    ULONG address,
+    TIMECARD_I2C_PROBE *probe);
+NTSTATUS TimeCardOcoresI2cReadLocked(
+    PDEVICE_CONTEXT context,
+    const TIMECARD_I2C_READ_REQUEST *request,
+    TIMECARD_I2C_TRANSFER *transfer);
+NTSTATUS TimeCardOcoresI2cWriteLocked(
+    PDEVICE_CONTEXT context,
+    ULONG address,
+    const UCHAR *data,
+    ULONG length,
+    ULONG *controllerStatus,
+    ULONG *interruptStatus);
 NTSTATUS TimeCardI2cMuxQuery(PDEVICE_CONTEXT context,
                              TIMECARD_I2C_MUX_CONTROL *control);
 NTSTATUS TimeCardI2cMuxSet(PDEVICE_CONTEXT context,
@@ -282,3 +348,9 @@ NTSTATUS TimeCardFlashErase(PDEVICE_CONTEXT context,
 NTSTATUS TimeCardFlashProgram(PDEVICE_CONTEXT context,
                               const TIMECARD_FLASH_TRANSFER *request,
                               TIMECARD_FLASH_RESULT *result);
+NTSTATUS TimeCardAlteraFlashInitialize(PDEVICE_CONTEXT context);
+NTSTATUS TimeCardAlteraFlashTransfer(PDEVICE_CONTEXT context,
+                                     const UCHAR *transmit,
+                                     UCHAR *receive,
+                                     ULONG length);
+ULONG TimeCardAlteraFlashStatus(PDEVICE_CONTEXT context);

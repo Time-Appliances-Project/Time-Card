@@ -936,7 +936,9 @@ namespace TimeCardControlCenter
         {
             AbiVersion = info.AbiVersion;
             DriverVersion = string.Format("{0}.{1}", info.DriverVersion >> 16, info.DriverVersion & 0xffff);
-            Layout = info.Layout == 2 ? "MSI-X" : info.Layout == 1 ? "MSI" : "Unknown";
+            Layout = info.Layout == 3 ? "Orolia ART" :
+                info.Layout == 2 ? "MSI-X" :
+                info.Layout == 1 ? "MSI" : "Unknown";
             InterruptMessages = info.InterruptMessages;
             BarLength = info.BarLength;
             ClockOffset = info.ClockOffset;
@@ -951,15 +953,25 @@ namespace TimeCardControlCenter
             Leap = info.Leap;
             GnssStatus = info.GnssStatus;
             Satellites = info.Satellites;
-            SeenSatellites = (int)(info.Satellites & 0xff);
-            LockedSatellites = (int)((info.Satellites >> 8) & 0xff);
-            SatelliteDataValid = (info.Satellites & (1u << 16)) != 0;
-            GnssFixOk = (info.GnssStatus & (1u << 16)) != 0;
-            GnssFixCode = (int)((info.GnssStatus >> 17) & 0xff);
+            TodTelemetryAvailable = info.TodVersion != uint.MaxValue;
+            GnssTelemetryAvailable = TodTelemetryAvailable &&
+                info.GnssStatus != uint.MaxValue &&
+                info.Satellites != uint.MaxValue;
+            SeenSatellites = GnssTelemetryAvailable ?
+                (int)(info.Satellites & 0xff) : 0;
+            LockedSatellites = GnssTelemetryAvailable ?
+                (int)((info.Satellites >> 8) & 0xff) : 0;
+            SatelliteDataValid = GnssTelemetryAvailable &&
+                (info.Satellites & (1u << 16)) != 0;
+            GnssFixOk = GnssTelemetryAvailable &&
+                (info.GnssStatus & (1u << 16)) != 0;
+            GnssFixCode = GnssTelemetryAvailable ?
+                (int)((info.GnssStatus >> 17) & 0xff) : -1;
             string[] fixNames = { "No fix", "Dead reckoning", "2-D fix", "3-D fix",
                 "GPS + dead reckoning", "Unknown" };
-            GnssFix = GnssFixCode >= 0 && GnssFixCode < fixNames.Length - 1
-                ? fixNames[GnssFixCode] : fixNames[fixNames.Length - 1];
+            GnssFix = !GnssTelemetryAvailable ? "Not available" :
+                GnssFixCode >= 0 && GnssFixCode < fixNames.Length - 1
+                    ? fixNames[GnssFixCode] : fixNames[fixNames.Length - 1];
             HierarchyRuntimeEnabled = hierarchy.RuntimeEnabled != 0;
             HierarchyPersisted = hierarchy.Persisted != 0;
 
@@ -990,8 +1002,10 @@ namespace TimeCardControlCenter
         public uint TodStatus { get; private set; }
         public uint UtcStatus { get; private set; }
         public uint Leap { get; private set; }
+        public bool TodTelemetryAvailable { get; private set; }
         public uint GnssStatus { get; private set; }
         public uint Satellites { get; private set; }
+        public bool GnssTelemetryAvailable { get; private set; }
         public int SeenSatellites { get; private set; }
         public int LockedSatellites { get; private set; }
         public bool SatelliteDataValid { get; private set; }

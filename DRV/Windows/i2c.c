@@ -205,7 +205,7 @@ TimeCardI2cAddressValid(ULONG address)
 static ULONG
 TimeCardI2cKnownDeviceFlag(ULONG address)
 {
-    if (address == TIMECARD_BOARD_EEPROM_ADDRESS)
+    if (address == TIMECARD_BOARD_EEPROM_ADDRESS || address == 0x52u)
         return TIMECARD_I2C_DEVICE_BOARD_EEPROM;
     if (address == TIMECARD_IDENTITY_ADDRESS)
         return TIMECARD_I2C_DEVICE_MAC_EEPROM;
@@ -404,6 +404,9 @@ TimeCardI2cReadLocked(PDEVICE_CONTEXT context,
     ULONG attempt;
     NTSTATUS status = STATUS_IO_TIMEOUT;
 
+    if (context->I2cController == TIMECARD_I2C_CONTROLLER_OCORES)
+        return TimeCardOcoresI2cReadLocked(context, request, transfer);
+
     if (timeoutMilliseconds == 0)
         timeoutMilliseconds = TIMECARD_I2C_DEFAULT_TIMEOUT_MS;
     if (timeoutMilliseconds > TIMECARD_I2C_MAX_TIMEOUT_MS)
@@ -498,9 +501,16 @@ TimeCardI2cWriteLocked(PDEVICE_CONTEXT context, ULONG address,
     NTSTATUS status = STATUS_IO_TIMEOUT;
 
     if (!TimeCardI2cAddressValid(address) || data == NULL ||
-        length == 0 || length >= XIIC_FIFO_DEPTH) {
+        length == 0) {
         return STATUS_INVALID_PARAMETER;
     }
+    if (context->I2cController == TIMECARD_I2C_CONTROLLER_OCORES) {
+        return TimeCardOcoresI2cWriteLocked(
+            context, address, data, length,
+            controllerStatus, interruptStatus);
+    }
+    if (length >= XIIC_FIFO_DEPTH)
+        return STATUS_INVALID_PARAMETER;
 
     *controllerStatus = 0;
     *interruptStatus = 0;
@@ -573,6 +583,15 @@ TimeCardI2cGetStatus(PDEVICE_CONTEXT context, TIMECARD_I2C_STATUS *status)
     if (!context->HardwareReady || context->I2c == NULL)
         return STATUS_DEVICE_NOT_READY;
 
+    if (context->I2cController == TIMECARD_I2C_CONTROLLER_OCORES) {
+        NTSTATUS result;
+
+        WdfWaitLockAcquire(context->RegisterLock, NULL);
+        result = TimeCardOcoresI2cGetStatusLocked(context, status);
+        WdfWaitLockRelease(context->RegisterLock);
+        return result;
+    }
+
     RtlZeroMemory(status, sizeof(*status));
     WdfWaitLockAcquire(context->RegisterLock, NULL);
     control = TimeCardI2cRead8(context, XIIC_CR_OFFSET);
@@ -618,6 +637,21 @@ TimeCardI2cProbe(PDEVICE_CONTEXT context, ULONG address,
         return STATUS_DEVICE_NOT_READY;
     if (!TimeCardI2cAddressValid(address))
         return STATUS_INVALID_PARAMETER;
+
+    if (context->I2cController == TIMECARD_I2C_CONTROLLER_OCORES) {
+        WdfWaitLockAcquire(context->RegisterLock, NULL);
+        status = TimeCardOcoresI2cProbeLocked(
+            context, address, probe);
+        if (NT_SUCCESS(status)) {
+            flag = TimeCardI2cKnownDeviceFlag(address);
+            if (probe->Present != 0)
+                context->I2cKnownDeviceMask |= flag;
+            else
+                context->I2cKnownDeviceMask &= ~flag;
+        }
+        WdfWaitLockRelease(context->RegisterLock);
+        return status;
+    }
 
     RtlZeroMemory(probe, sizeof(*probe));
     probe->Size = (ULONG)sizeof(*probe);
@@ -1552,9 +1586,18 @@ TimeCardGetIdentity(PDEVICE_CONTEXT context, TIMECARD_IDENTITY *identity)
 
     RtlZeroMemory(&request, sizeof(request));
     request.Size = sizeof(request);
-    request.Address = TIMECARD_IDENTITY_ADDRESS;
+    if (context->BoardProfile == TIMECARD_BOARD_ART) {
+        /*
+         * Linux's ART EEPROM map stores the serial at absolute 24c08
+         * offset 0x263. The high address block selects slave 0x52.
+         */
+        request.Address = 0x52u;
+        request.Subaddress = 0x63u;
+    } else {
+        request.Address = TIMECARD_IDENTITY_ADDRESS;
+        request.Subaddress = TIMECARD_IDENTITY_EUI48_OFFSET;
+    }
     request.SubaddressLength = 1u;
-    request.Subaddress = TIMECARD_IDENTITY_EUI48_OFFSET;
     request.Length = TIMECARD_IDENTITY_SERIAL_LENGTH;
     request.TimeoutMilliseconds = TIMECARD_I2C_DEFAULT_TIMEOUT_MS;
 

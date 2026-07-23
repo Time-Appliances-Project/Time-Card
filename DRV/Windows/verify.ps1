@@ -7,22 +7,31 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$instance = 'PCI\VEN_1D9B&DEV_0400*'
+$instances = @(
+    'PCI\VEN_1D9B&DEV_0400*',
+    'PCI\VEN_18D4&DEV_1008*',
+    'PCI\VEN_1AD7&DEV_A000*'
+)
 $tool = Join-Path $PSScriptRoot 'out\timecardctl.exe'
 $log = Join-Path $PSScriptRoot 'verify.log'
 
 Start-Transcript -Path $log -Force | Out-Null
 try {
     pnputil.exe /scan-devices | Out-Host
-    $device = Get-PnpDevice -PresentOnly | Where-Object InstanceId -Like $instance
-    if (-not $device) {
-        throw 'OCP TimeCard PCI device is not present.'
+    $devices = Get-PnpDevice -PresentOnly | Where-Object {
+        $id = $_.InstanceId
+        $instances | Where-Object { $id -like $_ }
     }
-    $device | Format-List Status, Class, FriendlyName, InstanceId | Out-Host
-    if ($device.Status -ne 'OK') {
-        $problem = Get-PnpDeviceProperty -InstanceId $device.InstanceId `
-            -KeyName DEVPKEY_Device_ProblemCode
-        throw "TimeCard did not start. Device Manager problem code: $($problem.Data)"
+    if (-not $devices) {
+        throw 'A supported OCP Time Card PCI device is not present.'
+    }
+    $devices | Format-List Status, Class, FriendlyName, InstanceId | Out-Host
+    foreach ($device in $devices) {
+        if ($device.Status -ne 'OK') {
+            $problem = Get-PnpDeviceProperty -InstanceId $device.InstanceId `
+                -KeyName DEVPKEY_Device_ProblemCode
+            throw "Time Card did not start. Device Manager problem code: $($problem.Data)"
+        }
     }
 
     $timeCardDevices = Get-PnpDevice -PresentOnly -Class TimeCard |
@@ -31,17 +40,25 @@ try {
         Format-Table -AutoSize Status, FriendlyName, InstanceId | Out-Host
     $expectedChildren = @(
         'TIMECARD\PHC\*',
-        'TIMECARD\TOD\*',
         'TIMECARD\UART_GNSS\*',
-        'TIMECARD\UART_GNSS2\*',
         'TIMECARD\UART_MAC\*',
-        'TIMECARD\UART_NMEA\*',
         'TIMECARD\SMA\*',
-        'TIMECARD\TIMING_IO\*',
         'TIMECARD\I2C\*',
-        'TIMECARD\FLASH\*',
-        'TIMECARD\PTM\*'
+        'TIMECARD\FLASH\*'
     )
+    $hasFbProfile = $devices | Where-Object {
+        $_.InstanceId -like 'PCI\VEN_1D9B&DEV_0400*' -or
+        $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
+    }
+    if ($hasFbProfile) {
+        $expectedChildren += @(
+            'TIMECARD\TOD\*',
+            'TIMECARD\UART_GNSS2\*',
+            'TIMECARD\UART_NMEA\*',
+            'TIMECARD\TIMING_IO\*',
+            'TIMECARD\PTM\*'
+        )
+    }
     if ($ExpectHierarchy) {
         foreach ($childPattern in $expectedChildren) {
             $child = $timeCardDevices |
@@ -62,6 +79,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'timecardctl status failed.' }
     & $tool get
     if ($LASTEXITCODE -ne 0) { throw 'timecardctl get failed.' }
+    & $tool serial
+    if ($LASTEXITCODE -ne 0) { throw 'timecardctl serial failed.' }
+    & $tool sma-status
+    if ($LASTEXITCODE -ne 0) { throw 'timecardctl sma-status failed.' }
+    & $tool i2c-status
+    if ($LASTEXITCODE -ne 0) { throw 'timecardctl i2c-status failed.' }
+    if ($hasFbProfile) {
+        & $tool nmea-status
+        if ($LASTEXITCODE -ne 0) { throw 'timecardctl nmea-status failed.' }
+    }
     if ($SetFromSystem) {
         & $tool set-system
         if ($LASTEXITCODE -ne 0) { throw 'timecardctl set-system failed.' }
