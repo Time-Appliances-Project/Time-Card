@@ -4,7 +4,7 @@ The Time Card Control Center is a dependency-free Windows desktop dashboard
 for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
-Driver 1.17 recognizes the Meta/Facebook, Celestica, and Orolia/Safran ART
+Driver 1.23 recognizes the Meta/Facebook, Celestica, and Orolia/Safran ART
 profiles from the Linux driver. The application labels the ART layout,
 suppresses unavailable ToD/GNSS-summary fields, uses the ART-specific SMA
 function menu, and prevents the MAC-SA53 panel from sending commands to the
@@ -67,8 +67,8 @@ the ART default of 9,600 baud.
 - Manual and automatic control of all six IS32FL3207 RGB subsystem indicators,
   including current limiting, open/short reporting, and a bounded electrical
   test that restores the previous colors.
-- Live one-hertz BME280 temperature/humidity/pressure, INA219 +12 V/+5 V/+3.3 V
-  rail telemetry, and BNO055 fused orientation plus raw nine-axis IMU data.
+- Live one-hertz BME280/BMP280 environment, INA219 +12 V/+5 V/+3.3 V
+  rail telemetry, and BNO055 NDOF or BNO08x SH-2 fused nine-axis IMU data.
 - Runtime and persistent Device Manager subsystem-hierarchy controls.
 - A guarded FPGA SPI-flash workspace with JEDEC/geometry discovery, OCPC
   vendor/device/length/CRC validation, explicit raw-image warnings, protected
@@ -257,7 +257,7 @@ sample window.
 The cross-timestamp distribution uses the same system-sampling-window values
 as the line chart and marks its median and 95th percentile; the summary also
 reports the 99th percentile. Overall vibration is the Euclidean magnitude of
-the BNO055 gravity-compensated linear-acceleration vector,
+the IMU gravity-compensated linear-acceleration vector,
 `sqrt(x*x + y*y + z*z)`, in m/s². The live label includes a rolling 60-sample
 RMS, and recorded CSV/JSON rows include `vibration_m_s2` /
 `vibrationMetersPerSecondSquared`. These are board-motion indicators, not a
@@ -442,9 +442,9 @@ attribute.
 
 Reads support no subaddress or a one- or two-byte subaddress followed by a
 repeated start. Transfers are limited to 255 bytes and a bounded timeout.
-Driver 1.14 corrects the dynamic-mode startup handshake by queuing the complete
-command before clearing the stale bus-not-busy latch, matching Linux
-`i2c-xiic`. Receive data is drained whenever available,
+Driver 1.18 corrects the dynamic-mode short-transfer handshake by queueing
+START/address, clearing stale completion state, and then appending the
+register payload, matching Linux `i2c-xiic`. Receive data is drained whenever available,
 the expected final receive NACK is handled separately from an address NACK,
 and a failed transient transaction is reset and retried once. Native Win32
 error text and a post-failure controller snapshot are shown if a read still
@@ -455,16 +455,18 @@ at `0x70`. Channel 0 is the MAC-clock branch, channel 1 contains the onboard
 sensors and RGB LED driver, channel 2 is the analog/ADC expansion branch, and
 channel 3 is the DC expansion branch. The workspace shows the selected mask,
 offers safe single-branch shortcuts, annotates full scans with the expected
-BNO055, INA219, BME280, and IS32FL3207 addresses, and provides matching read
-presets.
+BNO055, BNO08x, INA219, BME280/BMP280, and IS32FL3207 addresses, and provides
+matching read presets.
 
 U26, the TMUX1072 near the MAC connector, is controlled by the physical
 `MACSER` DIP only; the select net is not routed to the FPGA. The workspace
 therefore explains that channel 0 also requires `MACSER=0` instead of exposing
 a non-functional software toggle.
 
-The IS32FL3207 uses 7-bit address `0x37`; the schematic's `0x6e` label is its
-8-bit write address. It drives six common-anode RGB indicators: GNSS1 uses
+Time Card V9 straps the IS32FL3207 at 7-bit address `0x37`; the schematic's
+`0x6e` label is its 8-bit write address. Driver 1.18 also detects the other
+documented AD strap choices (`0x34`-`0x36`). It drives six common-anode RGB
+indicators: GNSS1 uses
 OUT1â€“3, GNSS2 OUT4â€“6, and IO1 through IO4 use OUT7â€“18 in groups of three.
 Manual RGB/current controls and automatic status mapping are available.
 Automatic mode uses green for a GNSS fix or configured SMA output, blue for an
@@ -481,17 +483,25 @@ shown in the workspace, and automatic mapping marks affected packages as
 
 ## Sensors and IMU
 
-Driver 1.15.1 / ABI 8 and the dedicated Sensors & IMU workspace read every
-populated monitor on the schematic's sensor branch. The BME280 cards show
-factory-compensated temperature, relative humidity, pressure, and calculated
-dew point. The three INA219 cards show bus voltage, shunt current, and load
-power for +12 V, +5 V, and +3.3 V using the board's 2 milliohm shunts.
+Driver 1.23 / ABI 8 and the dedicated Sensors & IMU workspace read every
+populated monitor on the auto-detected sensor branch. BME280 and BMP280 are
+auto-detected at `0x76` or `0x77`; BME280 cards show factory-compensated
+temperature, relative humidity, pressure, and calculated dew point, while a
+BMP280 correctly reports humidity and dew point as unavailable. The three
+INA219 cards show bus voltage, shunt current, and load power for +12 V, +5 V,
+and +3.3 V using the board's 2 milliohm shunts.
+Driver 1.19 also wakes and verifies an INA219 that gateware left in
+reset/power-down before collecting its first conversion.
 
-The BNO055 is placed in NDOF fusion mode and uses the V9 schematic's external
-32.768 kHz crystal. The workspace reports heading, roll, pitch, quaternion,
-temperature, calibration levels, acceleration, linear acceleration, gravity,
-angular velocity, and magnetic field. Sampling is live at one hertz while the
-workspace is visible. Each query temporarily selects PCA9546A channel 1,
+The BNO055 is auto-detected at `0x28` or `0x29`, placed in NDOF fusion mode,
+and uses the V9 schematic's external 32.768 kHz crystal. The
+schematic-permitted BNO080/BNO08x alternative is detected at `0x4a` or `0x4b`;
+the driver configures its SH-2 SHTP acceleration, gyro, magnetic, linear-
+acceleration, rotation-vector, and gravity reports. The workspace reports
+heading, roll, pitch, quaternion, calibration levels, acceleration, linear
+acceleration, gravity, angular velocity, and magnetic field. BNO055 also
+reports temperature. Sampling is live at one hertz while the workspace is
+visible. Each query temporarily selects the discovered PCA9546A branch,
 reports missing devices separately, and restores the previous mux selection.
 
 ## FPGA SPI flash

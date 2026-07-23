@@ -495,6 +495,38 @@ cmd_i2c_status(HANDLE handle)
 }
 
 static int
+cmd_i2c_mux(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_I2C_MUX_CONTROL control;
+    DWORD code;
+
+    if (argc < 2 || argc > 3)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    if (argc == 3) {
+        control.ChannelMask =
+            (unsigned __int32)parse_ulong(argv[2], "I2C mux mask");
+        if ((control.ChannelMask & ~TIMECARD_I2C_MUX_CHANNEL_MASK) != 0)
+            return 2;
+        code = IOCTL_TIMECARD_I2C_MUX_SET;
+    } else {
+        code = IOCTL_TIMECARD_I2C_MUX_QUERY;
+    }
+    if (timecard_ioctl(handle, code,
+                       argc == 3 ? &control : NULL,
+                       argc == 3 ? sizeof(control) : 0,
+                       &control, sizeof(control), NULL))
+        return 1;
+    printf("PCA9546A: %s, channel mask 0x%02lx, SR 0x%02lx, ISR 0x%08lx\n",
+           control.Present ? "present" : "not present",
+           (unsigned long)control.ChannelMask,
+           (unsigned long)control.ControllerStatus,
+           (unsigned long)control.InterruptStatus);
+    return control.Present ? 0 : 1;
+}
+
+static int
 cmd_i2c_scan(HANDLE handle)
 {
     unsigned long address;
@@ -587,6 +619,289 @@ cmd_i2c_read(HANDLE handle, int argc, char **argv)
 }
 
 static void
+print_sensor_presence(const char *name, unsigned long flags)
+{
+    printf("%-18s %s%s%s\n", name,
+           (flags & TIMECARD_SENSOR_FLAG_PRESENT) ? "present" : "not present",
+           (flags & TIMECARD_SENSOR_FLAG_VALID) ? ", valid" : "",
+           (flags & TIMECARD_SENSOR_FLAG_CONFIGURED) ? ", configured" : "");
+}
+
+static int
+cmd_sensors(HANDLE handle)
+{
+    TIMECARD_SENSOR_TELEMETRY telemetry;
+    unsigned long validCount = 0;
+
+    RtlZeroMemory(&telemetry, sizeof(telemetry));
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_SENSOR_QUERY,
+                       NULL, 0, &telemetry, sizeof(telemetry), NULL))
+        return 1;
+
+    printf("Sensor branch:     %s (prior mux 0x%02lx)\n",
+           (telemetry.Flags & TIMECARD_SENSOR_FLAG_PRESENT) ?
+               "available" : "unavailable",
+           (unsigned long)telemetry.MuxChannelMask);
+    printf("Controller/events: 0x%02lx / 0x%08lx\n",
+           (unsigned long)telemetry.ControllerStatus,
+           (unsigned long)telemetry.InterruptStatus);
+    print_sensor_presence(
+        telemetry.Environment.ChipId == 0x58u ? "BMP280" : "BME280",
+        telemetry.Environment.Flags);
+    if ((telemetry.Environment.Flags & TIMECARD_SENSOR_FLAG_PRESENT) != 0) {
+        printf("  chip/status:     0x%02lx / 0x%02lx%s\n",
+               (unsigned long)telemetry.Environment.ChipId,
+               (unsigned long)telemetry.Environment.Status,
+               (telemetry.Environment.Flags &
+                TIMECARD_SENSOR_FLAG_HUMIDITY) ? " (humidity capable)" : "");
+        printf("  raw T/P/H:       %ld / %lu / %lu\n",
+               (long)telemetry.Environment.RawTemperature,
+               (unsigned long)telemetry.Environment.RawPressure,
+               (unsigned long)telemetry.Environment.RawHumidity);
+    }
+    print_sensor_presence("INA219 +12 V", telemetry.Rail12V.Flags);
+    if ((telemetry.Rail12V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+        printf("  %lu mV, %ld mA, %ld mW\n",
+               (unsigned long)telemetry.Rail12V.BusMillivolts,
+               (long)telemetry.Rail12V.CurrentMilliamps,
+               (long)telemetry.Rail12V.PowerMilliwatts);
+    print_sensor_presence("INA219 +5 V", telemetry.Rail5V.Flags);
+    if ((telemetry.Rail5V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+        printf("  %lu mV, %ld mA, %ld mW\n",
+               (unsigned long)telemetry.Rail5V.BusMillivolts,
+               (long)telemetry.Rail5V.CurrentMilliamps,
+               (long)telemetry.Rail5V.PowerMilliwatts);
+    print_sensor_presence("INA219 +3.3 V", telemetry.Rail3V3.Flags);
+    if ((telemetry.Rail3V3.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+        printf("  %lu mV, %ld mA, %ld mW\n",
+               (unsigned long)telemetry.Rail3V3.BusMillivolts,
+               (long)telemetry.Rail3V3.CurrentMilliamps,
+               (long)telemetry.Rail3V3.PowerMilliwatts);
+    print_sensor_presence(
+        telemetry.Imu.ChipId == TIMECARD_SENSOR_BNO08X_CHIP_ID ?
+            "BNO08x IMU" : "BNO055 IMU",
+        telemetry.Imu.Flags);
+    if ((telemetry.Imu.Flags & TIMECARD_SENSOR_FLAG_PRESENT) != 0) {
+        printf("  chip/mode/error: 0x%02lx / 0x%02lx / 0x%02lx\n",
+               (unsigned long)telemetry.Imu.ChipId,
+               (unsigned long)telemetry.Imu.OperationMode,
+               (unsigned long)telemetry.Imu.SystemError);
+        printf("  accel XYZ:       %ld / %ld / %ld\n",
+               (long)telemetry.Imu.AccelerationX,
+               (long)telemetry.Imu.AccelerationY,
+               (long)telemetry.Imu.AccelerationZ);
+        printf("  linear XYZ:      %ld / %ld / %ld\n",
+               (long)telemetry.Imu.LinearAccelerationX,
+               (long)telemetry.Imu.LinearAccelerationY,
+               (long)telemetry.Imu.LinearAccelerationZ);
+        printf("  gravity XYZ:     %ld / %ld / %ld\n",
+               (long)telemetry.Imu.GravityX,
+               (long)telemetry.Imu.GravityY,
+               (long)telemetry.Imu.GravityZ);
+        printf("  gyro XYZ:        %ld / %ld / %ld\n",
+               (long)telemetry.Imu.GyroscopeX,
+               (long)telemetry.Imu.GyroscopeY,
+               (long)telemetry.Imu.GyroscopeZ);
+        printf("  magnetic XYZ:    %ld / %ld / %ld\n",
+               (long)telemetry.Imu.MagneticX,
+               (long)telemetry.Imu.MagneticY,
+               (long)telemetry.Imu.MagneticZ);
+        printf("  quaternion WXYZ: %ld / %ld / %ld / %ld\n",
+               (long)telemetry.Imu.QuaternionW,
+               (long)telemetry.Imu.QuaternionX,
+               (long)telemetry.Imu.QuaternionY,
+               (long)telemetry.Imu.QuaternionZ);
+    }
+    if ((telemetry.Environment.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+        ++validCount;
+    if ((telemetry.Rail12V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+        ++validCount;
+    if ((telemetry.Rail5V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+        ++validCount;
+    if ((telemetry.Rail3V3.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+        ++validCount;
+    if ((telemetry.Imu.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+        ++validCount;
+    if (validCount == 0) {
+        fprintf(stderr, "timecardctl: no valid sensor samples were returned\n");
+        return 1;
+    }
+    printf("%lu valid sensor block(s).\n", validCount);
+    return 0;
+}
+
+static void
+print_led(const TIMECARD_LED_CONTROL *control)
+{
+    printf("LED %lu: %s%s, RGB %lu/%lu/%lu, current %lu",
+           (unsigned long)control->Led + 1u,
+           (control->Flags & TIMECARD_LED_FLAG_PRESENT) ?
+               "present" : "not present",
+           (control->Flags & TIMECARD_LED_FLAG_ENABLED) ?
+               ", enabled" : "",
+           (unsigned long)control->Red,
+           (unsigned long)control->Green,
+           (unsigned long)control->Blue,
+           (unsigned long)control->GlobalCurrent);
+    if ((control->Flags & TIMECARD_LED_FLAG_FAULT_VALID) != 0) {
+        printf(", open 0x%05lx, short 0x%05lx",
+               (unsigned long)control->OpenOutputMask,
+               (unsigned long)control->ShortOutputMask);
+    }
+    printf("\n");
+}
+
+static int
+cmd_led_status(HANDLE handle, int argc, char **argv)
+{
+    unsigned long first = 1;
+    unsigned long last = TIMECARD_LED_COUNT;
+    unsigned long led;
+
+    if (argc > 3)
+        return 2;
+    if (argc == 3) {
+        first = parse_ulong(argv[2], "LED");
+        if (first == 0 || first > TIMECARD_LED_COUNT)
+            return 2;
+        last = first;
+    }
+    for (led = first; led <= last; ++led) {
+        TIMECARD_LED_CONTROL control;
+
+        RtlZeroMemory(&control, sizeof(control));
+        control.Size = sizeof(control);
+        control.Led = (unsigned __int32)(led - 1u);
+        if (timecard_ioctl(handle, IOCTL_TIMECARD_LED_QUERY,
+                           &control, sizeof(control), &control,
+                           sizeof(control), NULL))
+            return 1;
+        print_led(&control);
+    }
+    return 0;
+}
+
+static int
+cmd_led_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_LED_CONTROL control;
+
+    if (argc < 6 || argc > 7)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Led =
+        (unsigned __int32)parse_ulong(argv[2], "LED");
+    control.Red =
+        (unsigned __int32)parse_ulong(argv[3], "red");
+    control.Green =
+        (unsigned __int32)parse_ulong(argv[4], "green");
+    control.Blue =
+        (unsigned __int32)parse_ulong(argv[5], "blue");
+    control.GlobalCurrent = argc == 7 ?
+        (unsigned __int32)parse_ulong(argv[6], "global current") : 96u;
+    if (control.Led == 0 || control.Led > TIMECARD_LED_COUNT ||
+        control.Red > 255u || control.Green > 255u ||
+        control.Blue > 255u || control.GlobalCurrent == 0 ||
+        control.GlobalCurrent > TIMECARD_LED_MAX_GLOBAL_CURRENT) {
+        return 2;
+    }
+    --control.Led;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_LED_SET,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_led(&control);
+    return 0;
+}
+
+static int
+cmd_led_test(HANDLE handle)
+{
+    TIMECARD_LED_CONTROL saved[TIMECARD_LED_COUNT];
+    TIMECARD_LED_CONTROL control;
+    unsigned long led;
+    int failed = 0;
+
+    RtlZeroMemory(saved, sizeof(saved));
+    for (led = 0; led < TIMECARD_LED_COUNT; ++led) {
+        saved[led].Size = sizeof(saved[led]);
+        saved[led].Led = (unsigned __int32)led;
+        if (timecard_ioctl(handle, IOCTL_TIMECARD_LED_QUERY,
+                           &saved[led], sizeof(saved[led]), &saved[led],
+                           sizeof(saved[led]), NULL))
+            return 1;
+    }
+
+    printf("Forcing all 18 IS32FL3207 outputs on for three seconds...\n");
+    for (led = 0; led < TIMECARD_LED_COUNT; ++led) {
+        RtlZeroMemory(&control, sizeof(control));
+        control.Size = sizeof(control);
+        control.Led = (unsigned __int32)led;
+        control.Red = 255u;
+        control.Green = 255u;
+        control.Blue = 255u;
+        control.GlobalCurrent = TIMECARD_LED_MAX_GLOBAL_CURRENT;
+        if (led == 0)
+            control.Flags = TIMECARD_LED_FLAG_RESET_TEST;
+        if (timecard_ioctl(handle, IOCTL_TIMECARD_LED_SET,
+                           &control, sizeof(control), &control,
+                           sizeof(control), NULL)) {
+            failed = 1;
+            goto Restore;
+        }
+        if (led == 0 &&
+            (control.Flags & TIMECARD_LED_FLAG_SDB_HIGH) == 0) {
+            fprintf(stderr,
+                    "timecardctl: IS32FL3207 SDB is low; check R109 and U6\n");
+            failed = 1;
+        }
+    }
+
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Led = 0;
+    control.Red = 255u;
+    control.Green = 255u;
+    control.Blue = 255u;
+    control.GlobalCurrent = TIMECARD_LED_MAX_GLOBAL_CURRENT;
+    control.Flags = TIMECARD_LED_FLAG_DC_TEST;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_LED_SET,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL)) {
+        failed = 1;
+        goto Restore;
+    }
+    print_led(&control);
+    if ((control.Flags & TIMECARD_LED_FLAG_FAULT_VALID) == 0) {
+        printf("Warning: LED fault diagnostics unavailable\n");
+    } else if ((control.OpenOutputMask | control.ShortOutputMask) != 0) {
+        printf("Warning: LED diagnostic mask: open 0x%05lx, short 0x%05lx\n",
+               (unsigned long)control.OpenOutputMask,
+               (unsigned long)control.ShortOutputMask);
+    }
+    Sleep(3000u);
+
+Restore:
+    for (led = 0; led < TIMECARD_LED_COUNT; ++led) {
+        RtlZeroMemory(&control, sizeof(control));
+        control.Size = sizeof(control);
+        control.Led = (unsigned __int32)led;
+        control.Red = saved[led].Red;
+        control.Green = saved[led].Green;
+        control.Blue = saved[led].Blue;
+        control.GlobalCurrent = saved[led].GlobalCurrent != 0 ?
+            saved[led].GlobalCurrent : 1u;
+        if (timecard_ioctl(handle, IOCTL_TIMECARD_LED_SET,
+                           &control, sizeof(control), &control,
+                           sizeof(control), NULL))
+            failed = 1;
+    }
+    printf("Previous LED colors restored.\n");
+    return failed;
+}
+
+static void
 usage(void)
 {
     fprintf(stderr,
@@ -609,8 +924,13 @@ usage(void)
             "  timecardctl sma-set <connector> <input|output> <function>\n"
             "  timecardctl sma-set <connector> disabled\n"
             "  timecardctl i2c-status\n"
+            "  timecardctl i2c-mux [channel-mask 0..15]\n"
             "  timecardctl i2c-scan\n"
             "  timecardctl i2c-read <address> <subaddress> <bytes> [subaddress-bytes 0..2]\n"
+            "  timecardctl sensors\n"
+            "  timecardctl led-status [LED 1..6]\n"
+            "  timecardctl led-set <LED 1..6> <red> <green> <blue> [current 1..128]\n"
+            "  timecardctl led-test\n"
             "ports: 0=GNSS, 1=GNSS2, 2=MAC, 3=NMEA\n");
 }
 
@@ -659,10 +979,20 @@ main(int argc, char **argv)
         result = cmd_sma_set(handle, argc, argv);
     else if (strcmp(argv[1], "i2c-status") == 0 && argc == 2)
         result = cmd_i2c_status(handle);
+    else if (strcmp(argv[1], "i2c-mux") == 0)
+        result = cmd_i2c_mux(handle, argc, argv);
     else if (strcmp(argv[1], "i2c-scan") == 0 && argc == 2)
         result = cmd_i2c_scan(handle);
     else if (strcmp(argv[1], "i2c-read") == 0)
         result = cmd_i2c_read(handle, argc, argv);
+    else if (strcmp(argv[1], "sensors") == 0 && argc == 2)
+        result = cmd_sensors(handle);
+    else if (strcmp(argv[1], "led-status") == 0)
+        result = cmd_led_status(handle, argc, argv);
+    else if (strcmp(argv[1], "led-set") == 0)
+        result = cmd_led_set(handle, argc, argv);
+    else if (strcmp(argv[1], "led-test") == 0 && argc == 2)
+        result = cmd_led_test(handle);
     CloseHandle(handle);
 
     if (result == 2)

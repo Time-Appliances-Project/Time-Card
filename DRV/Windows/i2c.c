@@ -38,6 +38,22 @@
 #define TIMECARD_I2C_DEFAULT_TIMEOUT_MS 100u
 #define TIMECARD_I2C_MAX_TIMEOUT_MS 250u
 #define TIMECARD_I2C_POLL_US 5u
+#define TIMECARD_INA219_CONFIGURATION 0x399fu
+#define TIMECARD_IMU_TYPE_NONE 0u
+#define TIMECARD_IMU_TYPE_BNO055 1u
+#define TIMECARD_IMU_TYPE_BNO08X 2u
+#define TIMECARD_BNO08X_MAX_PACKET_LENGTH 1024u
+#define TIMECARD_BNO08X_REPORT_INTERVAL_US 250000u
+#define TIMECARD_BNO08X_CHANNEL_CONTROL 2u
+#define TIMECARD_BNO08X_CHANNEL_REPORTS 3u
+#define TIMECARD_BNO08X_SET_FEATURE 0xfdu
+#define TIMECARD_BNO08X_BASE_TIMESTAMP 0xfbu
+#define TIMECARD_BNO08X_ACCELEROMETER 0x01u
+#define TIMECARD_BNO08X_GYROSCOPE 0x02u
+#define TIMECARD_BNO08X_MAGNETIC_FIELD 0x03u
+#define TIMECARD_BNO08X_LINEAR_ACCELERATION 0x04u
+#define TIMECARD_BNO08X_ROTATION_VECTOR 0x05u
+#define TIMECARD_BNO08X_GRAVITY 0x06u
 
 static UCHAR
 TimeCardI2cRead8(PDEVICE_CONTEXT context, ULONG offset)
@@ -143,16 +159,6 @@ TimeCardI2cWaitNotBusy(PDEVICE_CONTEXT context)
 static VOID
 TimeCardI2cQueueDynamicStart(PDEVICE_CONTEXT context, USHORT addressWord)
 {
-    /*
-     * Queue the complete dynamic command before clearing BNB.  This matches
-     * Linux i2c-xiic: some AXI IIC revisions do not launch START from an
-     * address-only FIFO and instead wait for data or a dynamic receive length.
-     * BNB is level-derived while idle, so the caller clears it only after the
-     * complete command has been queued.
-     */
-    TimeCardI2cClearInterruptMask(
-        context, XIIC_INTR_ARB_LOST | XIIC_INTR_TX_ERROR |
-                 XIIC_INTR_TX_EMPTY | XIIC_INTR_RX_FULL);
     TimeCardI2cWrite16(
         context, XIIC_DTR_OFFSET,
         (USHORT)(XIIC_TX_DYN_START | addressWord));
@@ -302,6 +308,15 @@ TimeCardI2cReadAttempt(PDEVICE_CONTEXT context,
     if (request->SubaddressLength != 0) {
         TimeCardI2cQueueDynamicStart(
             context, (USHORT)(request->Address << 1));
+        /*
+         * Match Linux i2c-xiic's transmit ordering: put START/address in the
+         * FIFO, acknowledge stale completion state, then append payload.
+         * Clearing TX_EMPTY after the payload can erase a real completion on
+         * short register transactions.
+         */
+        TimeCardI2cClearInterruptMask(
+            context, XIIC_INTR_TX_EMPTY | XIIC_INTR_TX_ERROR |
+                     XIIC_INTR_BNB);
         if (request->SubaddressLength == 2u) {
             TimeCardI2cWrite16(
                 context, XIIC_DTR_OFFSET,
@@ -310,9 +325,6 @@ TimeCardI2cReadAttempt(PDEVICE_CONTEXT context,
         TimeCardI2cWrite16(context, XIIC_DTR_OFFSET,
                            (USHORT)(request->Subaddress & 0xffu));
         TimeCardI2cCaptureStartTrace(context);
-        TimeCardI2cClearInterruptMask(
-            context, XIIC_INTR_TX_EMPTY | XIIC_INTR_TX_ERROR |
-                     XIIC_INTR_BNB);
 
         status = TimeCardI2cWaitTransmitPhase(
             context, &remainingPolls, &observedInterrupts,
@@ -329,6 +341,9 @@ TimeCardI2cReadAttempt(PDEVICE_CONTEXT context,
      * dynamic receive state machine and removes the completion race.
     */
     TimeCardI2cSetReceiveWatermark(context, request->Length);
+    TimeCardI2cClearInterruptMask(
+        context, XIIC_INTR_ARB_LOST | XIIC_INTR_TX_ERROR |
+                 XIIC_INTR_TX_EMPTY | XIIC_INTR_RX_FULL);
     TimeCardI2cQueueDynamicStart(
         context, (USHORT)((request->Address << 1) | 1u));
     TimeCardI2cWrite16(
@@ -438,7 +453,9 @@ TimeCardI2cWriteAttempt(PDEVICE_CONTEXT context, ULONG address,
     ULONG remainingPolls = pollCount;
     ULONG observedInterrupts = 0;
     UCHAR currentStatus = 0;
-    ULONG i;
+    BOOLEAN traceCaptured = FALSE;
+    ULONG chunk;
+    ULONG i = 0;
     NTSTATUS status;
 
     context->I2cLastStartTrace = 0;
@@ -449,16 +466,42 @@ TimeCardI2cWriteAttempt(PDEVICE_CONTEXT context, ULONG address,
 
     TimeCardI2cArmPolling(context);
     TimeCardI2cQueueDynamicStart(context, (USHORT)(address << 1));
-    for (i = 0; i < length; ++i) {
-        USHORT value = data[i];
-        if (i + 1u == length)
-            value |= XIIC_TX_DYN_STOP;
-        TimeCardI2cWrite16(context, XIIC_DTR_OFFSET, value);
-    }
-    TimeCardI2cCaptureStartTrace(context);
     TimeCardI2cClearInterruptMask(
         context, XIIC_INTR_TX_EMPTY | XIIC_INTR_TX_ERROR | XIIC_INTR_BNB);
 
+    /*
+     * Stream transfers larger than the 16-entry FIFO without releasing the
+     * bus.  This is required by BNO08x SHTP control packets (21 bytes).
+     * The first chunk reserves one FIFO entry for START/address; later chunks
+     * can use the whole FIFO.  STOP is attached only to the final payload.
+     */
+    while (i < length) {
+        ULONG capacity = i == 0 ? XIIC_FIFO_DEPTH - 1u :
+                                  XIIC_FIFO_DEPTH;
+
+        chunk = length - i;
+        if (chunk > capacity)
+            chunk = capacity;
+        while (chunk-- != 0) {
+            USHORT value = data[i];
+
+            if (i + 1u == length)
+                value |= XIIC_TX_DYN_STOP;
+            TimeCardI2cWrite16(context, XIIC_DTR_OFFSET, value);
+            ++i;
+        }
+        if (!traceCaptured) {
+            TimeCardI2cCaptureStartTrace(context);
+            traceCaptured = TRUE;
+        }
+        if (i < length) {
+            status = TimeCardI2cWaitTransmitPhase(
+                context, &remainingPolls, &observedInterrupts,
+                &currentStatus);
+            if (!NT_SUCCESS(status))
+                goto Exit;
+        }
+    }
     status = STATUS_IO_TIMEOUT;
     while (remainingPolls != 0) {
         ULONG interrupts;
@@ -509,9 +552,6 @@ TimeCardI2cWriteLocked(PDEVICE_CONTEXT context, ULONG address,
             context, address, data, length,
             controllerStatus, interruptStatus);
     }
-    if (length >= XIIC_FIFO_DEPTH)
-        return STATUS_INVALID_PARAMETER;
-
     *controllerStatus = 0;
     *interruptStatus = 0;
     for (attempt = 0; attempt < 2u; ++attempt) {
@@ -803,25 +843,134 @@ TimeCardI2cMuxSet(PDEVICE_CONTEXT context,
     return status;
 }
 
+static BOOLEAN
+TimeCardBno08xHeaderValid(const UCHAR *header)
+{
+    ULONG length = (ULONG)header[0] |
+                   (((ULONG)header[1] & 0x7fu) << 8);
+
+    return length >= 4u &&
+           length <= TIMECARD_BNO08X_MAX_PACKET_LENGTH &&
+           header[2] <= 5u;
+}
+
+static BOOLEAN
+TimeCardSensorBranchProbeLocked(PDEVICE_CONTEXT context, UCHAR channelMask,
+                                ULONG *controllerStatus,
+                                ULONG *interruptStatus)
+{
+    static const ULONG bno055Addresses[] = {
+        TIMECARD_SENSOR_BNO055_ADDRESS,
+        TIMECARD_SENSOR_BNO055_ADDRESS_ALTERNATE
+    };
+    static const ULONG bno08xAddresses[] = {
+        TIMECARD_SENSOR_BNO08X_ADDRESS,
+        TIMECARD_SENSOR_BNO08X_ADDRESS_ALTERNATE
+    };
+    static const ULONG environmentAddresses[] = {
+        TIMECARD_SENSOR_BME280_ADDRESS,
+        TIMECARD_SENSOR_BME280_ADDRESS_ALTERNATE
+    };
+    UCHAR value = 0;
+    UCHAR header[4];
+    ULONG i;
+    NTSTATUS status;
+
+    status = TimeCardI2cMuxWriteLocked(
+        context, channelMask, controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return FALSE;
+    KeStallExecutionProcessor(10u);
+
+    for (i = 0; i < ARRAYSIZE(bno055Addresses); ++i) {
+        status = TimeCardI2cReadBytesLocked(
+            context, bno055Addresses[i], 1, 0x00u, &value, 1,
+            controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status) && value == 0xa0u) {
+            context->I2cImuType = TIMECARD_IMU_TYPE_BNO055;
+            context->I2cImuAddress = bno055Addresses[i];
+            return TRUE;
+        }
+    }
+
+    /*
+     * BNO08x does not expose BNO055-style registers.  Its first four bytes
+     * are an SHTP header; a bounded length and channel identify it without
+     * writing or consuming the queued transfer.
+     */
+    for (i = 0; i < ARRAYSIZE(bno08xAddresses); ++i) {
+        status = TimeCardI2cReadBytesLocked(
+            context, bno08xAddresses[i], 0, 0, header, sizeof(header),
+            controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status) && TimeCardBno08xHeaderValid(header)) {
+            context->I2cImuType = TIMECARD_IMU_TYPE_BNO08X;
+            context->I2cImuAddress = bno08xAddresses[i];
+            return TRUE;
+        }
+    }
+
+    for (i = 0; i < ARRAYSIZE(environmentAddresses); ++i) {
+        status = TimeCardI2cReadBytesLocked(
+            context, environmentAddresses[i], 1, 0xd0u, &value, 1,
+            controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status) && (value == 0x60u || value == 0x58u))
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 static NTSTATUS
 TimeCardSensorBranchSelectLocked(PDEVICE_CONTEXT context, UCHAR *savedMask,
                                  BOOLEAN *changed, ULONG *controllerStatus,
                                  ULONG *interruptStatus)
 {
+    static const UCHAR candidates[] = {
+        TIMECARD_I2C_MUX_CHANNEL_SENSORS,
+        TIMECARD_I2C_MUX_CHANNEL_DC,
+        TIMECARD_I2C_MUX_CHANNEL_MAC,
+        TIMECARD_I2C_MUX_CHANNEL_ANADC
+    };
+    UCHAR selectedMask;
+    ULONG i;
     NTSTATUS status = TimeCardI2cMuxReadLocked(
         context, savedMask, controllerStatus, interruptStatus);
 
     *changed = FALSE;
     if (!NT_SUCCESS(status))
         return status;
-    if (*savedMask == TIMECARD_I2C_MUX_CHANNEL_SENSORS)
+
+    selectedMask = (UCHAR)context->I2cSensorMuxMask;
+    if (selectedMask == 0) {
+        context->I2cImuType = TIMECARD_IMU_TYPE_NONE;
+        context->I2cImuAddress = 0;
+        for (i = 0; i < ARRAYSIZE(candidates); ++i) {
+            if (TimeCardSensorBranchProbeLocked(
+                    context, candidates[i],
+                    controllerStatus, interruptStatus)) {
+                selectedMask = candidates[i];
+                context->I2cSensorMuxMask = selectedMask;
+                break;
+            }
+        }
+        if (selectedMask == 0)
+            selectedMask = TIMECARD_I2C_MUX_CHANNEL_SENSORS;
+    }
+
+    if (*savedMask == selectedMask)
         return STATUS_SUCCESS;
 
     status = TimeCardI2cMuxWriteLocked(
-        context, TIMECARD_I2C_MUX_CHANNEL_SENSORS,
+        context, selectedMask,
         controllerStatus, interruptStatus);
-    if (NT_SUCCESS(status))
+    if (NT_SUCCESS(status)) {
         *changed = TRUE;
+        /*
+         * PCA9546A switching is fast, but allow the selected branch and its
+         * pull-ups to settle before issuing a repeated controller reset/START.
+         */
+        KeStallExecutionProcessor(10u);
+    }
     return status;
 }
 
@@ -840,6 +989,166 @@ TimeCardSensorBranchRestoreLocked(PDEVICE_CONTEXT context, UCHAR savedMask,
     return NT_SUCCESS(operationStatus) ? restoreStatus : operationStatus;
 }
 
+static VOID
+TimeCardSensorDelayMilliseconds(ULONG milliseconds)
+{
+    LARGE_INTEGER interval;
+
+    interval.QuadPart = -((LONGLONG)milliseconds * 10000ll);
+    (VOID)KeDelayExecutionThread(KernelMode, FALSE, &interval);
+}
+
+static NTSTATUS
+TimeCardLedResolveAddressLocked(PDEVICE_CONTEXT context, ULONG *address,
+                                ULONG *controllerStatus,
+                                ULONG *interruptStatus)
+{
+    static const ULONG candidates[] = { 0x37u, 0x36u, 0x35u, 0x34u };
+    UCHAR deviceControl;
+    UCHAR globalCurrent;
+    ULONG i;
+    NTSTATUS status = STATUS_NO_SUCH_DEVICE;
+
+    if (context->I2cLedAddress >= TIMECARD_LED_ADDRESS_MIN &&
+        context->I2cLedAddress <= TIMECARD_LED_ADDRESS_MAX) {
+        status = TimeCardI2cReadBytesLocked(
+            context, context->I2cLedAddress, 1, 0x00u,
+            &deviceControl, 1, controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status)) {
+            *address = context->I2cLedAddress;
+            return STATUS_SUCCESS;
+        }
+        context->I2cLedAddress = 0;
+    }
+
+    for (i = 0; i < ARRAYSIZE(candidates); ++i) {
+        status = TimeCardI2cReadBytesLocked(
+            context, candidates[i], 1, 0x00u, &deviceControl, 1,
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            continue;
+        status = TimeCardI2cReadBytesLocked(
+            context, candidates[i], 1, 0x6eu, &globalCurrent, 1,
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            continue;
+        /*
+         * D7 and D3 are reserved.  Do not reject a chip merely because a
+         * boot loader selected a different legal oscillator/PWM mode or a
+         * global-current value above the Control Center's safety cap.
+         */
+        if ((deviceControl & 0x88u) != 0) {
+            continue;
+        }
+        context->I2cLedAddress = candidates[i];
+        *address = candidates[i];
+        return STATUS_SUCCESS;
+    }
+    return status;
+}
+
+static NTSTATUS
+TimeCardEnvironmentResolveAddressLocked(PDEVICE_CONTEXT context,
+                                        ULONG *address, UCHAR *chipId,
+                                        ULONG *controllerStatus,
+                                        ULONG *interruptStatus)
+{
+    static const ULONG candidates[] = {
+        TIMECARD_SENSOR_BME280_ADDRESS,
+        TIMECARD_SENSOR_BME280_ADDRESS_ALTERNATE
+    };
+    ULONG i;
+    NTSTATUS status = STATUS_NO_SUCH_DEVICE;
+
+    if (context->I2cEnvironmentAddress != 0) {
+        status = TimeCardI2cReadBytesLocked(
+            context, context->I2cEnvironmentAddress, 1, 0xd0u,
+            chipId, 1, controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status) &&
+            (*chipId == 0x60u || *chipId == 0x58u)) {
+            *address = context->I2cEnvironmentAddress;
+            return STATUS_SUCCESS;
+        }
+        context->I2cEnvironmentAddress = 0;
+    }
+
+    for (i = 0; i < ARRAYSIZE(candidates); ++i) {
+        status = TimeCardI2cReadBytesLocked(
+            context, candidates[i], 1, 0xd0u, chipId, 1,
+            controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status) &&
+            (*chipId == 0x60u || *chipId == 0x58u)) {
+            context->I2cEnvironmentAddress = candidates[i];
+            *address = candidates[i];
+            return STATUS_SUCCESS;
+        }
+    }
+    return status;
+}
+
+static NTSTATUS
+TimeCardImuResolveAddressLocked(PDEVICE_CONTEXT context, ULONG *address,
+                                UCHAR *chipId, ULONG *controllerStatus,
+                                ULONG *interruptStatus)
+{
+    static const ULONG candidates[] = {
+        TIMECARD_SENSOR_BNO055_ADDRESS,
+        TIMECARD_SENSOR_BNO055_ADDRESS_ALTERNATE
+    };
+    ULONG i;
+    NTSTATUS status = STATUS_NO_SUCH_DEVICE;
+
+    if (context->I2cImuAddress != 0) {
+        status = TimeCardI2cReadBytesLocked(
+            context, context->I2cImuAddress, 1, 0x00u,
+            chipId, 1, controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status) && *chipId == 0xa0u) {
+            *address = context->I2cImuAddress;
+            return STATUS_SUCCESS;
+        }
+        context->I2cImuAddress = 0;
+    }
+
+    for (i = 0; i < ARRAYSIZE(candidates); ++i) {
+        status = TimeCardI2cReadBytesLocked(
+            context, candidates[i], 1, 0x00u, chipId, 1,
+            controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status) && *chipId == 0xa0u) {
+            context->I2cImuAddress = candidates[i];
+            *address = candidates[i];
+            return STATUS_SUCCESS;
+        }
+    }
+    return status;
+}
+
+static BOOLEAN
+TimeCardLedUsesLegacyWiring(PDEVICE_CONTEXT context)
+{
+    /*
+     * The Rev00/MSI assembly routes the six RGB packages differently from
+     * the V9 Rev02/MSI-X schematic and exchanges each package's R/G sinks.
+     * Keep the V9 mapping unchanged for the original card.
+     */
+    return context->Layout == TIMECARD_LAYOUT_MSI;
+}
+
+static ULONG
+TimeCardLedPhysicalIndex(PDEVICE_CONTEXT context, ULONG logicalLed)
+{
+    static const UCHAR legacyMap[TIMECARD_LED_COUNT] = {
+        TIMECARD_LED_IO3,
+        TIMECARD_LED_IO4,
+        TIMECARD_LED_IO1,
+        TIMECARD_LED_IO2,
+        TIMECARD_LED_GNSS1,
+        TIMECARD_LED_GNSS2
+    };
+
+    return TimeCardLedUsesLegacyWiring(context) ?
+        legacyMap[logicalLed] : logicalLed;
+}
+
 static ULONG
 TimeCardLedFaultMask(const UCHAR *data)
 {
@@ -849,7 +1158,8 @@ TimeCardLedFaultMask(const UCHAR *data)
 }
 
 static NTSTATUS
-TimeCardLedDetectFaultsLocked(PDEVICE_CONTEXT context, ULONG *openMask,
+TimeCardLedDetectFaultsLocked(PDEVICE_CONTEXT context, ULONG address,
+                              ULONG *openMask,
                               ULONG *shortMask, ULONG *controllerStatus,
                               ULONG *interruptStatus)
 {
@@ -865,12 +1175,13 @@ TimeCardLedDetectFaultsLocked(PDEVICE_CONTEXT context, ULONG *openMask,
     writeBuffer[0] = 0x71u;
     writeBuffer[1] = 0x03u;
     status = TimeCardI2cWriteLocked(
-        context, TIMECARD_LED_ADDRESS, writeBuffer, sizeof(writeBuffer),
+        context, address, writeBuffer, sizeof(writeBuffer),
         controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         goto Disable;
+    TimeCardSensorDelayMilliseconds(1u);
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_LED_ADDRESS, 1, 0x72u, result, sizeof(result),
+        context, address, 1, 0x72u, result, sizeof(result),
         controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         goto Disable;
@@ -879,12 +1190,13 @@ TimeCardLedDetectFaultsLocked(PDEVICE_CONTEXT context, ULONG *openMask,
     /* OSDE=10 selects short detection and replaces the result registers. */
     writeBuffer[1] = 0x02u;
     status = TimeCardI2cWriteLocked(
-        context, TIMECARD_LED_ADDRESS, writeBuffer, sizeof(writeBuffer),
+        context, address, writeBuffer, sizeof(writeBuffer),
         controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         goto Disable;
+    TimeCardSensorDelayMilliseconds(1u);
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_LED_ADDRESS, 1, 0x72u, result, sizeof(result),
+        context, address, 1, 0x72u, result, sizeof(result),
         controllerStatus, interruptStatus);
     if (NT_SUCCESS(status))
         *shortMask = TimeCardLedFaultMask(result);
@@ -892,7 +1204,7 @@ TimeCardLedDetectFaultsLocked(PDEVICE_CONTEXT context, ULONG *openMask,
 Disable:
     writeBuffer[1] = 0x00u;
     disableStatus = TimeCardI2cWriteLocked(
-        context, TIMECARD_LED_ADDRESS, writeBuffer, sizeof(writeBuffer),
+        context, address, writeBuffer, sizeof(writeBuffer),
         controllerStatus, interruptStatus);
     return NT_SUCCESS(status) ? disableStatus : status;
 }
@@ -907,6 +1219,8 @@ TimeCardLedQuery(PDEVICE_CONTEXT context, ULONG led,
     UCHAR globalCurrent = 0;
     UCHAR spreadSpectrum = 0;
     UCHAR pwm[6];
+    ULONG address = 0;
+    ULONG physicalLed;
     ULONG controllerStatus = 0;
     ULONG interruptStatus = 0;
     ULONG openMask = 0;
@@ -930,23 +1244,29 @@ TimeCardLedQuery(PDEVICE_CONTEXT context, ULONG led,
     if (!NT_SUCCESS(status))
         goto Exit;
 
+    status = TimeCardLedResolveAddressLocked(
+        context, &address, &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    physicalLed = TimeCardLedPhysicalIndex(context, led);
+
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_LED_ADDRESS, 1, 0x00u, &deviceControl, 1,
+        context, address, 1, 0x00u, &deviceControl, 1,
         &controllerStatus, &interruptStatus);
     if (!NT_SUCCESS(status))
         goto Exit;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_LED_ADDRESS, 1, 0x6eu, &globalCurrent, 1,
+        context, address, 1, 0x6eu, &globalCurrent, 1,
         &controllerStatus, &interruptStatus);
     if (!NT_SUCCESS(status))
         goto Exit;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_LED_ADDRESS, 1, 0x78u, &spreadSpectrum, 1,
+        context, address, 1, 0x78u, &spreadSpectrum, 1,
         &controllerStatus, &interruptStatus);
     if (!NT_SUCCESS(status))
         goto Exit;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_LED_ADDRESS, 1, 0x01u + led * 6u, pwm,
+        context, address, 1, 0x01u + physicalLed * 6u, pwm,
         sizeof(pwm),
         &controllerStatus, &interruptStatus);
     if (NT_SUCCESS(status)) {
@@ -955,12 +1275,17 @@ TimeCardLedQuery(PDEVICE_CONTEXT context, ULONG led,
             control->Flags |= TIMECARD_LED_FLAG_ENABLED;
         if ((spreadSpectrum & 0x60u) == 0x60u)
             control->Flags |= TIMECARD_LED_FLAG_DC_TEST;
-        control->Red = pwm[0];
-        control->Green = pwm[2];
+        if (TimeCardLedUsesLegacyWiring(context)) {
+            control->Red = pwm[2];
+            control->Green = pwm[0];
+        } else {
+            control->Red = pwm[0];
+            control->Green = pwm[2];
+        }
         control->Blue = pwm[4];
         control->GlobalCurrent = globalCurrent;
         faultStatus = TimeCardLedDetectFaultsLocked(
-            context, &openMask, &shortMask,
+            context, address, &openMask, &shortMask,
             &controllerStatus, &interruptStatus);
         if (NT_SUCCESS(faultStatus)) {
             control->Flags |= TIMECARD_LED_FLAG_FAULT_VALID;
@@ -987,8 +1312,16 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
     UCHAR savedMask = 0;
     BOOLEAN changed = FALSE;
     UCHAR writeBuffer[7];
+    UCHAR readControl = 0;
+    UCHAR readCurrent = 0;
+    UCHAR readScaling[3];
+    UCHAR readPwm[6];
+    UCHAR readSpread = 0;
+    UCHAR expectedSpread;
     UCHAR resetProbe = 0;
     BOOLEAN sdbHigh = FALSE;
+    ULONG address = 0;
+    ULONG physicalLed;
     ULONG controllerStatus = 0;
     ULONG interruptStatus = 0;
     ULONG openMask = 0;
@@ -1019,6 +1352,12 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
     if (!NT_SUCCESS(status))
         goto Exit;
 
+    status = TimeCardLedResolveAddressLocked(
+        context, &address, &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    physicalLed = TimeCardLedPhysicalIndex(context, request->Led);
+
     if ((request->Flags & TIMECARD_LED_FLAG_RESET_TEST) != 0) {
         /*
          * The reset command is honored only while SDB is physically high
@@ -1028,19 +1367,19 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
         writeBuffer[0] = 0x00u;
         writeBuffer[1] = 0x01u;
         status = TimeCardI2cWriteLocked(
-            context, TIMECARD_LED_ADDRESS, writeBuffer, 2,
+            context, address, writeBuffer, 2,
             &controllerStatus, &interruptStatus);
         if (!NT_SUCCESS(status))
             goto Exit;
         writeBuffer[0] = 0x70u;
         writeBuffer[1] = 0x05u;
         status = TimeCardI2cWriteLocked(
-            context, TIMECARD_LED_ADDRESS, writeBuffer, 2,
+            context, address, writeBuffer, 2,
             &controllerStatus, &interruptStatus);
         if (!NT_SUCCESS(status))
             goto Exit;
         status = TimeCardI2cReadBytesLocked(
-            context, TIMECARD_LED_ADDRESS, 1, 0x70u, &resetProbe, 1,
+            context, address, 1, 0x70u, &resetProbe, 1,
             &controllerStatus, &interruptStatus);
         if (!NT_SUCCESS(status) || resetProbe != 0x05u) {
             if (NT_SUCCESS(status))
@@ -1050,12 +1389,12 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
         writeBuffer[0] = 0x7fu;
         writeBuffer[1] = 0x00u;
         status = TimeCardI2cWriteLocked(
-            context, TIMECARD_LED_ADDRESS, writeBuffer, 2,
+            context, address, writeBuffer, 2,
             &controllerStatus, &interruptStatus);
         if (!NT_SUCCESS(status))
             goto Exit;
         status = TimeCardI2cReadBytesLocked(
-            context, TIMECARD_LED_ADDRESS, 1, 0x70u, &resetProbe, 1,
+            context, address, 1, 0x70u, &resetProbe, 1,
             &controllerStatus, &interruptStatus);
         if (!NT_SUCCESS(status))
             goto Exit;
@@ -1067,7 +1406,7 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
     writeBuffer[0] = 0x00u;
     writeBuffer[1] = 0x01u;
     status = TimeCardI2cWriteLocked(
-        context, TIMECARD_LED_ADDRESS, writeBuffer, 2,
+        context, address, writeBuffer, 2,
         &controllerStatus, &interruptStatus);
     if (!NT_SUCCESS(status))
         goto Exit;
@@ -1075,31 +1414,33 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
     writeBuffer[0] = 0x6eu;
     writeBuffer[1] = (UCHAR)request->GlobalCurrent;
     status = TimeCardI2cWriteLocked(
-        context, TIMECARD_LED_ADDRESS, writeBuffer, 2,
+        context, address, writeBuffer, 2,
         &controllerStatus, &interruptStatus);
     if (!NT_SUCCESS(status))
         goto Exit;
 
     /* Apply full per-channel scaling; global current remains safety-capped. */
-    writeBuffer[0] = (UCHAR)(0x4au + request->Led * 3u);
+    writeBuffer[0] = (UCHAR)(0x4au + physicalLed * 3u);
     writeBuffer[1] = 0xffu;
     writeBuffer[2] = 0xffu;
     writeBuffer[3] = 0xffu;
     status = TimeCardI2cWriteLocked(
-        context, TIMECARD_LED_ADDRESS, writeBuffer, 4,
+        context, address, writeBuffer, 4,
         &controllerStatus, &interruptStatus);
     if (!NT_SUCCESS(status))
         goto Exit;
 
-    writeBuffer[0] = (UCHAR)(0x01u + request->Led * 6u);
-    writeBuffer[1] = (UCHAR)request->Red;
+    writeBuffer[0] = (UCHAR)(0x01u + physicalLed * 6u);
+    writeBuffer[1] = TimeCardLedUsesLegacyWiring(context) ?
+        (UCHAR)request->Green : (UCHAR)request->Red;
     writeBuffer[2] = 0;
-    writeBuffer[3] = (UCHAR)request->Green;
+    writeBuffer[3] = TimeCardLedUsesLegacyWiring(context) ?
+        (UCHAR)request->Red : (UCHAR)request->Green;
     writeBuffer[4] = 0;
     writeBuffer[5] = (UCHAR)request->Blue;
     writeBuffer[6] = 0;
     status = TimeCardI2cWriteLocked(
-        context, TIMECARD_LED_ADDRESS, writeBuffer, sizeof(writeBuffer),
+        context, address, writeBuffer, sizeof(writeBuffer),
         &controllerStatus, &interruptStatus);
     if (!NT_SUCCESS(status))
         goto Exit;
@@ -1107,7 +1448,7 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
     writeBuffer[0] = 0x49u;
     writeBuffer[1] = 0;
     status = TimeCardI2cWriteLocked(
-        context, TIMECARD_LED_ADDRESS, writeBuffer, 2,
+        context, address, writeBuffer, 2,
         &controllerStatus, &interruptStatus);
     if (!NT_SUCCESS(status))
         goto Exit;
@@ -1116,13 +1457,64 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
      * DCPWM is a guarded electrical diagnostic.  0x60 forces OUT1-18 on
      * independently of the PWM/update path; normal requests explicitly
      * return the device to PWM mode.
-     */
+    */
     writeBuffer[0] = 0x78u;
-    writeBuffer[1] =
+    expectedSpread =
         (request->Flags & TIMECARD_LED_FLAG_DC_TEST) != 0 ? 0x60u : 0x00u;
+    writeBuffer[1] = expectedSpread;
     status = TimeCardI2cWriteLocked(
-        context, TIMECARD_LED_ADDRESS, writeBuffer, 2,
+        context, address, writeBuffer, 2,
         &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+
+    /*
+     * Do not report a successful LED operation unless the IS32FL3207
+     * actually retained every setting that controls visible output.
+     */
+    status = TimeCardI2cReadBytesLocked(
+        context, address, 1, 0x00u, &readControl, 1,
+        &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    status = TimeCardI2cReadBytesLocked(
+        context, address, 1, 0x6eu, &readCurrent, 1,
+        &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    status = TimeCardI2cReadBytesLocked(
+        context, address, 1, 0x4au + physicalLed * 3u,
+        readScaling, sizeof(readScaling),
+        &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    status = TimeCardI2cReadBytesLocked(
+        context, address, 1, 0x01u + physicalLed * 6u,
+        readPwm, sizeof(readPwm),
+        &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    status = TimeCardI2cReadBytesLocked(
+        context, address, 1, 0x78u, &readSpread, 1,
+        &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    if ((readControl & 0x01u) == 0 ||
+        readCurrent != (UCHAR)request->GlobalCurrent ||
+        readScaling[0] != 0xffu || readScaling[1] != 0xffu ||
+        readScaling[2] != 0xffu ||
+        readPwm[0] != (TimeCardLedUsesLegacyWiring(context) ?
+            (UCHAR)request->Green : (UCHAR)request->Red) ||
+        readPwm[1] != 0 ||
+        readPwm[2] != (TimeCardLedUsesLegacyWiring(context) ?
+            (UCHAR)request->Red : (UCHAR)request->Green) ||
+        readPwm[3] != 0 ||
+        readPwm[4] != (UCHAR)request->Blue || readPwm[5] != 0 ||
+        (readSpread & 0x60u) != expectedSpread) {
+        status = STATUS_DEVICE_DATA_ERROR;
+        goto Exit;
+    }
+
     if (NT_SUCCESS(status)) {
         response->Flags = TIMECARD_LED_FLAG_PRESENT |
                           TIMECARD_LED_FLAG_ENABLED;
@@ -1132,12 +1524,17 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
             response->Flags |= TIMECARD_LED_FLAG_RESET_TEST;
         if (sdbHigh)
             response->Flags |= TIMECARD_LED_FLAG_SDB_HIGH;
-        response->Red = request->Red;
-        response->Green = request->Green;
-        response->Blue = request->Blue;
-        response->GlobalCurrent = request->GlobalCurrent;
+        if (TimeCardLedUsesLegacyWiring(context)) {
+            response->Red = readPwm[2];
+            response->Green = readPwm[0];
+        } else {
+            response->Red = readPwm[0];
+            response->Green = readPwm[2];
+        }
+        response->Blue = readPwm[4];
+        response->GlobalCurrent = readCurrent;
         faultStatus = TimeCardLedDetectFaultsLocked(
-            context, &openMask, &shortMask,
+            context, address, &openMask, &shortMask,
             &controllerStatus, &interruptStatus);
         if (NT_SUCCESS(faultStatus)) {
             response->Flags |= TIMECARD_LED_FLAG_FAULT_VALID;
@@ -1154,15 +1551,6 @@ Exit:
     response->InterruptStatus = interruptStatus;
     WdfWaitLockRelease(context->RegisterLock);
     return status;
-}
-
-static VOID
-TimeCardSensorDelayMilliseconds(ULONG milliseconds)
-{
-    LARGE_INTEGER interval;
-
-    interval.QuadPart = -((LONGLONG)milliseconds * 10000ll);
-    (VOID)KeDelayExecutionThread(KernelMode, FALSE, &interval);
 }
 
 static USHORT
@@ -1200,30 +1588,37 @@ TimeCardBme280ReadLocked(PDEVICE_CONTEXT context,
     UCHAR calibration2[7];
     UCHAR data[8];
     UCHAR writeBuffer[2];
+    ULONG address = 0;
+    ULONG dataLength;
     ULONG index;
     NTSTATUS status;
 
     reading->Size = sizeof(*reading);
-    status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BME280_ADDRESS, 1, 0xd0u,
-        &chipId, 1, controllerStatus, interruptStatus);
-    if (!NT_SUCCESS(status) || chipId != 0x60u)
+    status = TimeCardEnvironmentResolveAddressLocked(
+        context, &address, &chipId, controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
         return;
     reading->ChipId = chipId;
     reading->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
+    if (chipId == 0x60u)
+        reading->Flags |= TIMECARD_SENSOR_FLAG_HUMIDITY;
 
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BME280_ADDRESS, 1, 0x88u,
+        context, address, 1, 0x88u,
         calibration1, sizeof(calibration1),
         controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
-    status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BME280_ADDRESS, 1, 0xe1u,
-        calibration2, sizeof(calibration2),
-        controllerStatus, interruptStatus);
-    if (!NT_SUCCESS(status))
-        return;
+    if (chipId == 0x60u) {
+        status = TimeCardI2cReadBytesLocked(
+            context, address, 1, 0xe1u,
+            calibration2, sizeof(calibration2),
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            return;
+    } else {
+        RtlZeroMemory(calibration2, sizeof(calibration2));
+    }
 
     reading->DigT1 = TimeCardSensorReadLe16(&calibration1[0]);
     reading->DigT2 = TimeCardSensorReadLeSigned16(&calibration1[2]);
@@ -1237,27 +1632,31 @@ TimeCardBme280ReadLocked(PDEVICE_CONTEXT context,
     reading->DigP7 = TimeCardSensorReadLeSigned16(&calibration1[18]);
     reading->DigP8 = TimeCardSensorReadLeSigned16(&calibration1[20]);
     reading->DigP9 = TimeCardSensorReadLeSigned16(&calibration1[22]);
-    reading->DigH1 = calibration1[25];
-    reading->DigH2 = TimeCardSensorReadLeSigned16(&calibration2[0]);
-    reading->DigH3 = calibration2[2];
-    reading->DigH4 = (LONG)(CHAR)calibration2[3] * 16L +
-                     (LONG)(calibration2[4] & 0x0fu);
-    reading->DigH5 = (LONG)(CHAR)calibration2[5] * 16L +
-                     (LONG)(calibration2[4] >> 4);
-    reading->DigH6 = (LONG)(CHAR)calibration2[6];
+    if (chipId == 0x60u) {
+        reading->DigH1 = calibration1[25];
+        reading->DigH2 = TimeCardSensorReadLeSigned16(&calibration2[0]);
+        reading->DigH3 = calibration2[2];
+        reading->DigH4 = (LONG)(CHAR)calibration2[3] * 16L +
+                         (LONG)(calibration2[4] & 0x0fu);
+        reading->DigH5 = (LONG)(CHAR)calibration2[5] * 16L +
+                         (LONG)(calibration2[4] >> 4);
+        reading->DigH6 = (LONG)(CHAR)calibration2[6];
+    }
 
-    /* Humidity x1, temperature x2, pressure x4, one forced sample. */
-    writeBuffer[0] = 0xf2u;
-    writeBuffer[1] = 0x01u;
-    status = TimeCardI2cWriteLocked(
-        context, TIMECARD_SENSOR_BME280_ADDRESS, writeBuffer, 2,
-        controllerStatus, interruptStatus);
-    if (!NT_SUCCESS(status))
-        return;
+    /* Temperature x2, pressure x4, plus humidity x1 when BME280 is fitted. */
+    if (chipId == 0x60u) {
+        writeBuffer[0] = 0xf2u;
+        writeBuffer[1] = 0x01u;
+        status = TimeCardI2cWriteLocked(
+            context, address, writeBuffer, 2,
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            return;
+    }
     writeBuffer[0] = 0xf4u;
     writeBuffer[1] = 0x4du;
     status = TimeCardI2cWriteLocked(
-        context, TIMECARD_SENSOR_BME280_ADDRESS, writeBuffer, 2,
+        context, address, writeBuffer, 2,
         controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
@@ -1266,7 +1665,7 @@ TimeCardBme280ReadLocked(PDEVICE_CONTEXT context,
     for (index = 0; index < 20u; ++index) {
         TimeCardSensorDelayMilliseconds(5u);
         status = TimeCardI2cReadBytesLocked(
-            context, TIMECARD_SENSOR_BME280_ADDRESS, 1, 0xf3u,
+            context, address, 1, 0xf3u,
             &statusByte, 1, controllerStatus, interruptStatus);
         if (!NT_SUCCESS(status))
             return;
@@ -1277,9 +1676,11 @@ TimeCardBme280ReadLocked(PDEVICE_CONTEXT context,
     if ((statusByte & 0x08u) == 0)
         reading->Flags |= TIMECARD_SENSOR_FLAG_CONVERSION_READY;
 
+    dataLength = chipId == 0x60u ? sizeof(data) : 6u;
+    RtlZeroMemory(data, sizeof(data));
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BME280_ADDRESS, 1, 0xf7u,
-        data, sizeof(data), controllerStatus, interruptStatus);
+        context, address, 1, 0xf7u,
+        data, dataLength, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
     reading->RawPressure = ((ULONG)data[0] << 12) |
@@ -1288,7 +1689,8 @@ TimeCardBme280ReadLocked(PDEVICE_CONTEXT context,
     reading->RawTemperature = (LONG)(((ULONG)data[3] << 12) |
                                     ((ULONG)data[4] << 4) |
                                     ((ULONG)data[5] >> 4));
-    reading->RawHumidity = ((ULONG)data[6] << 8) | data[7];
+    if (chipId == 0x60u)
+        reading->RawHumidity = ((ULONG)data[6] << 8) | data[7];
     if ((ULONG)reading->RawTemperature != 0x80000u &&
         reading->RawPressure != 0x80000u) {
         reading->Flags |= TIMECARD_SENSOR_FLAG_VALID;
@@ -1301,7 +1703,9 @@ TimeCardIna219ReadLocked(PDEVICE_CONTEXT context, ULONG address,
                          ULONG *controllerStatus, ULONG *interruptStatus)
 {
     UCHAR data[2];
+    UCHAR writeBuffer[3];
     USHORT busRaw;
+    USHORT configuration;
     LONG shuntRaw;
     LONGLONG power;
     NTSTATUS status;
@@ -1314,7 +1718,39 @@ TimeCardIna219ReadLocked(PDEVICE_CONTEXT context, ULONG address,
     if (!NT_SUCCESS(status))
         return;
     reading->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
-    reading->Configuration = TimeCardSensorReadBe16(data);
+    configuration = TimeCardSensorReadBe16(data);
+
+    /*
+     * Some Time Card assemblies leave INA219 in its reset/power-down state.
+     * Program the same safe 32 V, +/-320 mV, 12-bit continuous bus+shunt
+     * configuration used by the device default before sampling.  This does
+     * not use the calibration/current registers; current remains derived from
+     * the schematic's 2 milliohm shunt voltage.
+     */
+    if (configuration != TIMECARD_INA219_CONFIGURATION) {
+        writeBuffer[0] = 0x00u;
+        writeBuffer[1] =
+            (UCHAR)(TIMECARD_INA219_CONFIGURATION >> 8);
+        writeBuffer[2] =
+            (UCHAR)(TIMECARD_INA219_CONFIGURATION & 0xffu);
+        status = TimeCardI2cWriteLocked(
+            context, address, writeBuffer, sizeof(writeBuffer),
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            return;
+        TimeCardSensorDelayMilliseconds(2u);
+        status = TimeCardI2cReadBytesLocked(
+            context, address, 1, 0x00u, data, 2,
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            return;
+        configuration = TimeCardSensorReadBe16(data);
+        if (configuration != TIMECARD_INA219_CONFIGURATION)
+            return;
+    }
+    reading->Configuration = configuration;
+    reading->Flags |= TIMECARD_SENSOR_FLAG_CONFIGURED;
+    TimeCardSensorDelayMilliseconds(2u);
     status = TimeCardI2cReadBytesLocked(
         context, address, 1, 0x01u, data, 2,
         controllerStatus, interruptStatus);
@@ -1340,12 +1776,316 @@ TimeCardIna219ReadLocked(PDEVICE_CONTEXT context, ULONG address,
     else if (power < (-2147483647ll - 1ll))
         power = (-2147483647ll - 1ll);
     reading->PowerMilliwatts = (LONG)power;
-    reading->Flags |= TIMECARD_SENSOR_FLAG_VALID |
-                      TIMECARD_SENSOR_FLAG_CONFIGURED;
+    reading->Flags |= TIMECARD_SENSOR_FLAG_VALID;
     if ((busRaw & 0x0002u) != 0)
         reading->Flags |= TIMECARD_SENSOR_FLAG_CONVERSION_READY;
     if ((busRaw & 0x0001u) != 0)
         reading->Flags |= TIMECARD_SENSOR_FLAG_OVERFLOW;
+}
+
+static LONG
+TimeCardBno08xQ8ToCenti(SHORT value)
+{
+    LONG scaled = (LONG)value * 100L;
+
+    scaled += scaled >= 0 ? 128L : -128L;
+    return scaled / 256L;
+}
+
+static LONG
+TimeCardBno08xQ9ToDegrees16(SHORT value)
+{
+    /*
+     * BNO08x calibrated gyro is Q9 radians/second.  The existing ABI carries
+     * BNO055-compatible degrees/second at 16 LSB/degree, so convert using
+     * 16 * 180 / (pi * 512), rounded with a fixed-point rational.
+     */
+    LONGLONG scaled = (LONGLONG)value * 17905ll;
+
+    scaled += scaled >= 0 ? 5000ll : -5000ll;
+    return (LONG)(scaled / 10000ll);
+}
+
+static NTSTATUS
+TimeCardBno08xResolveAddressLocked(PDEVICE_CONTEXT context, ULONG *address,
+                                   ULONG *controllerStatus,
+                                   ULONG *interruptStatus)
+{
+    static const ULONG candidates[] = {
+        TIMECARD_SENSOR_BNO08X_ADDRESS,
+        TIMECARD_SENSOR_BNO08X_ADDRESS_ALTERNATE
+    };
+    UCHAR header[4];
+    ULONG i;
+    NTSTATUS status = STATUS_NO_SUCH_DEVICE;
+
+    if (context->I2cImuType == TIMECARD_IMU_TYPE_BNO08X &&
+        (context->I2cImuAddress == TIMECARD_SENSOR_BNO08X_ADDRESS ||
+         context->I2cImuAddress ==
+             TIMECARD_SENSOR_BNO08X_ADDRESS_ALTERNATE)) {
+        *address = context->I2cImuAddress;
+        return STATUS_SUCCESS;
+    }
+
+    for (i = 0; i < ARRAYSIZE(candidates); ++i) {
+        status = TimeCardI2cReadBytesLocked(
+            context, candidates[i], 0, 0, header, sizeof(header),
+            controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status) && TimeCardBno08xHeaderValid(header)) {
+            context->I2cImuType = TIMECARD_IMU_TYPE_BNO08X;
+            context->I2cImuAddress = candidates[i];
+            *address = candidates[i];
+            return STATUS_SUCCESS;
+        }
+    }
+    return status;
+}
+
+static NTSTATUS
+TimeCardBno08xReadTransferLocked(PDEVICE_CONTEXT context, ULONG address,
+                                 UCHAR *data, ULONG *dataLength,
+                                 ULONG *controllerStatus,
+                                 ULONG *interruptStatus)
+{
+    UCHAR header[4];
+    ULONG length;
+    NTSTATUS status;
+
+    *dataLength = 0;
+    status = TimeCardI2cReadBytesLocked(
+        context, address, 0, 0, header, sizeof(header),
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return status;
+    if (!TimeCardBno08xHeaderValid(header))
+        return STATUS_DEVICE_DATA_ERROR;
+
+    length = (ULONG)header[0] | (((ULONG)header[1] & 0x7fu) << 8);
+    if (length > TIMECARD_I2C_MAX_TRANSFER)
+        length = TIMECARD_I2C_MAX_TRANSFER;
+    status = TimeCardI2cReadBytesLocked(
+        context, address, 0, 0, data, length,
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return status;
+    if (length < 4u || !TimeCardBno08xHeaderValid(data))
+        return STATUS_DEVICE_DATA_ERROR;
+    *dataLength = length;
+    return STATUS_SUCCESS;
+}
+
+static NTSTATUS
+TimeCardBno08xSetFeatureLocked(PDEVICE_CONTEXT context, ULONG address,
+                               UCHAR reportId, ULONG intervalMicroseconds,
+                               ULONG *controllerStatus,
+                               ULONG *interruptStatus)
+{
+    UCHAR packet[21];
+
+    RtlZeroMemory(packet, sizeof(packet));
+    packet[0] = (UCHAR)sizeof(packet);
+    packet[1] = 0;
+    packet[2] = TIMECARD_BNO08X_CHANNEL_CONTROL;
+    packet[3] = (UCHAR)context->I2cBno08xSequence++;
+    packet[4] = TIMECARD_BNO08X_SET_FEATURE;
+    packet[5] = reportId;
+    packet[9] = (UCHAR)(intervalMicroseconds & 0xffu);
+    packet[10] = (UCHAR)((intervalMicroseconds >> 8) & 0xffu);
+    packet[11] = (UCHAR)((intervalMicroseconds >> 16) & 0xffu);
+    packet[12] = (UCHAR)((intervalMicroseconds >> 24) & 0xffu);
+    return TimeCardI2cWriteLocked(
+        context, address, packet, sizeof(packet),
+        controllerStatus, interruptStatus);
+}
+
+static NTSTATUS
+TimeCardBno08xConfigureLocked(PDEVICE_CONTEXT context, ULONG address,
+                              ULONG *controllerStatus,
+                              ULONG *interruptStatus)
+{
+    static const UCHAR reports[] = {
+        TIMECARD_BNO08X_ACCELEROMETER,
+        TIMECARD_BNO08X_GYROSCOPE,
+        TIMECARD_BNO08X_MAGNETIC_FIELD,
+        TIMECARD_BNO08X_LINEAR_ACCELERATION,
+        TIMECARD_BNO08X_ROTATION_VECTOR,
+        TIMECARD_BNO08X_GRAVITY
+    };
+    UCHAR discard[TIMECARD_I2C_MAX_TRANSFER];
+    ULONG discardLength;
+    ULONG i;
+    NTSTATUS status;
+
+    /*
+     * Remove boot advertisements and reset notifications so the first live
+     * sample does not sit behind a multi-fragment SHTP descriptor.
+     */
+    for (i = 0; i < 12u; ++i) {
+        status = TimeCardBno08xReadTransferLocked(
+            context, address, discard, &discardLength,
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            break;
+    }
+
+    for (i = 0; i < ARRAYSIZE(reports); ++i) {
+        status = TimeCardBno08xSetFeatureLocked(
+            context, address, reports[i],
+            TIMECARD_BNO08X_REPORT_INTERVAL_US,
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            return status;
+        TimeCardSensorDelayMilliseconds(1u);
+    }
+    context->I2cBno08xConfigured = 1;
+    TimeCardSensorDelayMilliseconds(300u);
+    return STATUS_SUCCESS;
+}
+
+static VOID
+TimeCardBno08xParseReports(TIMECARD_BNO055_READING *reading,
+                           const UCHAR *payload, ULONG length)
+{
+    ULONG cursor = 0;
+    BOOLEAN valid = FALSE;
+
+    while (cursor < length) {
+        UCHAR reportId = payload[cursor];
+        ULONG reportLength;
+        ULONG accuracy;
+
+        if (reportId == TIMECARD_BNO08X_BASE_TIMESTAMP)
+            reportLength = 5u;
+        else if (reportId == TIMECARD_BNO08X_ROTATION_VECTOR)
+            reportLength = 14u;
+        else if (reportId >= TIMECARD_BNO08X_ACCELEROMETER &&
+                 reportId <= TIMECARD_BNO08X_GRAVITY)
+            reportLength = 10u;
+        else
+            break;
+        if (cursor + reportLength > length)
+            break;
+        if (reportId == TIMECARD_BNO08X_BASE_TIMESTAMP) {
+            cursor += reportLength;
+            continue;
+        }
+
+        accuracy = payload[cursor + 2u] & 0x03u;
+        if (reportId == TIMECARD_BNO08X_ACCELEROMETER) {
+            reading->AccelerationX = TimeCardBno08xQ8ToCenti(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 4u]));
+            reading->AccelerationY = TimeCardBno08xQ8ToCenti(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 6u]));
+            reading->AccelerationZ = TimeCardBno08xQ8ToCenti(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 8u]));
+            reading->Calibration =
+                (reading->Calibration & ~(3u << 2)) | (accuracy << 2);
+            valid = TRUE;
+        } else if (reportId == TIMECARD_BNO08X_GYROSCOPE) {
+            reading->GyroscopeX = TimeCardBno08xQ9ToDegrees16(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 4u]));
+            reading->GyroscopeY = TimeCardBno08xQ9ToDegrees16(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 6u]));
+            reading->GyroscopeZ = TimeCardBno08xQ9ToDegrees16(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 8u]));
+            reading->Calibration =
+                (reading->Calibration & ~(3u << 4)) | (accuracy << 4);
+            valid = TRUE;
+        } else if (reportId == TIMECARD_BNO08X_MAGNETIC_FIELD) {
+            reading->MagneticX = TimeCardSensorReadLeSigned16(
+                &payload[cursor + 4u]);
+            reading->MagneticY = TimeCardSensorReadLeSigned16(
+                &payload[cursor + 6u]);
+            reading->MagneticZ = TimeCardSensorReadLeSigned16(
+                &payload[cursor + 8u]);
+            reading->Calibration =
+                (reading->Calibration & ~3u) | accuracy;
+            valid = TRUE;
+        } else if (reportId == TIMECARD_BNO08X_LINEAR_ACCELERATION) {
+            reading->LinearAccelerationX = TimeCardBno08xQ8ToCenti(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 4u]));
+            reading->LinearAccelerationY = TimeCardBno08xQ8ToCenti(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 6u]));
+            reading->LinearAccelerationZ = TimeCardBno08xQ8ToCenti(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 8u]));
+            valid = TRUE;
+        } else if (reportId == TIMECARD_BNO08X_ROTATION_VECTOR) {
+            reading->QuaternionX = TimeCardSensorReadLeSigned16(
+                &payload[cursor + 4u]);
+            reading->QuaternionY = TimeCardSensorReadLeSigned16(
+                &payload[cursor + 6u]);
+            reading->QuaternionZ = TimeCardSensorReadLeSigned16(
+                &payload[cursor + 8u]);
+            reading->QuaternionW = TimeCardSensorReadLeSigned16(
+                &payload[cursor + 10u]);
+            reading->Calibration =
+                (reading->Calibration & ~(3u << 6)) | (accuracy << 6);
+            valid = TRUE;
+        } else if (reportId == TIMECARD_BNO08X_GRAVITY) {
+            reading->GravityX = TimeCardBno08xQ8ToCenti(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 4u]));
+            reading->GravityY = TimeCardBno08xQ8ToCenti(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 6u]));
+            reading->GravityZ = TimeCardBno08xQ8ToCenti(
+                (SHORT)TimeCardSensorReadLe16(&payload[cursor + 8u]));
+            valid = TRUE;
+        }
+        cursor += reportLength;
+    }
+
+    if (valid)
+        reading->Flags |= TIMECARD_SENSOR_FLAG_VALID;
+}
+
+static VOID
+TimeCardBno08xReadLocked(PDEVICE_CONTEXT context,
+                         TIMECARD_BNO055_READING *reading,
+                         ULONG *controllerStatus, ULONG *interruptStatus)
+{
+    UCHAR packet[TIMECARD_I2C_MAX_TRANSFER];
+    ULONG address = 0;
+    ULONG packetLength;
+    ULONG i;
+    NTSTATUS status;
+
+    reading->Size = sizeof(*reading);
+    status = TimeCardBno08xResolveAddressLocked(
+        context, &address, controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return;
+
+    reading->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
+    reading->ChipId = TIMECARD_SENSOR_BNO08X_CHIP_ID;
+    reading->OperationMode = TIMECARD_BNO08X_CHANNEL_REPORTS;
+    reading->UnitSelection = 0;
+    reading->SystemStatus = 1;
+    reading->SystemError = 0;
+
+    if (context->I2cBno08xConfigured == 0) {
+        status = TimeCardBno08xConfigureLocked(
+            context, address, controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            return;
+    }
+    reading->Flags |= TIMECARD_SENSOR_FLAG_CONFIGURED;
+
+    for (i = 0; i < 32u; ++i) {
+        status = TimeCardBno08xReadTransferLocked(
+            context, address, packet, &packetLength,
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            break;
+        if (packetLength >= 4u &&
+            packet[2] == TIMECARD_BNO08X_CHANNEL_REPORTS) {
+            /*
+             * I2C first returns a four-byte header.  The required second read
+             * repeats that header with SHTP's continuation bit set and carries
+             * the complete payload, so continuation is expected here.
+             */
+            TimeCardBno08xParseReports(
+                reading, &packet[4], packetLength - 4u);
+        }
+    }
 }
 
 static VOID
@@ -1365,18 +2105,18 @@ TimeCardBno055ReadLocked(PDEVICE_CONTEXT context,
     UCHAR systemTrigger = 0;
     UCHAR data[45];
     UCHAR writeBuffer[2];
+    ULONG address = 0;
     NTSTATUS status;
 
     reading->Size = sizeof(*reading);
-    status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x00u,
-        &chipId, 1, controllerStatus, interruptStatus);
-    if (!NT_SUCCESS(status) || chipId != 0xa0u)
+    status = TimeCardImuResolveAddressLocked(
+        context, &address, &chipId, controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
         return;
     reading->ChipId = chipId;
     reading->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x3du,
+        context, address, 1, 0x3du,
         &operationMode, 1, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
@@ -1387,7 +2127,7 @@ TimeCardBno055ReadLocked(PDEVICE_CONTEXT context,
             writeBuffer[0] = 0x3du;
             writeBuffer[1] = 0x00u;
             status = TimeCardI2cWriteLocked(
-                context, TIMECARD_SENSOR_BNO055_ADDRESS,
+                context, address,
                 writeBuffer, 2, controllerStatus, interruptStatus);
             if (!NT_SUCCESS(status))
                 return;
@@ -1397,7 +2137,7 @@ TimeCardBno055ReadLocked(PDEVICE_CONTEXT context,
         writeBuffer[0] = 0x3bu;
         writeBuffer[1] = 0x80u;
         status = TimeCardI2cWriteLocked(
-            context, TIMECARD_SENSOR_BNO055_ADDRESS,
+            context, address,
             writeBuffer, 2, controllerStatus, interruptStatus);
         if (!NT_SUCCESS(status))
             return;
@@ -1405,7 +2145,7 @@ TimeCardBno055ReadLocked(PDEVICE_CONTEXT context,
         writeBuffer[0] = 0x3fu;
         writeBuffer[1] = 0x80u;
         status = TimeCardI2cWriteLocked(
-            context, TIMECARD_SENSOR_BNO055_ADDRESS,
+            context, address,
             writeBuffer, 2, controllerStatus, interruptStatus);
         if (!NT_SUCCESS(status))
             return;
@@ -1413,7 +2153,7 @@ TimeCardBno055ReadLocked(PDEVICE_CONTEXT context,
         writeBuffer[0] = 0x3du;
         writeBuffer[1] = 0x0cu;
         status = TimeCardI2cWriteLocked(
-            context, TIMECARD_SENSOR_BNO055_ADDRESS,
+            context, address,
             writeBuffer, 2, controllerStatus, interruptStatus);
         if (!NT_SUCCESS(status))
             return;
@@ -1422,47 +2162,47 @@ TimeCardBno055ReadLocked(PDEVICE_CONTEXT context,
     }
 
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x08u,
+        context, address, 1, 0x08u,
         data, sizeof(data), controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x35u,
+        context, address, 1, 0x35u,
         &calibration, 1, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x36u,
+        context, address, 1, 0x36u,
         &selfTest, 1, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x38u,
+        context, address, 1, 0x38u,
         &clockStatus, 1, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x39u,
+        context, address, 1, 0x39u,
         &systemStatus, 1, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x3au,
+        context, address, 1, 0x3au,
         &systemError, 1, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x3bu,
+        context, address, 1, 0x3bu,
         &unitSelection, 1, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x3eu,
+        context, address, 1, 0x3eu,
         &powerMode, 1, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
     status = TimeCardI2cReadBytesLocked(
-        context, TIMECARD_SENSOR_BNO055_ADDRESS, 1, 0x3fu,
+        context, address, 1, 0x3fu,
         &systemTrigger, 1, controllerStatus, interruptStatus);
     if (!NT_SUCCESS(status))
         return;
@@ -1556,9 +2296,21 @@ TimeCardSensorQuery(PDEVICE_CONTEXT context,
     TimeCardIna219ReadLocked(
         context, TIMECARD_SENSOR_INA219_3V3_ADDRESS,
         &telemetry->Rail3V3, &controllerStatus, &interruptStatus);
-    TimeCardBno055ReadLocked(
-        context, &telemetry->Imu,
-        &controllerStatus, &interruptStatus);
+    if (context->I2cImuType == TIMECARD_IMU_TYPE_BNO08X) {
+        TimeCardBno08xReadLocked(
+            context, &telemetry->Imu,
+            &controllerStatus, &interruptStatus);
+    } else {
+        TimeCardBno055ReadLocked(
+            context, &telemetry->Imu,
+            &controllerStatus, &interruptStatus);
+        if ((telemetry->Imu.Flags &
+             TIMECARD_SENSOR_FLAG_PRESENT) == 0) {
+            TimeCardBno08xReadLocked(
+                context, &telemetry->Imu,
+                &controllerStatus, &interruptStatus);
+        }
+    }
     telemetry->Flags |= TIMECARD_SENSOR_FLAG_VALID;
 
 Exit:

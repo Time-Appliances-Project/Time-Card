@@ -162,6 +162,9 @@ TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
     context->I2cKnownDeviceMask = 0;
     context->I2cLastStartTrace = 0;
     context->I2cLastStartEvents = 0;
+    context->I2cLedAddress = 0;
+    context->I2cEnvironmentAddress = 0;
+    context->I2cImuAddress = 0;
     context->FlashJedecId = 0;
     context->FlashCapacity = 0;
     context->FlashFifoDepth = 0;
@@ -324,6 +327,9 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
     context->I2cKnownDeviceMask = 0;
     context->I2cLastStartTrace = 0;
     context->I2cLastStartEvents = 0;
+    context->I2cLedAddress = 0;
+    context->I2cEnvironmentAddress = 0;
+    context->I2cImuAddress = 0;
     context->Flash = NULL;
     context->FlashJedecId = 0;
     context->FlashCapacity = 0;

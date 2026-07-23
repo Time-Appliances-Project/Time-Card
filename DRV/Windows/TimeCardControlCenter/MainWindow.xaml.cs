@@ -4243,12 +4243,25 @@ namespace TimeCardControlCenter
                 out led) ? led : 0u;
         }
 
-        private static string DescribeBoardLedFaults(BoardLedState state)
+        private uint BoardLedPhysicalIndex(uint logicalLed)
+        {
+            if (lastSnapshot == null ||
+                !string.Equals(lastSnapshot.Layout, "MSI",
+                    StringComparison.OrdinalIgnoreCase))
+                return logicalLed;
+            return logicalLed == 0 ? 4u :
+                logicalLed == 1 ? 5u :
+                logicalLed == 4 ? 0u :
+                logicalLed == 5 ? 1u : logicalLed;
+        }
+
+        private string DescribeBoardLedFaults(BoardLedState state)
         {
             if (!state.HasFaultDiagnostics)
                 return "hardware fault diagnostics unavailable";
 
-            uint channelMask = 7u << ((int)state.Led * 3);
+            uint physicalLed = BoardLedPhysicalIndex(state.Led);
+            uint channelMask = 7u << ((int)physicalLed * 3);
             uint open = state.OpenOutputMask & channelMask;
             uint shorted = state.ShortOutputMask & channelMask;
             if (open == 0 && shorted == 0)
@@ -4263,11 +4276,12 @@ namespace TimeCardControlCenter
                     "short-output mask 0x{0:X5}", state.ShortOutputMask);
         }
 
-        private static bool HasBoardLedFault(BoardLedState state)
+        private bool HasBoardLedFault(BoardLedState state)
         {
             if (!state.HasFaultDiagnostics)
                 return false;
-            uint channelMask = 7u << ((int)state.Led * 3);
+            uint physicalLed = BoardLedPhysicalIndex(state.Led);
+            uint channelMask = 7u << ((int)physicalLed * 3);
             return ((state.OpenOutputMask | state.ShortOutputMask) &
                     channelMask) != 0;
         }
@@ -5845,24 +5859,31 @@ namespace TimeCardControlCenter
             EnvironmentSensorReading environment = telemetry.Environment;
             if (environment.IsValid)
             {
+                string sensorName = environment.ChipId == 0x58u ?
+                    "BMP280" : "BME280";
                 BmeTemperatureText.Text = environment.TemperatureCelsius.ToString(
                     "F1", CultureInfo.InvariantCulture) + " °C";
-                BmeHumidityText.Text = environment.HumidityPercent.ToString(
-                    "F1", CultureInfo.InvariantCulture) + " %";
+                BmeHumidityText.Text = environment.HasHumidity ?
+                    environment.HumidityPercent.ToString(
+                        "F1", CultureInfo.InvariantCulture) + " %" :
+                    "N/A";
                 BmePressureText.Text = environment.PressureHectopascals.ToString(
                     "F1", CultureInfo.InvariantCulture) + " hPa";
-                BmeDewPointText.Text = environment.DewPointCelsius.ToString(
-                    "F1", CultureInfo.InvariantCulture) + " °C";
+                BmeDewPointText.Text = environment.HasHumidity ?
+                    environment.DewPointCelsius.ToString(
+                        "F1", CultureInfo.InvariantCulture) + " °C" :
+                    "N/A";
                 BmeDetailText.Text = string.Format(CultureInfo.InvariantCulture,
-                    "BME280 · 0x76 · ID 0x{0:X2} · {1}", environment.ChipId,
+                    "{0} · AUTO ADDRESS · ID 0x{1:X2} · {2}", sensorName,
+                    environment.ChipId,
                     environment.IsConversionReady ? "READY" : "CONVERTING");
                 BmeDetailText.Foreground = healthy;
             }
             else
             {
                 SetEnvironmentUnavailable(environment.IsPresent ?
-                    "BME280 · 0x76 · INVALID SAMPLE" :
-                    "BME280 · 0x76 · NOT PRESENT");
+                    "BME280/BMP280 · 0x76/0x77 · INVALID SAMPLE" :
+                    "BME280/BMP280 · 0x76/0x77 · NOT PRESENT");
             }
 
             ApplyPowerRail(telemetry.Rail12V, Rail12VoltageText,
@@ -5927,6 +5948,9 @@ namespace TimeCardControlCenter
         {
             Brush healthy = (Brush)FindResource("AccentBrush");
             Brush warning = (Brush)FindResource("GoldBrush");
+            bool isBno08x = imu.ChipId == 0x80u;
+            string imuName = isBno08x ? "BNO08x" : "BNO055";
+            string imuAddress = isBno08x ? "0x4A" : "0x29";
             if (!imu.IsValid)
             {
                 ImuHeadingText.Text = "—°";
@@ -5947,8 +5971,8 @@ namespace TimeCardControlCenter
                     "NOT PRESENT";
                 ImuStatusText.Foreground = warning;
                 ImuDetailText.Text = imu.IsPresent ?
-                    "BNO055 · 0x29 · INITIALIZING" :
-                    "BNO055 · 0x29 · NOT PRESENT";
+                    imuName + " · " + imuAddress + " · INITIALIZING" :
+                    "BNO055/BNO08x · AUTO ROUTE · NOT PRESENT";
                 ImuDetailText.Foreground = warning;
                 ImuRawStatusText.Text = string.Format(CultureInfo.InvariantCulture,
                     "Mode 0x{0:X2} · Status 0x{1:X2}",
@@ -5966,8 +5990,9 @@ namespace TimeCardControlCenter
             ImuQuaternionText.Text = string.Format(CultureInfo.InvariantCulture,
                 "{0:F4}, {1:F4}, {2:F4}, {3:F4}", imu.QuaternionW,
                 imu.QuaternionX, imu.QuaternionY, imu.QuaternionZ);
-            ImuTemperatureText.Text = imu.TemperatureCelsius.ToString("F1",
-                CultureInfo.InvariantCulture) + " °C";
+            ImuTemperatureText.Text = isBno08x ? "— °C" :
+                imu.TemperatureCelsius.ToString("F1",
+                    CultureInfo.InvariantCulture) + " °C";
             ImuSystemCalibrationText.Text = imu.SystemCalibration + "/3";
             ImuGyroCalibrationText.Text = imu.GyroscopeCalibration + "/3";
             ImuAccelCalibrationText.Text = imu.AccelerometerCalibration + "/3";
@@ -5978,18 +6003,22 @@ namespace TimeCardControlCenter
             ImuLinearAccelerationText.Text =
                 FormatSensorVector(imu.LinearAcceleration);
             ImuGravityText.Text = FormatSensorVector(imu.Gravity);
-            ImuStatusText.Text = imu.SystemError == 0 ? "FUSION LIVE" :
+            ImuStatusText.Text = imu.SystemError == 0 ?
+                (isBno08x ? "SHTP LIVE" : "FUSION LIVE") :
                 "SYSTEM ERROR";
             ImuStatusText.Foreground = imu.SystemError == 0 ? healthy : warning;
             ImuDetailText.Text = string.Format(CultureInfo.InvariantCulture,
-                "BNO055 · 0x29 · ID 0x{0:X2} · NDOF", imu.ChipId);
+                "{0} · {1} · ID 0x{2:X2} · {3}", imuName, imuAddress,
+                imu.ChipId, isBno08x ? "SH-2 FUSION" : "NDOF");
             ImuDetailText.Foreground = healthy;
             ImuRawStatusText.Text = string.Format(CultureInfo.InvariantCulture,
                 "Mode 0x{0:X2} · Status 0x{1:X2} · Error 0x{2:X2}",
                 imu.OperationMode, imu.SystemStatus, imu.SystemError);
-            ImuClockText.Text = imu.UsesExternalClock ?
-                "External 32.768 kHz crystal active" :
-                "Internal clock active";
+            ImuClockText.Text = isBno08x ?
+                "SHTP sensor hub · mux route auto-detected" :
+                imu.UsesExternalClock ?
+                    "External 32.768 kHz crystal active" :
+                    "Internal clock active";
         }
 
         private static string FormatSensorVector(SensorVector3 vector)

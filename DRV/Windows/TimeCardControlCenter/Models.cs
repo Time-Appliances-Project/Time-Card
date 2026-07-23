@@ -576,6 +576,7 @@ namespace TimeCardControlCenter
             IsValid = (value.Flags & 2u) != 0;
             IsConfigured = (value.Flags & 4u) != 0;
             IsConversionReady = (value.Flags & 8u) != 0;
+            HasHumidity = (value.Flags & 64u) != 0;
             ChipId = value.ChipId;
             Status = value.Status;
             if (!IsValid || value.DigT1 == 0 || value.DigP1 == 0)
@@ -608,21 +609,24 @@ namespace TimeCardControlCenter
                     Math.Min(110000.0, pressure)) / 100.0;
             }
 
-            var1 = tFine - 76800.0;
-            var2 = value.DigH4 * 64.0 + value.DigH5 / 16384.0 * var1;
-            var3 = value.RawHumidity - var2;
-            double var4 = value.DigH2 / 65536.0;
-            double var5 = 1.0 + value.DigH3 / 67108864.0 * var1;
-            double var6 = 1.0 + value.DigH6 / 67108864.0 * var1 * var5;
-            var6 = var3 * var4 * (var5 * var6);
-            HumidityPercent = Math.Max(0.0, Math.Min(100.0,
-                var6 * (1.0 - value.DigH1 * var6 / 524288.0)));
-            if (HumidityPercent > 0.0)
+            if (HasHumidity)
             {
-                double gamma = Math.Log(HumidityPercent / 100.0) +
-                    17.62 * TemperatureCelsius /
-                    (243.12 + TemperatureCelsius);
-                DewPointCelsius = 243.12 * gamma / (17.62 - gamma);
+                var1 = tFine - 76800.0;
+                var2 = value.DigH4 * 64.0 + value.DigH5 / 16384.0 * var1;
+                var3 = value.RawHumidity - var2;
+                double var4 = value.DigH2 / 65536.0;
+                double var5 = 1.0 + value.DigH3 / 67108864.0 * var1;
+                double var6 = 1.0 + value.DigH6 / 67108864.0 * var1 * var5;
+                var6 = var3 * var4 * (var5 * var6);
+                HumidityPercent = Math.Max(0.0, Math.Min(100.0,
+                    var6 * (1.0 - value.DigH1 * var6 / 524288.0)));
+                if (HumidityPercent > 0.0)
+                {
+                    double gamma = Math.Log(HumidityPercent / 100.0) +
+                        17.62 * TemperatureCelsius /
+                        (243.12 + TemperatureCelsius);
+                    DewPointCelsius = 243.12 * gamma / (17.62 - gamma);
+                }
             }
         }
 
@@ -630,6 +634,7 @@ namespace TimeCardControlCenter
         public bool IsValid { get; private set; }
         public bool IsConfigured { get; private set; }
         public bool IsConversionReady { get; private set; }
+        public bool HasHumidity { get; private set; }
         public uint ChipId { get; private set; }
         public uint Status { get; private set; }
         public double TemperatureCelsius { get; private set; }
@@ -729,6 +734,27 @@ namespace TimeCardControlCenter
             QuaternionX = value.QuaternionX / 16384.0;
             QuaternionY = value.QuaternionY / 16384.0;
             QuaternionZ = value.QuaternionZ / 16384.0;
+            if (ChipId == 0x80u)
+            {
+                double sinRoll = 2.0 * (QuaternionW * QuaternionX +
+                    QuaternionY * QuaternionZ);
+                double cosRoll = 1.0 - 2.0 *
+                    (QuaternionX * QuaternionX + QuaternionY * QuaternionY);
+                double sinPitch = 2.0 * (QuaternionW * QuaternionY -
+                    QuaternionZ * QuaternionX);
+                double sinYaw = 2.0 * (QuaternionW * QuaternionZ +
+                    QuaternionX * QuaternionY);
+                double cosYaw = 1.0 - 2.0 *
+                    (QuaternionY * QuaternionY + QuaternionZ * QuaternionZ);
+
+                RollDegrees = Math.Atan2(sinRoll, cosRoll) * 180.0 / Math.PI;
+                PitchDegrees = Math.Asin(Math.Max(-1.0,
+                    Math.Min(1.0, sinPitch))) * 180.0 / Math.PI;
+                HeadingDegrees = Math.Atan2(sinYaw, cosYaw) *
+                    180.0 / Math.PI;
+                if (HeadingDegrees < 0.0)
+                    HeadingDegrees += 360.0;
+            }
             LinearAcceleration = new SensorVector3(
                 value.LinearAccelerationX * accelerationScale,
                 value.LinearAccelerationY * accelerationScale,

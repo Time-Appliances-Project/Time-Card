@@ -175,6 +175,13 @@ typedef struct _DEVICE_CONTEXT {
     ULONG I2cKnownDeviceMask;
     ULONG I2cLastStartTrace;
     ULONG I2cLastStartEvents;
+    ULONG I2cLedAddress;
+    ULONG I2cEnvironmentAddress;
+    ULONG I2cImuAddress;
+    ULONG I2cSensorMuxMask;
+    ULONG I2cImuType;
+    ULONG I2cBno08xSequence;
+    ULONG I2cBno08xConfigured;
     ULONG FlashOffset;
     ULONG FlashJedecId;
     ULONG FlashCapacity;
