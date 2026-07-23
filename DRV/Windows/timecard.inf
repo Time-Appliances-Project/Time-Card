@@ -7,7 +7,7 @@ Class       = TimeCard
 ClassGuid   = {B5415088-5EE1-4D3A-8519-C3487370E0BF}
 Provider    = %ProviderName%
 CatalogFile = timecard.cat
-DriverVer   = 07/22/2026,1.23.0.0
+DriverVer   = 07/23/2026,1.24.0.0
 PnpLockdown = 1
 
 [ClassInstall32]
