@@ -686,6 +686,19 @@ cmd_sensors(HANDLE handle)
                (unsigned long)telemetry.Imu.ChipId,
                (unsigned long)telemetry.Imu.OperationMode,
                (unsigned long)telemetry.Imu.SystemError);
+        if ((telemetry.Imu.Flags &
+             TIMECARD_SENSOR_FLAG_TEMPERATURE) != 0) {
+            if ((telemetry.Imu.Flags &
+                 TIMECARD_SENSOR_FLAG_TEMPERATURE_Q7) != 0) {
+                printf("  temperature:     %.2f C (SH-2 report 0x0e)\n",
+                       (double)telemetry.Imu.Temperature / 128.0);
+            } else {
+                printf("  temperature:     %ld C\n",
+                       (long)telemetry.Imu.Temperature);
+            }
+        } else {
+            printf("  temperature:     unavailable\n");
+        }
         printf("  accel XYZ:       %ld / %ld / %ld\n",
                (long)telemetry.Imu.AccelerationX,
                (long)telemetry.Imu.AccelerationY,

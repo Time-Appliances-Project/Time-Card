@@ -54,6 +54,7 @@
 #define TIMECARD_BNO08X_LINEAR_ACCELERATION 0x04u
 #define TIMECARD_BNO08X_ROTATION_VECTOR 0x05u
 #define TIMECARD_BNO08X_GRAVITY 0x06u
+#define TIMECARD_BNO08X_TEMPERATURE 0x0eu
 
 static UCHAR
 TimeCardI2cRead8(PDEVICE_CONTEXT context, ULONG offset)
@@ -1909,7 +1910,8 @@ TimeCardBno08xConfigureLocked(PDEVICE_CONTEXT context, ULONG address,
         TIMECARD_BNO08X_MAGNETIC_FIELD,
         TIMECARD_BNO08X_LINEAR_ACCELERATION,
         TIMECARD_BNO08X_ROTATION_VECTOR,
-        TIMECARD_BNO08X_GRAVITY
+        TIMECARD_BNO08X_GRAVITY,
+        TIMECARD_BNO08X_TEMPERATURE
     };
     UCHAR discard[TIMECARD_I2C_MAX_TRANSFER];
     ULONG discardLength;
@@ -1931,7 +1933,8 @@ TimeCardBno08xConfigureLocked(PDEVICE_CONTEXT context, ULONG address,
     for (i = 0; i < ARRAYSIZE(reports); ++i) {
         status = TimeCardBno08xSetFeatureLocked(
             context, address, reports[i],
-            TIMECARD_BNO08X_REPORT_INTERVAL_US,
+            reports[i] == TIMECARD_BNO08X_TEMPERATURE ?
+                1000000u : TIMECARD_BNO08X_REPORT_INTERVAL_US,
             controllerStatus, interruptStatus);
         if (!NT_SUCCESS(status))
             return status;
@@ -1958,6 +1961,8 @@ TimeCardBno08xParseReports(TIMECARD_BNO055_READING *reading,
             reportLength = 5u;
         else if (reportId == TIMECARD_BNO08X_ROTATION_VECTOR)
             reportLength = 14u;
+        else if (reportId == TIMECARD_BNO08X_TEMPERATURE)
+            reportLength = 6u;
         else if (reportId >= TIMECARD_BNO08X_ACCELEROMETER &&
                  reportId <= TIMECARD_BNO08X_GRAVITY)
             reportLength = 10u;
@@ -2028,6 +2033,17 @@ TimeCardBno08xParseReports(TIMECARD_BNO055_READING *reading,
                 (SHORT)TimeCardSensorReadLe16(&payload[cursor + 6u]));
             reading->GravityZ = TimeCardBno08xQ8ToCenti(
                 (SHORT)TimeCardSensorReadLe16(&payload[cursor + 8u]));
+            valid = TRUE;
+        } else if (reportId == TIMECARD_BNO08X_TEMPERATURE) {
+            /*
+             * SH-2 temperature report 0x0e is signed Q7 degrees Celsius.
+             * Whether it is implemented depends on the BNO08x firmware and
+             * its environmental-sensor configuration.
+             */
+            reading->Temperature = TimeCardSensorReadLeSigned16(
+                &payload[cursor + 4u]);
+            reading->Flags |= TIMECARD_SENSOR_FLAG_TEMPERATURE |
+                              TIMECARD_SENSOR_FLAG_TEMPERATURE_Q7;
             valid = TRUE;
         }
         cursor += reportLength;
@@ -2290,7 +2306,8 @@ TimeCardBno055ReadLocked(PDEVICE_CONTEXT context,
     reading->GravityZ = TimeCardSensorReadLeSigned16(&data[42]);
     reading->Temperature = (LONG)(CHAR)data[44];
     reading->Flags |= TIMECARD_SENSOR_FLAG_VALID |
-                      TIMECARD_SENSOR_FLAG_CONVERSION_READY;
+                      TIMECARD_SENSOR_FLAG_CONVERSION_READY |
+                      TIMECARD_SENSOR_FLAG_TEMPERATURE;
     if (reading->OperationMode == 0x0cu)
         reading->Flags |= TIMECARD_SENSOR_FLAG_CONFIGURED;
     if ((systemTrigger & 0x80u) != 0 &&

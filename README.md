@@ -171,7 +171,7 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
   [`DRV/Windows`](DRV/Windows)
 * CAD files for the custom PCIe bracket 
 
-The Windows package currently ships driver **1.24 / ABI 8** and a native
+The Windows package currently ships driver **1.25 / ABI 8** and a native
 Control Center that brings the complete Time Card into one application:
 
 * Precision-clock telemetry, detail-focused rolling offset graphs, clock-source

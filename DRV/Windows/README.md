@@ -54,7 +54,7 @@ controller from starting.
 
 ## Hardware compatibility
 
-Driver 1.24 / ABI 8 selects the same three board profiles and resource maps as
+Driver 1.25 / ABI 8 selects the same three board profiles and resource maps as
 the Linux `ptp_ocp` driver. Meta/Facebook and Celestica share the rev1 and rev2
 maps. Older PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or
 32 interrupt messages. Current PCI revision 02 LitePCIe gateware exposes 64
@@ -139,7 +139,7 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-Driver **1.24 / ABI 8** is required for the complete feature set shown below.
+Driver **1.25 / ABI 8** is required for the complete feature set shown below.
 
 ![Control Center overview](assets/timecard-control-center.png)
 
@@ -333,9 +333,15 @@ cards continue to use the NDOF register path.
 
 Driver 1.24 adds a BNO08x liveness watchdog. If the IMU resets internally or
 its finite SH-2 report queue stalls while the mux branch is idle, the next
-telemetry request drains stale packets, re-establishes all six feature
+telemetry request drains stale packets, re-establishes all six motion-feature
 subscriptions, resets the SHTP control-channel sequence, and retries the
 sample without requiring a driver reload or reboot.
+
+Driver 1.25 also requests and decodes the optional SH-2 ambient-temperature
+report `0x0e` as signed Q7 degrees Celsius. The temperature-valid flag is set
+only when the installed BNO08x firmware actually publishes that report, so
+motion telemetry remains unchanged and the Control Center continues to show
+temperature as unavailable on firmware without an environmental source.
 
 The schematic's U26 TMUX1072 is not software-controlled. Its `MACSER` select
 comes only from the physical DIP switch: 0 routes MAC I2C and 1 routes the FPGA

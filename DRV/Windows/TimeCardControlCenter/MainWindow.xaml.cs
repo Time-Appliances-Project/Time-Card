@@ -5990,9 +5990,9 @@ namespace TimeCardControlCenter
             ImuQuaternionText.Text = string.Format(CultureInfo.InvariantCulture,
                 "{0:F4}, {1:F4}, {2:F4}, {3:F4}", imu.QuaternionW,
                 imu.QuaternionX, imu.QuaternionY, imu.QuaternionZ);
-            ImuTemperatureText.Text = isBno08x ? "— °C" :
+            ImuTemperatureText.Text = imu.HasTemperature ?
                 imu.TemperatureCelsius.ToString("F1",
-                    CultureInfo.InvariantCulture) + " °C";
+                    CultureInfo.InvariantCulture) + " °C" : "— °C";
             ImuSystemCalibrationText.Text = imu.SystemCalibration + "/3";
             ImuGyroCalibrationText.Text = imu.GyroscopeCalibration + "/3";
             ImuAccelCalibrationText.Text = imu.AccelerometerCalibration + "/3";
