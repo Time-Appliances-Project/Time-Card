@@ -5,6 +5,19 @@ $productionSource = Get-Content -LiteralPath $sourcePath -Raw -Encoding UTF8
 $histogramPath = Join-Path $PSScriptRoot '..\TimeCardControlCenter\TelemetryHistogram.cs'
 $histogramSource = Get-Content -LiteralPath $histogramPath -Raw -Encoding UTF8
 $histogramSource = $histogramSource -replace '(?m)^using .+\r?\n', ''
+$windowXaml = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
+    '..\TimeCardControlCenter\MainWindow.xaml') -Raw -Encoding UTF8
+$windowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
+    '..\TimeCardControlCenter\MainWindow.xaml.cs') -Raw -Encoding UTF8
+if ($windowXaml -notmatch 'Viewport3D\s+x:Name="ImuOrientationViewport"' -or
+    $windowXaml -notmatch 'x:Name="ImuVisualizationStatusText"') {
+    throw 'Control Center product test failed: live 3D IMU viewport is missing.'
+}
+if ($windowSource -notmatch 'UpdateImuCubeOrientation' -or
+    $windowSource -notmatch 'UseShortestPath\s*=\s*true' -or
+    $windowSource -notmatch 'target\.Normalize\(\)') {
+    throw 'Control Center product test failed: quaternion-driven IMU cube is incomplete.'
+}
 $wpfUsings = "using System.Windows;`r`nusing System.Windows.Input;`r`nusing System.Windows.Media;`r`n"
 $stubs = @'
 namespace TimeCardControlCenter
@@ -74,7 +87,7 @@ namespace TimeCardControlCenter
 
             TimeCardSnapshot art = new TimeCardSnapshot
             {
-                DriverVersion = "1.29", AbiVersion = 9,
+                DriverVersion = "1.32", AbiVersion = 9,
                 Layout = "Orolia ART", IsClockSynchronized = true,
                 OffsetNanoseconds = 4, SamplingWindowNanoseconds = 9000
             };
@@ -147,7 +160,7 @@ namespace TimeCardControlCenter
                     restored.LastKnownGoodProfile.Name != roundTrip.Name)
                     throw new Exception("Settings serialization failed.");
             }
-            return "Control Center product tests passed (health graph, profiles, XML round-trip, telemetry retention/export, histogram percentiles, vibration math).";
+            return "Control Center product tests passed (health graph, profiles, XML round-trip, telemetry retention/export, histogram percentiles, vibration math, 3D IMU view).";
         }
     }
 }

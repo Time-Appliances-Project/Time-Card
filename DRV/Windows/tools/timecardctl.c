@@ -379,11 +379,15 @@ cmd_uart_observe(HANDLE handle, int argc, char **argv)
                        &request, sizeof(request), &response,
                        sizeof(response), NULL))
         return 1;
-    printf("UART %lu: %s, LSR 0x%02lx\n",
+    printf("UART %lu: %s, LSR 0x%02lx, interrupt object(s) %lu, "
+           "buffered %lu, dropped %lu\n",
            (unsigned long)response.Port,
            (response.Flags & TIMECARD_UART_OBSERVE_FLAG_ACTIVITY) ?
                "receive data ready" : "idle",
-           (unsigned long)(response.LineStatus & 0xffu));
+           (unsigned long)(response.LineStatus & 0xffu),
+           (unsigned long)response.Reserved[0],
+           (unsigned long)response.Reserved[1],
+           (unsigned long)response.Reserved[2]);
     return 0;
 }
 
@@ -655,6 +659,16 @@ cmd_i2c_status(HANDLE handle)
            (unsigned long)status.RxFifoOccupancy);
     printf("Known devices:     0x%02lx\n",
            (unsigned long)status.KnownDeviceMask);
+    printf("Last transfer:     CR 0x%02lx -> 0x%02lx, "
+           "SR 0x%02lx -> 0x%02lx\n",
+           (unsigned long)(status.Reserved[0] & 0xffu),
+           (unsigned long)((status.Reserved[0] >> 16) & 0xffu),
+           (unsigned long)((status.Reserved[0] >> 8) & 0xffu),
+           (unsigned long)((status.Reserved[0] >> 24) & 0xffu));
+    printf("Last events/TFO:   0x%04lx, %lu -> %lu\n",
+           (unsigned long)(status.Reserved[1] & 0xffffu),
+           (unsigned long)((status.Reserved[1] >> 16) & 0xffu),
+           (unsigned long)((status.Reserved[1] >> 24) & 0xffu));
     return 0;
 }
 

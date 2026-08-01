@@ -175,7 +175,13 @@ TimeCardGetHierarchySetting(PDEVICE_CONTEXT context, PBOOLEAN enabled)
     WDFKEY key;
     NTSTATUS status;
 
-    *enabled = FALSE;
+    /*
+     * A supported Time Card should expose its functional children on first
+     * installation.  Keep the registry value as an administrator override,
+     * but treat an absent value as enabled so a newly encountered board
+     * variant does not appear as only the parent PCI controller.
+     */
+    *enabled = TRUE;
     status = TimeCardOpenDeviceRegistry(context, KEY_QUERY_VALUE, &key);
     if (!NT_SUCCESS(status))
         return status;

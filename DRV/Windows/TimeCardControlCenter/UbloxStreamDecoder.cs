@@ -467,6 +467,10 @@ namespace TimeCardControlCenter
                 DecodeNavDop(payload, out summary, out details);
             else if (navigationClass && messageId == 0x21 && payload.Length >= 20)
                 DecodeNavTimeUtc(payload, out summary, out details);
+            else if (navigationClass && messageId == 0x20 && payload.Length >= 16)
+                DecodeNavTimeGps(payload, out summary, out details);
+            else if (navigationClass && messageId == 0x26 && payload.Length >= 24)
+                DecodeNavTimeLs(payload, out summary, out details);
             else if (navigationClass && messageId == 0x22 && payload.Length >= 20)
                 DecodeNavClock(payload, out summary, out details);
             else if (messageClass == 0x0a && messageId == 0x04 &&
@@ -643,6 +647,66 @@ namespace TimeCardControlCenter
                 "Accuracy {0} ns · fractional second {1} ns · iTOW {2} ms",
                 ReadUInt32(payload, 4), ReadInt32(payload, 8),
                 ReadUInt32(payload, 0));
+        }
+
+        private static void DecodeNavTimeGps(byte[] payload, out string summary,
+                                             out string details)
+        {
+            byte valid = payload[11];
+            bool towValid = (valid & 0x01) != 0;
+            bool weekValid = (valid & 0x02) != 0;
+            bool leapValid = (valid & 0x04) != 0;
+            double towSeconds = ReadUInt32(payload, 0) / 1000.0 +
+                ReadInt32(payload, 4) / 1000000000.0;
+            summary = string.Format(CultureInfo.InvariantCulture,
+                "GPS week {0} · TOW {1:F9} s · {2}",
+                unchecked((short)ReadUInt16(payload, 8)), towSeconds,
+                towValid && weekValid ? "valid" : "not valid");
+            details = string.Format(CultureInfo.InvariantCulture,
+                "GPS-UTC {0} s ({1}) · time accuracy {2} ns · validity 0x{3:X2}",
+                unchecked((sbyte)payload[10]), leapValid ? "valid" : "not valid",
+                ReadUInt32(payload, 12), valid);
+        }
+
+        private static void DecodeNavTimeLs(byte[] payload, out string summary,
+                                            out string details)
+        {
+            byte valid = payload[23];
+            bool currentValid = (valid & 0x01) != 0;
+            bool eventValid = (valid & 0x02) != 0;
+            int current = unchecked((sbyte)payload[9]);
+            int change = unchecked((sbyte)payload[11]);
+            int seconds = ReadInt32(payload, 12);
+            string eventText = !eventValid ? "event timing unavailable" :
+                change == 0 ? "no scheduled leap change" :
+                string.Format(CultureInfo.InvariantCulture,
+                    "{0:+#;-#;0} s change in {1} s", change, seconds);
+            summary = string.Format(CultureInfo.InvariantCulture,
+                "GPS-UTC {0} s · {1} · {2}", current,
+                currentValid ? "valid" : "not valid", eventText);
+            details = string.Format(CultureInfo.InvariantCulture,
+                "Current source {0} · event source {1} · event GPS week/day {2}/{3} · iTOW {4} ms",
+                LeapSecondSource(payload[8]), LeapSecondSource(payload[10]),
+                ReadUInt16(payload, 16), ReadUInt16(payload, 18),
+                ReadUInt32(payload, 0));
+        }
+
+        private static string LeapSecondSource(byte value)
+        {
+            switch (value)
+            {
+                case 0: return "firmware/default";
+                case 1: return "GPS-GLONASS difference";
+                case 2: return "GPS";
+                case 3: return "SBAS";
+                case 4: return "BeiDou";
+                case 5: return "Galileo";
+                case 6: return "GLONASS/aiding";
+                case 7: return "configured/IRNSS";
+                case 8: return "NavIC";
+                case 255: return "unknown";
+                default: return "source " + value.ToString(CultureInfo.InvariantCulture);
+            }
         }
 
         private static void DecodeNavClock(byte[] payload, out string summary,
@@ -835,6 +899,8 @@ namespace TimeCardControlCenter
                 case "UBX-NAV-STATUS": return "Receiver navigation status";
                 case "UBX-NAV-DOP": return "Dilution of precision";
                 case "UBX-NAV-TIMEUTC": return "UTC time solution";
+                case "UBX-NAV-TIMEGPS": return "GPS time solution";
+                case "UBX-NAV-TIMELS": return "Leap-second event information";
                 case "UBX-NAV-CLOCK": return "Receiver clock solution";
                 case "UBX-MON-VER": return "Receiver and software version";
                 case "UBX-RXM-RAWX": return "Multi-GNSS raw measurements";

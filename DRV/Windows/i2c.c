@@ -56,6 +56,11 @@
 #define TIMECARD_BNO08X_GRAVITY 0x06u
 #define TIMECARD_BNO08X_TEMPERATURE 0x0eu
 
+static NTSTATUS
+TimeCardI2cWriteLocked(PDEVICE_CONTEXT context, ULONG address,
+                       const UCHAR *data, ULONG length,
+                       ULONG *controllerStatus, ULONG *interruptStatus);
+
 static UCHAR
 TimeCardI2cRead8(PDEVICE_CONTEXT context, ULONG offset)
 {
@@ -442,6 +447,41 @@ TimeCardI2cReadLocked(PDEVICE_CONTEXT context,
                                         pollCount);
         if (NT_SUCCESS(status) || status == STATUS_NO_SUCH_DEVICE)
             break;
+    }
+
+    if (status == STATUS_NO_SUCH_DEVICE &&
+        request->SubaddressLength != 0) {
+        TIMECARD_I2C_READ_REQUEST readRequest = *request;
+        UCHAR pointer[2];
+        ULONG controllerStatus = 0;
+        ULONG interruptStatus = 0;
+
+        /*
+         * Some V9 register reads ACK the address and pointer byte but return a
+         * read-address NACK during the AXI-IIC dynamic repeated START.
+         * INA219 and BME/BMP280 retain their register pointer across STOP, so
+         * retry the exact same operation as two bounded bus messages. This
+         * also matches the common SMBus "write byte, read word" transaction.
+         */
+        if (request->SubaddressLength == 2u) {
+            pointer[0] = (UCHAR)((request->Subaddress >> 8) & 0xffu);
+            pointer[1] = (UCHAR)(request->Subaddress & 0xffu);
+        } else {
+            pointer[0] = (UCHAR)(request->Subaddress & 0xffu);
+        }
+        status = TimeCardI2cWriteLocked(
+            context, request->Address, pointer,
+            request->SubaddressLength,
+            &controllerStatus, &interruptStatus);
+        if (NT_SUCCESS(status)) {
+            readRequest.SubaddressLength = 0;
+            readRequest.Subaddress = 0;
+            transfer->Length = 0;
+            transfer->ControllerStatus = 0;
+            transfer->InterruptStatus = 0;
+            status = TimeCardI2cReadAttempt(
+                context, &readRequest, transfer, pollCount);
+        }
     }
     return status;
 }
@@ -868,10 +908,6 @@ TimeCardSensorBranchProbeLocked(PDEVICE_CONTEXT context, UCHAR channelMask,
         TIMECARD_SENSOR_BNO08X_ADDRESS,
         TIMECARD_SENSOR_BNO08X_ADDRESS_ALTERNATE
     };
-    static const ULONG environmentAddresses[] = {
-        TIMECARD_SENSOR_BME280_ADDRESS,
-        TIMECARD_SENSOR_BME280_ADDRESS_ALTERNATE
-    };
     UCHAR value = 0;
     UCHAR header[4];
     ULONG i;
@@ -910,15 +946,97 @@ TimeCardSensorBranchProbeLocked(PDEVICE_CONTEXT context, UCHAR channelMask,
         }
     }
 
-    for (i = 0; i < ARRAYSIZE(environmentAddresses); ++i) {
+    return FALSE;
+}
+
+static BOOLEAN
+TimeCardEnvironmentBranchProbeLocked(PDEVICE_CONTEXT context,
+                                     UCHAR channelMask,
+                                     ULONG *controllerStatus,
+                                     ULONG *interruptStatus)
+{
+    static const ULONG addresses[] = {
+        TIMECARD_SENSOR_BME280_ADDRESS,
+        TIMECARD_SENSOR_BME280_ADDRESS_ALTERNATE
+    };
+    UCHAR chipId = 0;
+    ULONG i;
+    NTSTATUS status = TimeCardI2cMuxWriteLocked(
+        context, channelMask, controllerStatus, interruptStatus);
+
+    if (!NT_SUCCESS(status))
+        return FALSE;
+    KeStallExecutionProcessor(10u);
+    for (i = 0; i < ARRAYSIZE(addresses); ++i) {
         status = TimeCardI2cReadBytesLocked(
-            context, environmentAddresses[i], 1, 0xd0u, &value, 1,
+            context, addresses[i], 1, 0xd0u, &chipId, 1,
             controllerStatus, interruptStatus);
-        if (NT_SUCCESS(status) && (value == 0x60u || value == 0x58u))
+        if (NT_SUCCESS(status) && (chipId == 0x60u || chipId == 0x58u)) {
+            context->I2cEnvironmentAddress = addresses[i];
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static BOOLEAN
+TimeCardPowerBranchProbeLocked(PDEVICE_CONTEXT context, UCHAR channelMask,
+                               ULONG *controllerStatus,
+                               ULONG *interruptStatus)
+{
+    static const ULONG addresses[] = {
+        TIMECARD_SENSOR_INA219_12V_ADDRESS,
+        TIMECARD_SENSOR_INA219_5V_ADDRESS,
+        TIMECARD_SENSOR_INA219_3V3_ADDRESS
+    };
+    UCHAR configuration[2];
+    ULONG i;
+    NTSTATUS status = TimeCardI2cMuxWriteLocked(
+        context, channelMask, controllerStatus, interruptStatus);
+
+    if (!NT_SUCCESS(status))
+        return FALSE;
+    KeStallExecutionProcessor(10u);
+    for (i = 0; i < ARRAYSIZE(addresses); ++i) {
+        status = TimeCardI2cReadBytesLocked(
+            context, addresses[i], 1, 0x00u, configuration,
+            sizeof(configuration), controllerStatus, interruptStatus);
+        if (NT_SUCCESS(status))
             return TRUE;
     }
-
     return FALSE;
+}
+
+static UCHAR
+TimeCardMonitorBranchResolveLocked(PDEVICE_CONTEXT context,
+                                   BOOLEAN environment,
+                                   ULONG *controllerStatus,
+                                   ULONG *interruptStatus)
+{
+    static const UCHAR candidates[] = {
+        TIMECARD_I2C_MUX_CHANNEL_SENSORS,
+        TIMECARD_I2C_MUX_CHANNEL_DC,
+        TIMECARD_I2C_MUX_CHANNEL_MAC,
+        TIMECARD_I2C_MUX_CHANNEL_ANADC
+    };
+    ULONG *cachedMask = environment ? &context->I2cEnvironmentMuxMask :
+                                      &context->I2cPowerMuxMask;
+    ULONG i;
+
+    if (*cachedMask != 0)
+        return (UCHAR)*cachedMask;
+    for (i = 0; i < ARRAYSIZE(candidates); ++i) {
+        BOOLEAN found = environment ?
+            TimeCardEnvironmentBranchProbeLocked(
+                context, candidates[i], controllerStatus, interruptStatus) :
+            TimeCardPowerBranchProbeLocked(
+                context, candidates[i], controllerStatus, interruptStatus);
+        if (found) {
+            *cachedMask = candidates[i];
+            return candidates[i];
+        }
+    }
+    return TIMECARD_I2C_MUX_CHANNEL_SENSORS;
 }
 
 static NTSTATUS
@@ -2321,6 +2439,9 @@ TimeCardSensorQuery(PDEVICE_CONTEXT context,
                     TIMECARD_SENSOR_TELEMETRY *telemetry)
 {
     UCHAR savedMask = 0;
+    UCHAR imuMask = TIMECARD_I2C_MUX_CHANNEL_SENSORS;
+    UCHAR environmentMask;
+    UCHAR powerMask;
     BOOLEAN changed = FALSE;
     ULONG controllerStatus = 0;
     ULONG interruptStatus = 0;
@@ -2349,9 +2470,33 @@ TimeCardSensorQuery(PDEVICE_CONTEXT context,
         goto Exit;
     telemetry->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
 
+    /*
+     * V9 normally places BME/BMP280 and INA219 on SENS_I2C, but supported
+     * vendor/revision variants may route those optional parts differently.
+     * Resolve and cache the environment, power, and IMU routes independently.
+     */
+    if (context->I2cSensorMuxMask != 0)
+        imuMask = (UCHAR)context->I2cSensorMuxMask;
+    environmentMask = TimeCardMonitorBranchResolveLocked(
+        context, TRUE, &controllerStatus, &interruptStatus);
+    powerMask = TimeCardMonitorBranchResolveLocked(
+        context, FALSE, &controllerStatus, &interruptStatus);
+    status = TimeCardI2cMuxWriteLocked(
+        context, environmentMask,
+        &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    KeStallExecutionProcessor(10u);
+
     TimeCardBme280ReadLocked(
         context, &telemetry->Environment,
         &controllerStatus, &interruptStatus);
+
+    status = TimeCardI2cMuxWriteLocked(
+        context, powerMask, &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    KeStallExecutionProcessor(10u);
     TimeCardIna219ReadLocked(
         context, TIMECARD_SENSOR_INA219_12V_ADDRESS,
         &telemetry->Rail12V, &controllerStatus, &interruptStatus);
@@ -2361,6 +2506,13 @@ TimeCardSensorQuery(PDEVICE_CONTEXT context,
     TimeCardIna219ReadLocked(
         context, TIMECARD_SENSOR_INA219_3V3_ADDRESS,
         &telemetry->Rail3V3, &controllerStatus, &interruptStatus);
+
+    status = TimeCardI2cMuxWriteLocked(
+        context, imuMask, &controllerStatus, &interruptStatus);
+    if (!NT_SUCCESS(status))
+        goto Exit;
+    KeStallExecutionProcessor(10u);
+
     if (context->I2cImuType == TIMECARD_IMU_TYPE_BNO08X) {
         TimeCardBno08xReadLocked(
             context, &telemetry->Imu,
@@ -2380,7 +2532,7 @@ TimeCardSensorQuery(PDEVICE_CONTEXT context,
 
 Exit:
     status = TimeCardSensorBranchRestoreLocked(
-        context, savedMask, changed, status,
+        context, savedMask, TRUE, status,
         &controllerStatus, &interruptStatus);
     telemetry->ControllerStatus = controllerStatus;
     telemetry->InterruptStatus = interruptStatus;

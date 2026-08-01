@@ -17,8 +17,11 @@ applications use the versioned IOCTL ABI through `timecardctl.exe`.
   coarse, and nonvolatile coarse-adjustment controls.
 - FPGA, TOD, synchronization, selectable clock source, UTC/leap, satellite,
   and GNSS status reporting.
-- Polled access to the GNSS, GNSS2, atomic-clock, and NMEA 16550 UARTs, plus
-  explicit enable, baud, and polarity control for the FPGA NMEA generator.
+- Buffered access to the GNSS, GNSS2, atomic-clock, and NMEA 16550 UARTs. The
+  driver uses the Linux MSI/MSI-X vector map when Windows exposes connectable
+  interrupt resources and a burst-aware kernel poller otherwise, so complete
+  high-rate u-blox frames survive the 16550 FIFO. FPGA NMEA enable, baud, and
+  polarity are independently configurable.
 - Validated query and routing control for all four SMA connectors, including
   input/output direction, named timing functions, fixed-direction detection,
   and immediate readback.
@@ -30,9 +33,10 @@ applications use the versioned IOCTL ABI through `timecardctl.exe`.
   dedicated IS32FL3207 LED updates, open/short diagnostics, and a bounded
   electrical test. The known identity devices are the board EEPROM at `0x50`
   and MAC EEPROM at `0x58`.
-- Guarded one-shot telemetry for BME280/BMP280 environment sensors, three INA219
-  power monitors, and BNO055 or BNO08x nine-axis IMUs on an auto-detected
-  PCA9546A branch.
+- Guarded one-shot telemetry for BME280/BMP280 environment sensors and three
+  INA219 power monitors, plus BNO055 or BNO08x nine-axis IMUs. Environment,
+  rail-monitor, and IMU routes are discovered independently across the known
+  PCA9546A branches so one alternate assembly route cannot hide another.
 - Guarded Xilinx and Altera SPI/SPI-NOR access for FPGA firmware query,
   4 KiB erase,
   page programming, and bounded read-back. All offsets are relative to the
@@ -56,7 +60,7 @@ controller from starting.
 
 ## Hardware compatibility
 
-Driver 1.29 / ABI 9 selects the same three board profiles and resource maps as
+Driver 1.35 / ABI 9 selects the same three board profiles and resource maps as
 the Linux `ptp_ocp` driver. Meta/Facebook and Celestica share the rev1 and rev2
 maps. Older PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or
 32 interrupt messages. Current PCI revision 02 LitePCIe gateware exposes 64
@@ -86,14 +90,14 @@ temperature is intentionally displayed as a raw word because its physical
 scale is not published for this gateware image. The mRO serial port is still
 configured for 9,600 baud when present.
 
-Linux assigns no fixed baud to the ART primary-GNSS UART. Driver 1.29 likewise
+Linux assigns no fixed baud to the ART primary-GNSS UART. Driver 1.35 likewise
 preserves its gateware divisor during device start; an operator may still set
 an explicit baud from the UART workspace or `timecardctl uart-config`.
 
 ART's 24c08 responds through bank addresses `0x50` through `0x57`. On the
 tested card it contains two copies of the mRO disciplining configuration,
 beginning with `oscillator=mRO50`, rather than the legacy serial layout at
-absolute offset `0x263`. Driver 1.29 detects that layout and returns an invalid
+absolute offset `0x263`. Driver 1.35 detects that layout and returns an invalid
 identity instead of turning configuration text into a false serial number.
 Its four fixed SMA routes remain read-only in the Control Center.
 
@@ -156,7 +160,7 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-Driver **1.29 / ABI 9** is required for the complete feature set shown below.
+Driver **1.35 / ABI 9** is required for the complete feature set shown below.
 
 ![Control Center overview](assets/timecard-control-center.png)
 
@@ -200,22 +204,25 @@ Reboot when requested, then verify the controller:
 
 ## Device hierarchy
 
-Subsystem enumeration is disabled on first install. After the controller,
-PHC, and UART checks pass, enable the hierarchy without persisting it:
+Subsystem enumeration is enabled by default for every newly installed
+supported card. The controller therefore appears with its PHC, ToD/GNSS,
+UART, SMA, timing, I2C, flash, and PTM children immediately. Verify it with:
 
 ```powershell
-.\out\timecardctl.exe hierarchy-enable
 .\verify.ps1 -ExpectHierarchy -TestGnssUart
 ```
 
-Persist the verified hierarchy for subsequent device starts:
+For recovery or comparison testing, an administrator can still disable the
+hierarchy persistently and later re-enable it:
 
 ```powershell
+.\out\timecardctl.exe hierarchy-disable
+.\out\timecardctl.exe hierarchy-enable
 .\out\timecardctl.exe hierarchy-persist
 ```
 
-`hierarchy-disable` clears persistence. Existing child nodes disappear after
-the Time Card device or Windows is restarted.
+An explicit persisted disable takes precedence over the default. Existing
+child nodes disappear after the Time Card device or Windows is restarted.
 
 ## Control tool
 
@@ -370,6 +377,23 @@ report `0x0e` as signed Q7 degrees Celsius. The temperature-valid flag is set
 only when the installed BNO08x firmware actually publishes that report, so
 motion telemetry remains unchanged and the Control Center continues to show
 temperature as unavailable on firmware without an environmental source.
+
+Driver 1.35 keeps the Rev00 BNO08x on its discovered mux route while resolving
+the BME/BMP280 and INA219 routes independently. It tries the V9 schematic's
+PCA9546A channel 1 (`mask 0x02`) first, then the remaining known assembly
+routes without disturbing the IMU selection. This prevents any alternate IMU,
+environment, or power-monitor route from hiding another populated device.
+Each address that returns no I2C ACK is reported independently as not fitted or
+unpowered instead of being shown as zero telemetry.
+
+Driver 1.35 also handles V9 register reads that ACK the pointer write but return
+a read-address NACK during the AXI-IIC dynamic repeated START. After that
+specific NACK, BME280,
+BMP280, and INA219 reads are retried as a STOP-terminated register-pointer write
+followed by a bounded read. These devices retain their register pointer across
+STOP; the fallback leaves the existing repeated-START path in place for every
+device that accepts it. The Control Center renders the IMU quaternion as a
+smoothed, color-keyed 3D cube alongside the numeric heading, roll, and pitch.
 
 The schematic's U26 TMUX1072 is not software-controlled. Its `MACSER` select
 comes only from the physical DIP switch: 0 routes MAC I2C and 1 routes the FPGA

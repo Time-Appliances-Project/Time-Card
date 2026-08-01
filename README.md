@@ -171,20 +171,22 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
   [`DRV/Windows`](DRV/Windows)
 * CAD files for the custom PCIe bracket 
 
-The Windows package currently ships driver **1.29 / ABI 9** and a native
+The Windows package currently ships driver **1.35 / ABI 9** and a native
 Control Center that brings the complete Time Card into one application:
 
 * Precision-clock telemetry, detail-focused rolling offset graphs, clock-source
   selection, and guarded synchronization in both directions.
-* Primary and secondary GNSS status, u-blox configuration, and a vendor-style
-  satellite sky map.
+* Primary and secondary GNSS status, u-blox F9 timing-receiver configuration,
+  decoded GPS/UTC/leap-second messages, and a vendor-style satellite sky map.
 * Board-aware atomic-clock control for Microchip MAC-SA53 and the Orolia ART
   mRO-50 FPGA bridge, plus multi-format UART consoles and FPGA NMEA where
   implemented.
 * SMA routing plus four PHC-aligned generators and four frequency counters.
 * Schematic-aware I2C routing, card identity, automatic/manual RGB status LEDs,
-  electrical diagnostics, live environmental sensors, power rails, and IMU.
-* Device hierarchy controls and guarded, verified FPGA SPI-flash updates.
+  electrical diagnostics, live environmental sensors, power rails, and a live
+  quaternion-driven 3D IMU orientation view.
+* A default-on Device Manager subsystem hierarchy, recovery controls, and
+  guarded, verified FPGA SPI-flash updates.
 * Explicit Meta/Facebook, Celestica, and Orolia/Safran ART board profiles
   matching the PCI identities and resource maps in the Linux driver. ART
   capability detection prevents absent Meta-only sensors, LEDs, ToD/NMEA,

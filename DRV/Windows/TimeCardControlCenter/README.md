@@ -4,7 +4,7 @@ The Time Card Control Center is a dependency-free Windows desktop dashboard
 for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
-Driver 1.29 / ABI 9 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
+Driver 1.35 / ABI 9 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
 ART profiles from the Linux driver. On ART, the application switches to a
 native mRO-50 FPGA-bridge workspace, probes all 24c08 banks at `0x50-0x57`,
 uses the fixed ART SMA map, and labels the absent ToD/NMEA, secondary-GNSS,
@@ -42,6 +42,8 @@ explicitly chooses a new divisor.
   constellation, tracking quality, and solution-use state. Compatible
   configuration-database receivers expose navigation rate and platform model,
   constellation selection, TP1 timing, and UART 1 message-rate controls.
+  F9 timing receivers additionally expose survey-in/fixed-position mode,
+  dual-band RF/antenna health, GPS time, UTC, and leap-second event telemetry.
 - Guarded one-shot synchronization in both directions between system UTC and
   the Time Card PHC.
 - A serial laboratory with streaming u-blox and NMEA decoders, dynamically
@@ -331,11 +333,13 @@ easy to see without clipping larger excursions.
 The **GNSS & Time-of-Day** workspace can query a receiver on UART 0 or UART 1
 using checksum-protected UBX frames. It recognizes the repository-recommended
 [u-blox RCB-F9T](https://www.u-blox.com/en/product/rcb-f9t-timing-board) through
-`UBX-MON-VER`, while `UBX-NAV-PVT` and `UBX-NAV-SAT` provide generic status on
-many other u-blox generations. The recommended RCB-F9T normally uses UART 0 at
-115,200 baud on the Time Card; the host baud selector can communicate with a
-receiver at another existing baud without changing the receiver's own port
-configuration.
+`UBX-MON-VER`. On cards whose FPGA path is receive-only, it also recognizes an
+F9 timing receiver from a validated live combination of `UBX-MON-RF`,
+`UBX-TIM-SVIN`, `UBX-NAV-PVT`, and the navigation-time messages. Passive mode
+keeps telemetry and decoding available while clearly disabling controls that
+require receiver acknowledgements. The recommended RCB-F9T normally uses UART
+0 at 115,200 baud; the host baud selector can communicate at another existing
+baud without changing the receiver's own port configuration.
 
 Older revision 00 FPGA images can expose a working GNSS UART without
 implementing the ToD GNSS-status and satellite-summary registers. The register
@@ -357,7 +361,17 @@ independently detected control groups:
 - GPS, Galileo, BeiDou, GLONASS, QZSS, and SBAS constellation enables.
 - TP1 enable, GNSS synchronization, locked settings, edge polarity, time grid,
   period, and pulse width.
-- UBX NAV-PVT and NMEA GGA, GSA, GSV, RMC, and ZDA output rates on UART 1.
+- UBX NAV-PVT, NAV-TIMEGPS, NAV-TIMEUTC, NAV-TIMELS, TIM-SVIN, and NMEA GGA,
+  GSA, GSV, RMC, and ZDA output rates on UART 1.
+
+The F9 timing panel decodes `UBX-NAV-TIMEGPS` into GPS week, time of week,
+GPS-UTC offset, validity, and time accuracy. It decodes `UBX-NAV-TIMELS` into
+the current leap-second offset and source plus any scheduled change, countdown,
+GPS week/day, and validity flags. The UART laboratory presents the same fields
+for live or replayed streams. F9 receivers with a working configuration path
+also expose disabled, survey-in, and fixed-position timing modes, survey
+duration/accuracy, fixed LLH/accuracy, `UBX-TIM-SVIN` progress, and per-band
+`UBX-MON-RF` antenna, AGC, noise, and jamming state.
 
 Configuration changes target receiver RAM by default and are therefore lost
 at reset. Selecting **Persist BBR + flash** asks for confirmation before the
@@ -368,7 +382,7 @@ Card synchronization or overload serial output. The application never changes
 the receiver UART baud, disables UBX protocol access, resets the receiver, or
 updates receiver firmware. Parameter keys, bounds, frame formats, and ACK/NAK
 handling follow the official
-[RCB-F9T Interface Description](https://content.u-blox.com/sites/default/files/RCB-F9T_InterfaceDescription_%28UBX-19003606%29.pdf).
+[ZED-F9T Interface Description](https://content.u-blox.com/sites/default/files/ZED-F9T-10B_InterfaceDescription_UBX-20033631.pdf).
 
 ## Atomic clocks: MAC-SA53 and ART mRO-50
 
@@ -493,9 +507,12 @@ shown in the workspace, and automatic mapping marks affected packages as
 
 ## Sensors and IMU
 
-On Meta/Facebook and Celestica profiles, driver 1.25 / ABI 8 and the dedicated
-Sensors & IMU workspace read every populated monitor on the auto-detected
-sensor branch. BME280 and BMP280 are
+On Meta/Facebook and Celestica profiles, driver 1.35 / ABI 9 and the dedicated
+Sensors & IMU workspace read every populated monitor. The BME280/BMP280,
+INA219, and IMU routes are resolved independently across the known PCA9546A
+branches, with the V9 schematic's sensor channel tried first. This keeps an
+alternate BNO055/BNO08x assembly route from masking populated environmental or
+rail monitors. BME280 and BMP280 are
 auto-detected at `0x76` or `0x77`; BME280 cards show factory-compensated
 temperature, relative humidity, pressure, and calculated dew point, while a
 BMP280 correctly reports humidity and dew point as unavailable. The three
@@ -503,6 +520,11 @@ INA219 cards show bus voltage, shunt current, and load power for +12 V, +5 V,
 and +3.3 V using the board's 2 milliohm shunts.
 Driver 1.19 also wakes and verifies an INA219 that gateware left in
 reset/power-down before collecting its first conversion.
+Driver 1.35 retries the V9 monitors with a STOP-then-START register transaction
+when the pointer write ACKs but the AXI-IIC repeated-START read-address phase
+NACKs. The
+fallback is limited to this NACK case and preserves the normal repeated-START
+path for devices that accept it.
 
 The BNO055 is auto-detected at `0x28` or `0x29`, placed in NDOF fusion mode,
 and uses the V9 schematic's external 32.768 kHz crystal. The
@@ -510,10 +532,15 @@ schematic-permitted BNO080/BNO08x alternative is detected at `0x4a` or `0x4b`;
 the driver configures its SH-2 SHTP acceleration, gyro, magnetic, linear-
 acceleration, rotation-vector, and gravity reports. The workspace reports
 heading, roll, pitch, quaternion, calibration levels, acceleration, linear
-acceleration, gravity, angular velocity, and magnetic field. BNO055 also
+acceleration, gravity, angular velocity, and magnetic field. A native 3D cube
+tracks the normalized quaternion in real time with smoothed shortest-path
+rotation and returns to a clearly marked waiting pose if samples stop. BNO055 also
 reports temperature. Sampling is live at one hertz while the workspace is
-visible. Each query temporarily selects the discovered PCA9546A branch,
-reports missing devices separately, and restores the previous mux selection.
+visible. Each query temporarily selects the schematic sensor branch and the
+independently discovered IMU branch, reports missing devices separately, and
+restores the previous mux selection. A nonresponding monitor is explicitly
+shown as **NO I2C ACK - NOT FITTED OR UNPOWERED**; the application never turns
+an absent sensor into a plausible zero reading.
 For BNO08x cards, driver 1.24 also detects a silent or reset SH-2 stream,
 re-establishes the six feature subscriptions, and retries the sample
 automatically. The workspace can therefore recover from `INITIALIZING` without

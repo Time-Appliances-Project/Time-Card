@@ -690,9 +690,9 @@
                     <ScrollViewer x:Name="GnssPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                         <Grid Margin="32,28,32,34">
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                 <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                 <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                 <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <StackPanel>
                                 <TextBlock Text="GNSS &amp; TIME-OF-DAY" Style="{StaticResource Eyebrow}" />
@@ -922,7 +922,7 @@
                                 </Border>
                             </Grid>
 
-                            <Grid Grid.Row="7" Margin="0,18,0,0">
+                             <Grid Grid.Row="7" Margin="0,18,0,0">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="0.8*" /></Grid.ColumnDefinitions>
                                 <Border x:Name="UbloxTimePulsePanel" Style="{StaticResource Panel}" Margin="0,0,18,0" IsEnabled="False">
                                     <StackPanel>
@@ -957,19 +957,77 @@
                                         <TextBlock Text="UART 1 message rates" Style="{StaticResource SectionTitle}" />
                                         <TextBlock Text="0 disables a message; 1 emits every navigation epoch. UBX input/output protocols remain enabled."
                                                    Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,16" />
-                                        <UniformGrid Columns="3">
+                                        <UniformGrid Columns="5">
                                             <StackPanel Margin="0,0,8,10"><TextBlock Text="UBX NAV-PVT" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxNavPvtRateTextBox" Text="0" /></StackPanel>
                                             <StackPanel Margin="0,0,8,10"><TextBlock Text="NMEA GGA" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxGgaRateTextBox" Text="1" /></StackPanel>
                                             <StackPanel Margin="0,0,0,10"><TextBlock Text="NMEA RMC" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxRmcRateTextBox" Text="1" /></StackPanel>
                                             <StackPanel Margin="0,0,8,0"><TextBlock Text="NMEA GSA" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxGsaRateTextBox" Text="1" /></StackPanel>
                                             <StackPanel Margin="0,0,8,0"><TextBlock Text="NMEA GSV" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxGsvRateTextBox" Text="1" /></StackPanel>
                                             <StackPanel><TextBlock Text="NMEA ZDA" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxZdaRateTextBox" Text="0" /></StackPanel>
+                                            <StackPanel Margin="0,0,8,0"><TextBlock Text="UBX TIMEGPS" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxTimeGpsRateTextBox" Text="1" /></StackPanel>
+                                            <StackPanel Margin="0,0,8,0"><TextBlock Text="UBX TIMEUTC" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxTimeUtcRateTextBox" Text="1" /></StackPanel>
+                                            <StackPanel Margin="0,0,8,0"><TextBlock Text="UBX TIMELS" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxTimeLsRateTextBox" Text="1" /></StackPanel>
+                                            <StackPanel><TextBlock Text="UBX TIM-SVIN" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxTimSvinRateTextBox" Text="1" /></StackPanel>
                                         </UniformGrid>
                                         <Button Content="Apply message rates" Click="ApplyUbloxMessages_Click" HorizontalAlignment="Left" Margin="0,15,0,0" />
                                     </StackPanel>
                                 </Border>
-                            </Grid>
-                        </Grid>
+                             </Grid>
+
+                             <Grid Grid.Row="8" Margin="0,18,0,0">
+                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="0.8*" /></Grid.ColumnDefinitions>
+                                 <Border x:Name="UbloxTimingPanel" Style="{StaticResource Panel}" Margin="0,0,18,0" IsEnabled="False">
+                                     <StackPanel>
+                                         <Grid>
+                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                             <StackPanel>
+                                                 <TextBlock Text="F9T timing receiver" Style="{StaticResource SectionTitle}" />
+                                                 <TextBlock Text="Configure disabled, survey-in, or fixed-position timing mode through the F9 configuration database."
+                                                            Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,18,16" />
+                                             </StackPanel>
+                                             <Border Grid.Column="1" Style="{StaticResource StatusChip}" VerticalAlignment="Top">
+                                                 <TextBlock x:Name="UbloxF9StatusText" Text="F9T NOT QUERIED" Foreground="{DynamicResource MutedBrush}"
+                                                            FontFamily="Segoe UI Semibold" FontSize="10" />
+                                             </Border>
+                                         </Grid>
+                                         <UniformGrid Columns="3" Margin="0,0,0,14">
+                                             <StackPanel Margin="0,0,10,0"><TextBlock Text="SURVEY STATUS" Style="{StaticResource Label}" /><TextBlock x:Name="UbloxSurveyStatusText" Text="Not queried" FontFamily="Segoe UI Semibold" Margin="0,5,0,0" /></StackPanel>
+                                             <StackPanel Margin="0,0,10,0"><TextBlock Text="DURATION / OBS" Style="{StaticResource Label}" /><TextBlock x:Name="UbloxSurveyDurationText" Text="--" FontFamily="Cascadia Mono, Consolas" Margin="0,5,0,0" /></StackPanel>
+                                             <StackPanel><TextBlock Text="MEAN ACCURACY" Style="{StaticResource Label}" /><TextBlock x:Name="UbloxSurveyAccuracyText" Text="--" FontFamily="Cascadia Mono, Consolas" Margin="0,5,0,0" /></StackPanel>
+                                         </UniformGrid>
+                                         <Grid>
+                                             <Grid.ColumnDefinitions><ColumnDefinition Width="1.05*" /><ColumnDefinition Width="1*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
+                                             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                             <StackPanel Margin="0,0,10,10"><TextBlock Text="TIMING MODE" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="UbloxTimingModeCombo" SelectedIndex="0"><ComboBoxItem Tag="0">Disabled</ComboBoxItem><ComboBoxItem Tag="1">Survey-in</ComboBoxItem><ComboBoxItem Tag="2">Fixed position</ComboBoxItem></ComboBox></StackPanel>
+                                             <StackPanel Grid.Column="1" Margin="0,0,10,10"><TextBlock Text="SURVEY MINIMUM (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxSurveyMinimumTextBox" Text="300" /></StackPanel>
+                                             <StackPanel Grid.Column="2" Margin="0,0,0,10"><TextBlock Text="SURVEY ACCURACY (CM)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxSurveyLimitTextBox" Text="5.0" /></StackPanel>
+                                             <StackPanel Grid.Row="1" Margin="0,0,10,0"><TextBlock Text="FIXED LATITUDE (DEG)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxFixedLatitudeTextBox" Text="0" /></StackPanel>
+                                             <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,0,10,0"><TextBlock Text="FIXED LONGITUDE (DEG)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="UbloxFixedLongitudeTextBox" Text="0" /></StackPanel>
+                                             <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="HEIGHT M / ACCURACY CM" Style="{StaticResource Label}" Margin="0,0,0,5" /><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBox x:Name="UbloxFixedHeightTextBox" Text="0" Margin="0,0,5,0" /><TextBox x:Name="UbloxFixedAccuracyTextBox" Grid.Column="1" Text="1.0" Margin="5,0,0,0" /></Grid></StackPanel>
+                                         </Grid>
+                                         <TextBlock Text="Fixed mode requires a surveyed antenna-reference position. Incorrect coordinates directly create timing error."
+                                                    Foreground="{DynamicResource GoldBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,13,0,10" />
+                                         <Button Content="Apply F9T timing mode" Click="ApplyUbloxTimingMode_Click" HorizontalAlignment="Left" />
+                                     </StackPanel>
+                                 </Border>
+                                 <Border Grid.Column="1" Style="{StaticResource Panel}">
+                                     <StackPanel>
+                                         <TextBlock Text="Antenna and RF health" Style="{StaticResource SectionTitle}" />
+                                         <TextBlock Text="Decoded from UBX-MON-RF for each F9T frequency block."
+                                                    Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,16" />
+                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Receiver" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="UbloxReceiverFamilyText" Grid.Column="1" Text="Not identified" TextWrapping="Wrap" /></Grid>
+                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Chip ID" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="UbloxUniqueIdText" Grid.Column="1" Text="--" FontFamily="Cascadia Mono, Consolas" /></Grid>
+                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="GPS time" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="UbloxGpsTimeText" Grid.Column="1" Text="Not queried" TextWrapping="Wrap" /></Grid>
+                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Leap seconds" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="UbloxLeapSecondsText" Grid.Column="1" Text="Not queried" TextWrapping="Wrap" /></Grid>
+                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Leap event" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="UbloxLeapEventText" Grid.Column="1" Text="Not queried" TextWrapping="Wrap" /></Grid>
+                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Antenna" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="UbloxAntennaStatusText" Grid.Column="1" Text="Not queried" /></Grid>
+                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Interference" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="UbloxRfStatusText" Grid.Column="1" Text="Not queried" TextWrapping="Wrap" /></Grid>
+                                         <TextBlock x:Name="UbloxRfDetailText" Text="Refresh an F9T receiver to load dual-band RF diagnostics."
+                                                    Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" TextWrapping="Wrap" Margin="0,13,0,0" />
+                                     </StackPanel>
+                                 </Border>
+                             </Grid>
+                         </Grid>
                     </ScrollViewer>
 
                     <!-- ATOMIC CLOCK -->
@@ -1699,7 +1757,7 @@
                             <Border Grid.Row="1" Background="#102638" BorderBrush="#28506C" BorderThickness="1" CornerRadius="12" Padding="16,12" Margin="0,22,0,18">
                                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                     <TextBlock Text="&#xE95E;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource CyanBrush}" FontSize="18" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                    <TextBlock x:Name="SensorsDriverText" Grid.Column="1" Text="Connect a Time Card with driver 1.15 / ABI 8 to begin live sampling."
+                                    <TextBlock x:Name="SensorsDriverText" Grid.Column="1" Text="Connect a Time Card with driver 1.35 / ABI 9 to begin live sampling."
                                                Foreground="#B9DCEE" TextWrapping="Wrap" VerticalAlignment="Center" />
                                     <TextBlock x:Name="SensorsLastSampleText" Grid.Column="2" Text="NOT SAMPLED" Foreground="{DynamicResource CyanBrush}" FontFamily="Segoe UI Semibold" FontSize="10" Margin="16,0,0,0" VerticalAlignment="Center" />
                                 </Grid>
@@ -1756,7 +1814,11 @@
                                     <TextBlock x:Name="ImuDetailText" Grid.Column="1" Text="BNO055/BNO08x &#x00B7; AUTO ROUTE &#x00B7; NOT SAMPLED" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" VerticalAlignment="Center" />
                                 </Grid>
                                 <Grid>
-                                    <Grid.ColumnDefinitions><ColumnDefinition Width="1.15*" /><ColumnDefinition Width="0.85*" /></Grid.ColumnDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="1.05*" />
+                                        <ColumnDefinition Width="1.05*" />
+                                        <ColumnDefinition Width="0.9*" />
+                                    </Grid.ColumnDefinitions>
                                     <Border Style="{StaticResource Panel}" Padding="18" Margin="0,0,14,0">
                                         <StackPanel>
                                             <TextBlock Text="FUSED ORIENTATION" Style="{StaticResource Label}" />
@@ -1769,7 +1831,37 @@
                                             <TextBlock x:Name="ImuQuaternionText" Text="&#x2014;, &#x2014;, &#x2014;, &#x2014;" FontFamily="Cascadia Mono, Consolas" FontSize="14" Margin="0,7,0,0" />
                                         </StackPanel>
                                     </Border>
-                                    <Border Grid.Column="1" Style="{StaticResource Panel}" Padding="18">
+                                    <Border Grid.Column="1" Style="{StaticResource Panel}" Padding="12" Margin="0,0,14,0"
+                                            Background="#0A1827" ClipToBounds="True">
+                                        <Grid MinHeight="190">
+                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="3D BOARD ORIENTATION" Style="{StaticResource Label}" />
+                                                <TextBlock x:Name="ImuVisualizationStatusText" Grid.Column="1" Text="WAITING"
+                                                           Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" />
+                                            </Grid>
+                                            <Viewport3D x:Name="ImuOrientationViewport" Grid.Row="1" Margin="0,2,0,0"
+                                                        ClipToBounds="True" IsHitTestVisible="False">
+                                                <Viewport3D.Camera>
+                                                    <PerspectiveCamera Position="3.5,2.6,4.8" LookDirection="-3.5,-2.6,-4.8"
+                                                                       UpDirection="0,1,0" FieldOfView="34" />
+                                                </Viewport3D.Camera>
+                                                <ModelVisual3D x:Name="ImuCubeVisual" />
+                                            </Viewport3D>
+                                            <Grid Grid.Row="1" IsHitTestVisible="False">
+                                                <TextBlock Text="Y" Foreground="#79E6FF" FontFamily="Segoe UI Semibold" FontSize="10"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,4,0,0" />
+                                                <TextBlock Text="X" Foreground="#65D99C" FontFamily="Segoe UI Semibold" FontSize="10"
+                                                           HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                                <TextBlock Text="Z" Foreground="#F2C94C" FontFamily="Segoe UI Semibold" FontSize="10"
+                                                           HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="5,0,0,3" />
+                                            </Grid>
+                                            <TextBlock Grid.Row="2" Text="Quaternion-driven &#x00B7; sensor frame"
+                                                       Foreground="{DynamicResource MutedBrush}" FontSize="10" HorizontalAlignment="Center" />
+                                        </Grid>
+                                    </Border>
+                                    <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="18">
                                         <StackPanel>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="SENSOR HEALTH" Style="{StaticResource Label}" /><TextBlock x:Name="ImuStatusText" Grid.Column="1" Text="NOT SAMPLED" Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" /></Grid>
                                             <TextBlock x:Name="ImuTemperatureText" Text="&#x2014; &#x00B0;C" Style="{StaticResource MetricValue}" Margin="0,10,0,10" />

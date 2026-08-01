@@ -53,6 +53,8 @@ extern const GUID GUID_DEVCLASS_TIMECARD;
 
 #define TIMECARD_REGISTER_WINDOW_SIZE   0x00010000u
 #define TIMECARD_UART_CLOCK_HZ          50000000u
+#define TIMECARD_UART_RX_RING_SIZE      8192u
+#define TIMECARD_UART_INTERRUPT_OBJECTS 4u
 #define TIMECARD_SUBSYSTEM_COUNT        11u
 #define TIMECARD_PCI_REVISION_UNKNOWN   0xffu
 #define TIMECARD_OFFSET_NONE            MAXULONG
@@ -179,6 +181,11 @@ typedef struct _DEVICE_CONTEXT {
     volatile UCHAR *I2c;
     volatile UCHAR *Flash;
     volatile UCHAR *Uart[TIMECARD_UART_COUNT];
+    UCHAR UartRxRing[TIMECARD_UART_COUNT][TIMECARD_UART_RX_RING_SIZE];
+    volatile LONG UartRxHead[TIMECARD_UART_COUNT];
+    volatile LONG UartRxTail[TIMECARD_UART_COUNT];
+    volatile LONG UartRxLineStatus[TIMECARD_UART_COUNT];
+    volatile LONG UartRxDropped[TIMECARD_UART_COUNT];
     ULONG ClockOffset;
     ULONG TodOffset;
     ULONG NmeaOutOffset;
@@ -190,6 +197,8 @@ typedef struct _DEVICE_CONTEXT {
     ULONG I2cEnvironmentAddress;
     ULONG I2cImuAddress;
     ULONG I2cSensorMuxMask;
+    ULONG I2cEnvironmentMuxMask;
+    ULONG I2cPowerMuxMask;
     ULONG I2cImuType;
     ULONG I2cBno08xSequence;
     ULONG I2cBno08xConfigured;
@@ -211,9 +220,19 @@ typedef struct _DEVICE_CONTEXT {
     BOOLEAN HierarchyCreated;
     WDFDEVICE ChildDevices[TIMECARD_SUBSYSTEM_COUNT];
     WDFWAITLOCK RegisterLock;
+    WDFINTERRUPT UartInterrupt[TIMECARD_UART_INTERRUPT_OBJECTS];
+    ULONG UartInterruptCount;
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, DeviceGetContext)
+
+typedef struct _TIMECARD_UART_INTERRUPT_CONTEXT {
+    PDEVICE_CONTEXT DeviceContext;
+    ULONG MessageBase;
+} TIMECARD_UART_INTERRUPT_CONTEXT, *PTIMECARD_UART_INTERRUPT_CONTEXT;
+
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(TIMECARD_UART_INTERRUPT_CONTEXT,
+                                   UartInterruptGetContext)
 
 typedef enum _TIMECARD_SUBSYSTEM {
     TimeCardSubsystemPhc = 0,
@@ -287,6 +306,8 @@ NTSTATUS TimeCardUartWrite(PDEVICE_CONTEXT context,
 NTSTATUS TimeCardUartObserve(PDEVICE_CONTEXT context,
                              const TIMECARD_UART_OBSERVE *request,
                              TIMECARD_UART_OBSERVE *response);
+EVT_WDF_INTERRUPT_ISR TimeCardEvtUartInterruptIsr;
+VOID TimeCardUartDisableInterrupts(PDEVICE_CONTEXT context);
 
 NTSTATUS TimeCardSmaQuery(PDEVICE_CONTEXT context,
                           ULONG connector,

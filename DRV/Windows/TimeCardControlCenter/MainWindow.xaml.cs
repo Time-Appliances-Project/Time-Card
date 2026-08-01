@@ -16,7 +16,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
 using System.Windows.Threading;
 
 namespace TimeCardControlCenter
@@ -54,6 +56,8 @@ namespace TimeCardControlCenter
         private bool smaUpdatingUi;
         private bool timingRefreshing;
         private bool sensorsRefreshing;
+        private QuaternionRotation3D imuCubeRotation;
+        private Quaternion imuCubeCurrent = Quaternion.Identity;
         private bool i2cRefreshing;
         private bool ledAutomationUpdating;
         private bool ledControlsUpdating;
@@ -249,6 +253,7 @@ namespace TimeCardControlCenter
         public MainWindow()
         {
             InitializeComponent();
+            InitializeImuCube();
             signalGeneratorControls = new[]
             {
                 new SignalGeneratorControls { Status = Generator1StatusText, Enabled = Generator1EnabledCheckBox, Frequency = Generator1FrequencyTextBox, Duty = Generator1DutyTextBox, Phase = Generator1PhaseTextBox, Invert = Generator1InvertCheckBox, Route = Generator1RouteCombo, Detail = Generator1DetailText, Apply = Generator1ApplyButton },
@@ -1588,11 +1593,13 @@ namespace TimeCardControlCenter
                 lastUbloxPort = port;
                 lastUbloxBaud = baud;
                 ApplyUbloxSnapshot(snapshot);
-                UbloxConnectionText.Text = snapshot.ConfigurationSupported ?
+                UbloxConnectionText.Text = snapshot.IsPassiveStream ?
+                    "LIVE · PASSIVE F9T" : snapshot.ConfigurationSupported ?
                     (snapshot.Warnings.Count == 0 ? "LIVE · UBX CFG" : "LIVE · PARTIAL") :
                     "LIVE · STATUS ONLY";
                 UbloxConnectionText.Foreground = (Brush)FindResource(
-                    snapshot.ConfigurationSupported ? "AccentBrush" : "GoldBrush");
+                    snapshot.ConfigurationSupported || snapshot.IsPassiveStream ?
+                    "AccentBrush" : "GoldBrush");
                 Log(string.Format(CultureInfo.InvariantCulture,
                     "u-blox UART {0} refreshed at {1} baud with {2} warning(s).",
                     port, baud, snapshot.Warnings.Count));
@@ -1669,12 +1676,14 @@ namespace TimeCardControlCenter
                 "Position unavailable";
             UbloxSignalSupportText.Text = "Reported support: " +
                 (string.IsNullOrWhiteSpace(snapshot.SupportedGnss) ? "not reported" : snapshot.SupportedGnss);
+            ApplyUbloxTimingSnapshot(snapshot);
             RenderUbloxSkyMap(snapshot);
 
             UbloxRatePanel.IsEnabled = snapshot.RateConfigurationSupported;
             UbloxSignalPanel.IsEnabled = snapshot.SignalConfigurationSupported;
             UbloxTimePulsePanel.IsEnabled = snapshot.TimePulseConfigurationSupported;
             UbloxMessagePanel.IsEnabled = snapshot.MessageConfigurationSupported;
+            UbloxTimingPanel.IsEnabled = snapshot.TimingConfigurationSupported;
             if (!snapshot.ConfigurationSupported)
                 return;
 
@@ -1706,6 +1715,117 @@ namespace TimeCardControlCenter
             SetConfigText(UbloxGsvRateTextBox, snapshot, UbloxClient.CfgMsgNmeaGsvUart1);
             SetConfigText(UbloxRmcRateTextBox, snapshot, UbloxClient.CfgMsgNmeaRmcUart1);
             SetConfigText(UbloxZdaRateTextBox, snapshot, UbloxClient.CfgMsgNmeaZdaUart1);
+            SetConfigText(UbloxTimeGpsRateTextBox, snapshot,
+                UbloxClient.CfgMsgUbxNavTimeGpsUart1);
+            SetConfigText(UbloxTimeUtcRateTextBox, snapshot,
+                UbloxClient.CfgMsgUbxNavTimeUtcUart1);
+            SetConfigText(UbloxTimeLsRateTextBox, snapshot,
+                UbloxClient.CfgMsgUbxNavTimeLsUart1);
+            SetConfigText(UbloxTimSvinRateTextBox, snapshot,
+                UbloxClient.CfgMsgUbxTimSvinUart1);
+
+            if (snapshot.TimingConfigurationSupported)
+            {
+                SelectComboTag(UbloxTimingModeCombo,
+                    snapshot.Config(UbloxClient.CfgTmodeMode, 0));
+                SetConfigText(UbloxSurveyMinimumTextBox, snapshot,
+                    UbloxClient.CfgTmodeSurveyInMinimumDuration);
+                if (snapshot.HasConfig(UbloxClient.CfgTmodeSurveyInAccuracyLimit))
+                    UbloxSurveyLimitTextBox.Text = (snapshot.Config(
+                        UbloxClient.CfgTmodeSurveyInAccuracyLimit, 0) / 100.0)
+                        .ToString("F1", CultureInfo.InvariantCulture);
+                UbloxFixedLatitudeTextBox.Text = (snapshot.ConfigSigned32(
+                    UbloxClient.CfgTmodeLatitude, 0) * 1e-7 +
+                    snapshot.ConfigSigned8(UbloxClient.CfgTmodeLatitudeHighPrecision, 0) * 1e-9)
+                    .ToString("F9", CultureInfo.InvariantCulture);
+                UbloxFixedLongitudeTextBox.Text = (snapshot.ConfigSigned32(
+                    UbloxClient.CfgTmodeLongitude, 0) * 1e-7 +
+                    snapshot.ConfigSigned8(UbloxClient.CfgTmodeLongitudeHighPrecision, 0) * 1e-9)
+                    .ToString("F9", CultureInfo.InvariantCulture);
+                UbloxFixedHeightTextBox.Text = (snapshot.ConfigSigned32(
+                    UbloxClient.CfgTmodeHeight, 0) * 0.01 +
+                    snapshot.ConfigSigned8(UbloxClient.CfgTmodeHeightHighPrecision, 0) * 0.0001)
+                    .ToString("F4", CultureInfo.InvariantCulture);
+                if (snapshot.HasConfig(UbloxClient.CfgTmodeFixedPositionAccuracy))
+                    UbloxFixedAccuracyTextBox.Text = (snapshot.Config(
+                        UbloxClient.CfgTmodeFixedPositionAccuracy, 0) / 100.0)
+                        .ToString("F1", CultureInfo.InvariantCulture);
+            }
+        }
+
+        private void ApplyUbloxTimingSnapshot(UbloxReceiverSnapshot snapshot)
+        {
+            Brush healthy = (Brush)FindResource("AccentBrush");
+            Brush warning = (Brush)FindResource("GoldBrush");
+            UbloxF9StatusText.Text = snapshot.IsF9TimingReceiver ?
+                (snapshot.IsPassiveStream ? "F9T · PASSIVE RX" : "F9T DETECTED") :
+                "GENERIC U-BLOX";
+            UbloxF9StatusText.Foreground = snapshot.IsF9TimingReceiver ? healthy : warning;
+            UbloxReceiverFamilyText.Text = string.IsNullOrWhiteSpace(snapshot.ReceiverFamily) ?
+                "u-blox receiver" : snapshot.ReceiverFamily;
+            UbloxUniqueIdText.Text = string.IsNullOrWhiteSpace(snapshot.UniqueChipId) ?
+                "--" : snapshot.UniqueChipId;
+
+            if (snapshot.SurveyInStatusSupported)
+            {
+                UbloxSurveyStatusText.Text = snapshot.SurveyInActive ? "IN PROGRESS" :
+                    snapshot.SurveyInValid ? "VALID" : "INACTIVE";
+                UbloxSurveyStatusText.Foreground = snapshot.SurveyInValid ? healthy : warning;
+                UbloxSurveyDurationText.Text = string.Format(CultureInfo.InvariantCulture,
+                    "{0} / {1} obs", FormatDuration(snapshot.SurveyInDurationSeconds),
+                    snapshot.SurveyInObservations);
+                UbloxSurveyAccuracyText.Text = snapshot.SurveyInMeanAccuracyMillimeters < 1000.0 ?
+                    snapshot.SurveyInMeanAccuracyMillimeters.ToString("F1",
+                        CultureInfo.InvariantCulture) + " mm" :
+                    (snapshot.SurveyInMeanAccuracyMillimeters / 1000.0).ToString("F3",
+                        CultureInfo.InvariantCulture) + " m";
+            }
+            else
+            {
+                UbloxSurveyStatusText.Text = "NOT AVAILABLE";
+                UbloxSurveyStatusText.Foreground = warning;
+                UbloxSurveyDurationText.Text = "--";
+                UbloxSurveyAccuracyText.Text = "--";
+            }
+
+            UbloxGpsTimeText.Text = snapshot.GpsTimeSupported ?
+                string.Format(CultureInfo.InvariantCulture,
+                    "WN {0} · {1:F6} s · {2}", snapshot.GpsWeek,
+                    snapshot.GpsTimeOfWeekSeconds,
+                    snapshot.GpsTimeValid ? "valid" : "not valid") : "Not available";
+            UbloxLeapSecondsText.Text = snapshot.LeapSecondStatusSupported ?
+                string.Format(CultureInfo.InvariantCulture, "GPS-UTC {0} s · {1}",
+                    snapshot.CurrentLeapSeconds,
+                    snapshot.CurrentLeapSecondsValid ? "valid" : "not valid") : "Not available";
+            UbloxLeapEventText.Text = !snapshot.LeapSecondEventValid ?
+                "No valid event schedule" : snapshot.LeapSecondChange == 0 ?
+                "No leap change scheduled" : string.Format(CultureInfo.InvariantCulture,
+                    "{0:+#;-#;0} s in {1} s · WN {2}/{3}",
+                    snapshot.LeapSecondChange, snapshot.SecondsToLeapSecondEvent,
+                    snapshot.LeapSecondEventGpsWeek, snapshot.LeapSecondEventGpsDay);
+
+            if (!snapshot.RfStatusSupported || snapshot.RfBlocks.Count == 0)
+            {
+                UbloxAntennaStatusText.Text = "Not available";
+                UbloxRfStatusText.Text = "Not available";
+                UbloxRfDetailText.Text = "The receiver did not return UBX-MON-RF data.";
+                return;
+            }
+            UbloxRfBlockInfo first = snapshot.RfBlocks[0];
+            byte worstJamming = snapshot.RfBlocks.Max(block => block.JammingState);
+            byte highestIndicator = snapshot.RfBlocks.Max(block => block.JammingIndicator);
+            UbloxAntennaStatusText.Text = UbloxAntennaName(first.AntennaStatus) +
+                " · power " + UbloxAntennaPowerName(first.AntennaPower);
+            UbloxAntennaStatusText.Foreground = first.AntennaStatus == 2 ? healthy : warning;
+            UbloxRfStatusText.Text = UbloxJammingName(worstJamming) +
+                string.Format(CultureInfo.InvariantCulture, " · indicator {0}/255",
+                    highestIndicator);
+            UbloxRfStatusText.Foreground = worstJamming <= 1 ? healthy : warning;
+            UbloxRfDetailText.Text = string.Join(" · ", snapshot.RfBlocks.Select(block =>
+                string.Format(CultureInfo.InvariantCulture,
+                    "RF{0}: AGC {1}, noise {2}, jam {3}", block.BlockIdentifier,
+                    block.AutomaticGainControl, block.NoisePerMillisecond,
+                    block.JammingIndicator)));
         }
 
         private void UbloxSkyMap_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -2139,16 +2259,79 @@ namespace TimeCardControlCenter
                     "NMEA RMC rate", 0, byte.MaxValue);
                 byte zda = (byte)ParseUnsigned(UbloxZdaRateTextBox.Text,
                     "NMEA ZDA rate", 0, byte.MaxValue);
+                byte timeGps = (byte)ParseUnsigned(UbloxTimeGpsRateTextBox.Text,
+                    "UBX NAV-TIMEGPS rate", 0, byte.MaxValue);
+                byte timeUtc = (byte)ParseUnsigned(UbloxTimeUtcRateTextBox.Text,
+                    "UBX NAV-TIMEUTC rate", 0, byte.MaxValue);
+                byte timeLs = (byte)ParseUnsigned(UbloxTimeLsRateTextBox.Text,
+                    "UBX NAV-TIMELS rate", 0, byte.MaxValue);
+                byte surveyIn = (byte)ParseUnsigned(UbloxTimSvinRateTextBox.Text,
+                    "UBX TIM-SVIN rate", 0, byte.MaxValue);
                 bool? persist = ConfirmUbloxPersistence();
                 if (!persist.HasValue)
                     return;
                 await RunUbloxOperationAsync("u-blox UART 1 message rates updated",
                     receiver => receiver.ApplyMessageRates(navPvt, gga, gsa,
-                        gsv, rmc, zda, persist.Value));
+                        gsv, rmc, zda, timeGps, timeUtc, timeLs, surveyIn,
+                        persist.Value));
             }
             catch (Exception ex)
             {
                 ShowUbloxError("Message-rate configuration was not applied", ex);
+            }
+        }
+
+        private async void ApplyUbloxTimingMode_Click(object sender,
+            RoutedEventArgs e)
+        {
+            try
+            {
+                if (lastUbloxSnapshot == null ||
+                    !lastUbloxSnapshot.IsF9TimingReceiver ||
+                    !lastUbloxSnapshot.TimingConfigurationSupported)
+                    throw new InvalidOperationException(
+                        "Refresh a ZED-F9T or RCB-F9T receiver with timing-configuration support first.");
+                byte mode = (byte)SelectedComboTag(UbloxTimingModeCombo,
+                    "F9T timing mode");
+                uint surveyMinimum = ParseUnsigned(UbloxSurveyMinimumTextBox.Text,
+                    "survey-in minimum duration", 1, uint.MaxValue);
+                double surveyLimitCm = ParseInvariantDouble(
+                    UbloxSurveyLimitTextBox.Text, "survey-in accuracy", 0.0001,
+                    42949672.95);
+                double latitude = ParseInvariantDouble(UbloxFixedLatitudeTextBox.Text,
+                    "fixed latitude", -90.0, 90.0);
+                double longitude = ParseInvariantDouble(UbloxFixedLongitudeTextBox.Text,
+                    "fixed longitude", -180.0, 180.0);
+                double height = ParseInvariantDouble(UbloxFixedHeightTextBox.Text,
+                    "fixed height", -1000000.0, 1000000.0);
+                double fixedAccuracyCm = ParseInvariantDouble(
+                    UbloxFixedAccuracyTextBox.Text, "fixed-position accuracy",
+                    0.0001, 42949672.95);
+                uint surveyTenthsMillimeter = checked((uint)Math.Round(
+                    surveyLimitCm * 100.0, MidpointRounding.AwayFromZero));
+                uint fixedTenthsMillimeter = checked((uint)Math.Round(
+                    fixedAccuracyCm * 100.0, MidpointRounding.AwayFromZero));
+
+                string warning = mode == 2 ?
+                    "Fixed timing mode will use the entered antenna-reference position. Any coordinate error directly becomes timing error. Apply this position?" :
+                    mode == 1 ?
+                    "Starting survey-in replaces the current timing-mode solution until both duration and accuracy limits are met. Continue?" :
+                    "Disabling F9T timing mode can interrupt the Time Card's timing solution. Continue?";
+                if (MessageBox.Show(this, warning, "Apply F9T timing mode",
+                    MessageBoxButton.YesNo, MessageBoxImage.Warning) !=
+                    MessageBoxResult.Yes)
+                    return;
+                bool? persist = ConfirmUbloxPersistence();
+                if (!persist.HasValue)
+                    return;
+                await RunUbloxOperationAsync("F9T timing mode updated", receiver =>
+                    receiver.ApplyTimingMode(mode, surveyMinimum,
+                        surveyTenthsMillimeter, latitude, longitude, height,
+                        fixedTenthsMillimeter, persist.Value));
+            }
+            catch (Exception ex)
+            {
+                ShowUbloxError("F9T timing mode was not applied", ex);
             }
         }
 
@@ -2318,6 +2501,8 @@ namespace TimeCardControlCenter
             UbloxSignalPanel.IsEnabled = enabled;
             UbloxTimePulsePanel.IsEnabled = enabled;
             UbloxMessagePanel.IsEnabled = enabled;
+            UbloxTimingPanel.IsEnabled = enabled && lastUbloxSnapshot != null &&
+                lastUbloxSnapshot.TimingConfigurationSupported;
         }
 
         private void SetUbloxBusy(bool busy)
@@ -2349,6 +2534,41 @@ namespace TimeCardControlCenter
             }
         }
 
+        private static string UbloxAntennaName(byte status)
+        {
+            switch (status)
+            {
+                case 0: return "initializing";
+                case 1: return "unknown";
+                case 2: return "OK";
+                case 3: return "short circuit";
+                case 4: return "open circuit";
+                default: return "status " + status.ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        private static string UbloxAntennaPowerName(byte status)
+        {
+            switch (status)
+            {
+                case 0: return "off";
+                case 1: return "on";
+                default: return "unknown";
+            }
+        }
+
+        private static string UbloxJammingName(byte status)
+        {
+            switch (status)
+            {
+                case 0: return "monitor unavailable";
+                case 1: return "no significant interference";
+                case 2: return "interference warning";
+                case 3: return "critical interference";
+                default: return "unknown";
+            }
+        }
+
         private async void RefreshAtomic_Click(object sender, RoutedEventArgs e)
         {
             await RefreshAtomicAsync(true);
@@ -2363,7 +2583,7 @@ namespace TimeCardControlCenter
             {
                 if (lastSnapshot.AbiVersion < 9)
                 {
-                    AtomicConnectionText.Text = "DRIVER 1.29 / ABI 9 REQUIRED";
+                    AtomicConnectionText.Text = "DRIVER 1.32 / ABI 9 REQUIRED";
                     AtomicConnectionText.Foreground =
                         (Brush)FindResource("GoldBrush");
                     AtomicRefreshButton.IsEnabled = false;
@@ -3077,6 +3297,20 @@ namespace TimeCardControlCenter
                 value < minimum || value > maximum)
                 throw new InvalidOperationException(string.Format(CultureInfo.InvariantCulture,
                     "Enter a valid {0} between {1} and {2}.", name, minimum, maximum));
+            return value;
+        }
+
+        private static double ParseInvariantDouble(string text, string name,
+            double minimum, double maximum)
+        {
+            double value;
+            if (!double.TryParse(text, NumberStyles.Float,
+                CultureInfo.InvariantCulture, out value) || double.IsNaN(value) ||
+                double.IsInfinity(value) || value < minimum || value > maximum)
+                throw new InvalidOperationException(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Enter a valid {0} between {1} and {2}.", name, minimum,
+                    maximum));
             return value;
         }
 
@@ -6202,9 +6436,14 @@ namespace TimeCardControlCenter
             SensorsLastSampleText.Text = DateTime.Now.ToString(
                 "HH:mm:ss", CultureInfo.InvariantCulture);
             SensorsDriverText.Text = string.Format(CultureInfo.InvariantCulture,
-                "Guarded sensor branch sample · prior mux mask 0x{0:X2} · controller 0x{1:X2} · events 0x{2:X8}",
+                "Guarded all-route inventory · BME {3} · INA219 {4}/{5}/{6} · IMU {7} · prior mux 0x{0:X2} · controller 0x{1:X2} · events 0x{2:X8}",
                 telemetry.MuxChannelMask, telemetry.ControllerStatus,
-                telemetry.InterruptStatus);
+                telemetry.InterruptStatus,
+                telemetry.Environment.IsPresent ? "ACK" : "NO ACK",
+                telemetry.Rail12V.IsPresent ? "ACK" : "NO ACK",
+                telemetry.Rail5V.IsPresent ? "ACK" : "NO ACK",
+                telemetry.Rail3V3.IsPresent ? "ACK" : "NO ACK",
+                telemetry.Imu.IsPresent ? "ACK" : "NO ACK");
 
             EnvironmentSensorReading environment = telemetry.Environment;
             if (environment.IsValid)
@@ -6233,7 +6472,7 @@ namespace TimeCardControlCenter
             {
                 SetEnvironmentUnavailable(environment.IsPresent ?
                     "BME280/BMP280 · 0x76/0x77 · INVALID SAMPLE" :
-                    "BME280/BMP280 · 0x76/0x77 · NOT PRESENT");
+                    "BME280/BMP280 · 0x76/0x77 · NO I2C ACK · NOT FITTED OR UNPOWERED");
             }
 
             ApplyPowerRail(telemetry.Rail12V, Rail12VoltageText,
@@ -6269,11 +6508,11 @@ namespace TimeCardControlCenter
                 voltage.Text = "— V";
                 current.Text = "— A";
                 power.Text = "— W";
-                detail.Text = rail.IsPresent ? "Sample unavailable" :
-                    "INA219 not present";
+                detail.Text = rail.IsPresent ? "I2C ACK; sample unavailable" :
+                    "No I2C ACK; device not fitted or not powered";
                 status.Text = string.Format(CultureInfo.InvariantCulture,
                     "0x{0:X2} · {1}", rail.Address,
-                    rail.IsPresent ? "INVALID" : "NOT PRESENT");
+                    rail.IsPresent ? "INVALID" : "NO ACK");
                 status.Foreground = warning;
                 return;
             }
@@ -6303,6 +6542,7 @@ namespace TimeCardControlCenter
             string imuAddress = isBno08x ? "0x4A" : "0x29";
             if (!imu.IsValid)
             {
+                UpdateImuCubeOrientation(Quaternion.Identity, false);
                 ImuHeadingText.Text = "—°";
                 ImuRollText.Text = "—°";
                 ImuPitchText.Text = "—°";
@@ -6340,6 +6580,8 @@ namespace TimeCardControlCenter
             ImuQuaternionText.Text = string.Format(CultureInfo.InvariantCulture,
                 "{0:F4}, {1:F4}, {2:F4}, {3:F4}", imu.QuaternionW,
                 imu.QuaternionX, imu.QuaternionY, imu.QuaternionZ);
+            UpdateImuCubeOrientation(new Quaternion(imu.QuaternionX,
+                imu.QuaternionY, imu.QuaternionZ, imu.QuaternionW), true);
             ImuTemperatureText.Text = imu.HasTemperature ?
                 imu.TemperatureCelsius.ToString("F1",
                     CultureInfo.InvariantCulture) + " °C" : "— °C";
@@ -6369,6 +6611,103 @@ namespace TimeCardControlCenter
                 imu.UsesExternalClock ?
                     "External 32.768 kHz crystal active" :
                     "Internal clock active";
+        }
+
+        private void InitializeImuCube()
+        {
+            Model3DGroup scene = new Model3DGroup();
+            scene.Children.Add(new AmbientLight(Color.FromRgb(62, 83, 105)));
+            scene.Children.Add(new DirectionalLight(Color.FromRgb(238, 247, 255),
+                new Vector3D(-1.2, -1.6, -2.8)));
+            scene.Children.Add(new DirectionalLight(Color.FromRgb(73, 171, 255),
+                new Vector3D(2.1, 0.7, 1.4)));
+
+            Model3DGroup cube = new Model3DGroup();
+            const double half = 0.78;
+            cube.Children.Add(CreateImuCubeFace(
+                new Point3D(-half, -half, half), new Point3D(half, -half, half),
+                new Point3D(half, half, half), new Point3D(-half, half, half),
+                Color.FromRgb(41, 105, 201)));
+            cube.Children.Add(CreateImuCubeFace(
+                new Point3D(half, -half, -half), new Point3D(-half, -half, -half),
+                new Point3D(-half, half, -half), new Point3D(half, half, -half),
+                Color.FromRgb(24, 61, 123)));
+            cube.Children.Add(CreateImuCubeFace(
+                new Point3D(-half, half, half), new Point3D(half, half, half),
+                new Point3D(half, half, -half), new Point3D(-half, half, -half),
+                Color.FromRgb(242, 201, 76)));
+            cube.Children.Add(CreateImuCubeFace(
+                new Point3D(-half, -half, -half), new Point3D(half, -half, -half),
+                new Point3D(half, -half, half), new Point3D(-half, -half, half),
+                Color.FromRgb(20, 77, 104)));
+            cube.Children.Add(CreateImuCubeFace(
+                new Point3D(half, -half, half), new Point3D(half, -half, -half),
+                new Point3D(half, half, -half), new Point3D(half, half, half),
+                Color.FromRgb(68, 202, 148)));
+            cube.Children.Add(CreateImuCubeFace(
+                new Point3D(-half, -half, -half), new Point3D(-half, -half, half),
+                new Point3D(-half, half, half), new Point3D(-half, half, -half),
+                Color.FromRgb(33, 126, 172)));
+
+            imuCubeRotation = new QuaternionRotation3D(Quaternion.Identity);
+            cube.Transform = new RotateTransform3D(imuCubeRotation);
+            scene.Children.Add(cube);
+            ImuCubeVisual.Content = scene;
+        }
+
+        private static GeometryModel3D CreateImuCubeFace(Point3D p0, Point3D p1,
+                                                          Point3D p2, Point3D p3,
+                                                          Color color)
+        {
+            MeshGeometry3D mesh = new MeshGeometry3D
+            {
+                Positions = new Point3DCollection { p0, p1, p2, p3 },
+                TriangleIndices = new Int32Collection { 0, 1, 2, 0, 2, 3 }
+            };
+            MaterialGroup materials = new MaterialGroup();
+            materials.Children.Add(new DiffuseMaterial(new SolidColorBrush(color)));
+            materials.Children.Add(new SpecularMaterial(
+                new SolidColorBrush(Color.FromArgb(180, 225, 243, 255)), 42.0));
+            return new GeometryModel3D(mesh, materials) { BackMaterial = materials };
+        }
+
+        private void UpdateImuCubeOrientation(Quaternion orientation, bool valid)
+        {
+            if (imuCubeRotation == null)
+                return;
+
+            Quaternion target = orientation;
+            double lengthSquared = target.X * target.X + target.Y * target.Y +
+                target.Z * target.Z + target.W * target.W;
+            if (!valid || double.IsNaN(lengthSquared) ||
+                double.IsInfinity(lengthSquared) || lengthSquared < 0.000001)
+            {
+                target = Quaternion.Identity;
+                valid = false;
+            }
+            else
+            {
+                target.Normalize();
+                double dot = imuCubeCurrent.X * target.X +
+                    imuCubeCurrent.Y * target.Y + imuCubeCurrent.Z * target.Z +
+                    imuCubeCurrent.W * target.W;
+                if (dot < 0.0)
+                    target = new Quaternion(-target.X, -target.Y, -target.Z, -target.W);
+            }
+
+            QuaternionAnimation animation = new QuaternionAnimation(
+                imuCubeCurrent, target, TimeSpan.FromMilliseconds(260))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.HoldEnd,
+                UseShortestPath = true
+            };
+            imuCubeRotation.BeginAnimation(QuaternionRotation3D.QuaternionProperty,
+                animation, HandoffBehavior.SnapshotAndReplace);
+            imuCubeCurrent = target;
+            ImuVisualizationStatusText.Text = valid ? "LIVE" : "WAITING";
+            ImuVisualizationStatusText.Foreground = (Brush)FindResource(
+                valid ? "AccentBrush" : "MutedBrush");
         }
 
         private static string FormatSensorVector(SensorVector3 vector)

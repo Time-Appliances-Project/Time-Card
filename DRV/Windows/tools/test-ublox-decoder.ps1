@@ -122,6 +122,39 @@ Assert-True ($second.Messages[1].Details -match '37.4220000, -122.0840000') 'NME
 Assert-True ($second.Messages[2].Name -eq 'RTCM3-1005') 'RTCM3 type was not decoded'
 Assert-True ($second.Messages[2].ChecksumValid -eq $true) 'valid RTCM CRC was rejected'
 
+$timeGps = [byte[]]::new(16)
+[BitConverter]::GetBytes([uint32]345678901).CopyTo($timeGps, 0)
+[BitConverter]::GetBytes([int32]-125000).CopyTo($timeGps, 4)
+[BitConverter]::GetBytes([int16]2429).CopyTo($timeGps, 8)
+$timeGps[10] = 18
+$timeGps[11] = 7
+[BitConverter]::GetBytes([uint32]20).CopyTo($timeGps, 12)
+$timeLs = [byte[]]::new(24)
+[BitConverter]::GetBytes([uint32]345678901).CopyTo($timeLs, 0)
+$timeLs[8] = 2
+$timeLs[9] = 18
+$timeLs[10] = 2
+$timeLs[11] = 1
+[BitConverter]::GetBytes([int32]86400).CopyTo($timeLs, 12)
+[BitConverter]::GetBytes([uint16]2430).CopyTo($timeLs, 16)
+[BitConverter]::GetBytes([uint16]1).CopyTo($timeLs, 18)
+$timeLs[23] = 3
+$timeUtc = [byte[]]::new(20)
+[BitConverter]::GetBytes([uint32]345678901).CopyTo($timeUtc, 0)
+[BitConverter]::GetBytes([uint32]25).CopyTo($timeUtc, 4)
+[BitConverter]::GetBytes([int32]123456789).CopyTo($timeUtc, 8)
+[BitConverter]::GetBytes([uint16]2026).CopyTo($timeUtc, 12)
+$timeUtc[14] = 8; $timeUtc[15] = 1; $timeUtc[16] = 12
+$timeUtc[17] = 34; $timeUtc[18] = 56; $timeUtc[19] = 7
+$timeMessages = $decoder.Feed((Join-ByteArrays @(
+    (New-UbxFrame 0x01 0x20 $timeGps),
+    (New-UbxFrame 0x01 0x26 $timeLs),
+    (New-UbxFrame 0x01 0x21 $timeUtc))))
+Assert-True ($timeMessages.Messages.Count -eq 3) 'UBX time-family frames were not separated'
+Assert-True ($timeMessages.Messages[0].Name -eq 'UBX-NAV-TIMEGPS' -and $timeMessages.Messages[0].Summary -match 'GPS week 2429' -and $timeMessages.Messages[0].Details -match 'GPS-UTC 18 s') 'UBX-NAV-TIMEGPS was not decoded'
+Assert-True ($timeMessages.Messages[1].Name -eq 'UBX-NAV-TIMELS' -and $timeMessages.Messages[1].Summary -match 'GPS-UTC 18 s' -and $timeMessages.Messages[1].Summary -match '\+1 s change') 'UBX-NAV-TIMELS was not decoded'
+Assert-True ($timeMessages.Messages[2].Name -eq 'UBX-NAV-TIMEUTC' -and $timeMessages.Messages[2].Summary -match '2026-08-01 12:34:56 UTC') 'UBX-NAV-TIMEUTC was not decoded'
+
 [byte[]]$gga = New-NmeaSentence 'GNGGA,205650.00,3725.3200,N,12205.0400,W,4,18,0.6,15.2,M,-32.1,M,1.0,0001'
 [byte[]]$gsa = New-NmeaSentence 'GNGSA,A,3,01,03,07,08,11,14,18,22,,,,,1.2,0.7,1.0,1'
 [byte[]]$gsv = New-NmeaSentence 'GPGSV,1,1,02,01,45,123,42,22,30,250,35,1'
@@ -156,8 +189,8 @@ $third = $decoder.Feed($damaged)
 Assert-True ($third.Messages.Count -eq 1) 'damaged UBX frame was not surfaced'
 Assert-True ($third.Messages[0].ChecksumValid -eq $false) 'damaged UBX checksum was not flagged'
 Assert-True ($decoder.ChecksumFailures -eq 1) 'checksum failure counter is incorrect'
-Assert-True ($decoder.TotalMessages -eq 4) 'message counter is incorrect'
+Assert-True ($decoder.TotalMessages -eq 7) 'message counter is incorrect'
 
 $decoder.Reset()
 Assert-True ($decoder.TotalMessages -eq 0 -and $decoder.BufferedBytes -eq 0) 'reset did not clear decoder state'
-Write-Host 'GNSS/NMEA stream decoder tests passed (fragmentation, decoded fields, UBX, NMEA, RTCM3, checksums, reset).'
+Write-Host 'GNSS/NMEA stream decoder tests passed (fragmentation, UBX time/leap decoding, decoded fields, NMEA, RTCM3, checksums, reset).'

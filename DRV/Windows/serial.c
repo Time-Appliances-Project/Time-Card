@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Polled 16550 UART access for GNSS, GNSS2, MAC, and NMEA ports. */
+/* Interrupt-backed 16550 UART access for GNSS, GNSS2, MAC, and NMEA ports. */
 
 #include "timecard.h"
 
@@ -18,10 +18,117 @@
 #define UART_FCR_INIT 0x07u
 #define UART_MCR_INIT 0x03u
 #define UART_LSR_DR   0x01u
+#define UART_IER_RDI  0x01u
 #define UART_LSR_THRE 0x20u
 #define UART_LSR_TEMT 0x40u
 
 #define TIMECARD_UART_MAX_TIMEOUT_MS 5000u
+#define TIMECARD_UART_NO_PORT        MAXULONG
+#define TIMECARD_UART_BURST_POLL_US  50u
+#define TIMECARD_UART_BURST_IDLE_US  2000u
+
+C_ASSERT((TIMECARD_UART_RX_RING_SIZE &
+          (TIMECARD_UART_RX_RING_SIZE - 1u)) == 0);
+
+static UCHAR TimeCardUartReadRegister(PDEVICE_CONTEXT context, ULONG port,
+                                      ULONG reg);
+static BOOLEAN TimeCardUartValid(PDEVICE_CONTEXT context, ULONG port);
+
+static ULONG
+TimeCardUartPortForMessage(PDEVICE_CONTEXT context, ULONG messageId)
+{
+    static const ULONG msiMessages[TIMECARD_UART_COUNT] = { 3u, 4u, 5u, 10u };
+    static const ULONG msixMessages[TIMECARD_UART_COUNT] = { 35u, 36u, 37u, 42u };
+    static const ULONG artMessages[TIMECARD_UART_COUNT] = {
+        3u, MAXULONG, 7u, MAXULONG
+    };
+    const ULONG *messages = context->Layout == TIMECARD_LAYOUT_MSIX ?
+        msixMessages : context->Layout == TIMECARD_LAYOUT_ART ?
+        artMessages : msiMessages;
+    ULONG port;
+
+    for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
+        if (messages[port] == messageId)
+            return port;
+    }
+    return TIMECARD_UART_NO_PORT;
+}
+
+static BOOLEAN
+TimeCardUartHasInterrupt(PDEVICE_CONTEXT context, ULONG port)
+{
+    ULONG message;
+
+    if (context->UartInterruptCount == 0)
+        return FALSE;
+    for (message = 0; message < context->InterruptMessages; ++message) {
+        if (TimeCardUartPortForMessage(context, message) == port)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static VOID
+TimeCardUartRingPush(PDEVICE_CONTEXT context, ULONG port, UCHAR value)
+{
+    ULONG head = (ULONG)context->UartRxHead[port];
+    ULONG next = (head + 1u) & (TIMECARD_UART_RX_RING_SIZE - 1u);
+
+    if (next == (ULONG)context->UartRxTail[port]) {
+        InterlockedIncrement(&context->UartRxDropped[port]);
+        return;
+    }
+    context->UartRxRing[port][head] = value;
+    KeMemoryBarrier();
+    InterlockedExchange(&context->UartRxHead[port], (LONG)next);
+}
+
+static VOID
+TimeCardUartRingDrain(PDEVICE_CONTEXT context, ULONG port,
+                      TIMECARD_UART_TRANSFER *transfer, ULONG maximum)
+{
+    while (transfer->Length < maximum) {
+        ULONG tail = (ULONG)context->UartRxTail[port];
+
+        if (tail == (ULONG)context->UartRxHead[port])
+            break;
+        KeMemoryBarrier();
+        transfer->Data[transfer->Length++] = context->UartRxRing[port][tail];
+        InterlockedExchange(&context->UartRxTail[port],
+            (LONG)((tail + 1u) & (TIMECARD_UART_RX_RING_SIZE - 1u)));
+    }
+}
+
+BOOLEAN
+TimeCardEvtUartInterruptIsr(WDFINTERRUPT interrupt, ULONG messageId)
+{
+    PTIMECARD_UART_INTERRUPT_CONTEXT interruptContext =
+        UartInterruptGetContext(interrupt);
+    PDEVICE_CONTEXT context = interruptContext->DeviceContext;
+    ULONG globalMessageId = interruptContext->MessageBase + messageId;
+    ULONG port = TimeCardUartPortForMessage(context, globalMessageId);
+    ULONG drained = 0;
+    UCHAR lsr;
+
+    /*
+     * A few PCI stacks report a global MSI-X message number even when the
+     * CM_RESOURCE descriptor describes only one vector. Accept both forms.
+     */
+    if (port == TIMECARD_UART_NO_PORT && messageId != globalMessageId)
+        port = TimeCardUartPortForMessage(context, messageId);
+    if (port == TIMECARD_UART_NO_PORT || !TimeCardUartValid(context, port))
+        return FALSE;
+    lsr = TimeCardUartReadRegister(context, port, UART_LSR);
+    InterlockedOr(&context->UartRxLineStatus[port], lsr);
+    while ((lsr & UART_LSR_DR) != 0 && drained < 1024u) {
+        TimeCardUartRingPush(
+            context, port, TimeCardUartReadRegister(context, port, UART_RBR));
+        ++drained;
+        lsr = TimeCardUartReadRegister(context, port, UART_LSR);
+        InterlockedOr(&context->UartRxLineStatus[port], lsr);
+    }
+    return drained != 0;
+}
 
 static UCHAR
 TimeCardUartReadRegister(PDEVICE_CONTEXT context, ULONG port, ULONG reg)
@@ -86,6 +193,13 @@ TimeCardUartConfigure(PDEVICE_CONTEXT context,
     TimeCardUartWriteRegister(context, config->Port, UART_LCR, UART_LCR_8N1);
     TimeCardUartWriteRegister(context, config->Port, UART_FCR, UART_FCR_INIT);
     TimeCardUartWriteRegister(context, config->Port, UART_MCR, UART_MCR_INIT);
+    InterlockedExchange(&context->UartRxHead[config->Port], 0);
+    InterlockedExchange(&context->UartRxTail[config->Port], 0);
+    InterlockedExchange(&context->UartRxLineStatus[config->Port], 0);
+    InterlockedExchange(&context->UartRxDropped[config->Port], 0);
+    if (TimeCardUartHasInterrupt(context, config->Port))
+        TimeCardUartWriteRegister(
+            context, config->Port, UART_IER, UART_IER_RDI);
     WdfWaitLockRelease(context->RegisterLock);
     return STATUS_SUCCESS;
 }
@@ -95,7 +209,9 @@ TimeCardUartRead(PDEVICE_CONTEXT context,
                  const TIMECARD_UART_READ_REQUEST *request,
                  TIMECARD_UART_TRANSFER *transfer)
 {
+    BOOLEAN burstActive = FALSE;
     ULONGLONG deadline;
+    ULONG burstIdlePolls = 0;
     ULONG maximum;
     ULONG timeout;
 
@@ -113,29 +229,71 @@ TimeCardUartRead(PDEVICE_CONTEXT context,
     RtlZeroMemory(transfer, sizeof(*transfer));
     transfer->Port = request->Port;
     transfer->TimeoutMilliseconds = timeout;
+    transfer->LineStatus = (ULONG)InterlockedExchange(
+        &context->UartRxLineStatus[request->Port], 0);
 
     do {
+        BOOLEAN received = FALSE;
+        ULONG previousLength = transfer->Length;
         UCHAR lsr;
 
+        TimeCardUartRingDrain(context, request->Port, transfer, maximum);
+        if (transfer->Length != previousLength) {
+            burstActive = TRUE;
+            burstIdlePolls = 0;
+        }
+        if (transfer->Length >= maximum)
+            break;
         WdfWaitLockAcquire(context->RegisterLock, NULL);
         lsr = TimeCardUartReadRegister(context, request->Port, UART_LSR);
         transfer->LineStatus |= lsr;
         while ((lsr & UART_LSR_DR) != 0 && transfer->Length < maximum) {
             transfer->Data[transfer->Length++] =
                 TimeCardUartReadRegister(context, request->Port, UART_RBR);
+            received = TRUE;
             lsr = TimeCardUartReadRegister(context, request->Port, UART_LSR);
             transfer->LineStatus |= lsr;
         }
         WdfWaitLockRelease(context->RegisterLock);
 
-        if (transfer->Length >= maximum || timeout == 0)
+        if (received) {
+            burstActive = TRUE;
+            burstIdlePolls = 0;
+        } else if (burstActive) {
+            ++burstIdlePolls;
+            if (burstIdlePolls >=
+                TIMECARD_UART_BURST_IDLE_US /
+                TIMECARD_UART_BURST_POLL_US) {
+                break;
+            }
+        }
+
+        if (transfer->Length >= maximum || (!burstActive && timeout == 0))
             break;
-        if (KeQueryInterruptTime() >= deadline)
+        if (!burstActive && KeQueryInterruptTime() >= deadline)
             break;
-        TimeCardUartPause();
+        if (burstActive)
+            KeStallExecutionProcessor(TIMECARD_UART_BURST_POLL_US);
+        else
+            TimeCardUartPause();
     } while (TRUE);
 
     return transfer->Length != 0 ? STATUS_SUCCESS : STATUS_IO_TIMEOUT;
+}
+
+VOID
+TimeCardUartDisableInterrupts(PDEVICE_CONTEXT context)
+{
+    ULONG port;
+
+    if (!context->HardwareReady)
+        return;
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
+        if (context->Uart[port] != NULL)
+            TimeCardUartWriteRegister(context, port, UART_IER, 0);
+    }
+    WdfWaitLockRelease(context->RegisterLock);
 }
 
 NTSTATUS
@@ -211,6 +369,19 @@ TimeCardUartObserve(PDEVICE_CONTEXT context,
     response->Port = request->Port;
     response->TimeoutMilliseconds = timeout;
     response->Flags = TIMECARD_UART_OBSERVE_FLAG_PRESENT;
+    response->Reserved[0] = context->UartInterruptCount;
+    response->Reserved[1] =
+        ((ULONG)context->UartRxHead[request->Port] -
+         (ULONG)context->UartRxTail[request->Port]) &
+        (TIMECARD_UART_RX_RING_SIZE - 1u);
+    response->Reserved[2] = (ULONG)context->UartRxDropped[request->Port];
+
+    if (context->UartRxHead[request->Port] !=
+        context->UartRxTail[request->Port]) {
+        response->Flags |= TIMECARD_UART_OBSERVE_FLAG_ACTIVITY;
+        response->LineStatus = (ULONG)context->UartRxLineStatus[request->Port];
+        return STATUS_SUCCESS;
+    }
 
     do {
         UCHAR lsr;

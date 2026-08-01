@@ -20,7 +20,7 @@ if (-not $OutputDirectory.StartsWith(
     throw 'OutputDirectory must be a child of the Windows driver directory.'
 }
 $driverFolder = Join-Path $OutputDirectory 'TimeCard'
-$cabPath = Join-Path $OutputDirectory 'TimeCard-1.29-x64.cab'
+$cabPath = Join-Path $OutputDirectory 'TimeCard-1.35-x64.cab'
 
 function Find-MSBuild {
     $command = Get-Command msbuild.exe -ErrorAction SilentlyContinue
@@ -126,7 +126,7 @@ $ddfLines = @(
     '.Set CompressionType=MSZIP',
     '.Set Cabinet=on',
     '.Set Compress=on',
-    '.Set CabinetNameTemplate=TimeCard-1.29-x64.cab',
+    '.Set CabinetNameTemplate=TimeCard-1.35-x64.cab',
     ".Set DiskDirectoryTemplate=`"$OutputDirectory`"",
     ".Set RptFileName=`"$(Join-Path $OutputDirectory 'TimeCard.rpt')`"",
     ".Set InfFileName=`"$(Join-Path $OutputDirectory 'TimeCard-cab.inf')`"",

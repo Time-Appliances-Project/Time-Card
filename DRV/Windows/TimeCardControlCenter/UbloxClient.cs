@@ -53,6 +53,30 @@ namespace TimeCardControlCenter
         }
     }
 
+    public sealed class UbloxRfBlockInfo
+    {
+        internal UbloxRfBlockInfo(byte blockIdentifier, byte jammingState,
+            byte antennaStatus, byte antennaPower, ushort noisePerMillisecond,
+            ushort automaticGainControl, byte jammingIndicator)
+        {
+            BlockIdentifier = blockIdentifier;
+            JammingState = jammingState;
+            AntennaStatus = antennaStatus;
+            AntennaPower = antennaPower;
+            NoisePerMillisecond = noisePerMillisecond;
+            AutomaticGainControl = automaticGainControl;
+            JammingIndicator = jammingIndicator;
+        }
+
+        public byte BlockIdentifier { get; private set; }
+        public byte JammingState { get; private set; }
+        public byte AntennaStatus { get; private set; }
+        public byte AntennaPower { get; private set; }
+        public ushort NoisePerMillisecond { get; private set; }
+        public ushort AutomaticGainControl { get; private set; }
+        public byte JammingIndicator { get; private set; }
+    }
+
     public sealed class UbloxReceiverSnapshot
     {
         private readonly Dictionary<uint, ulong> configuration;
@@ -64,6 +88,7 @@ namespace TimeCardControlCenter
             List<string> warningList = warnings as List<string> ?? new List<string>(warnings);
             Warnings = warningList.AsReadOnly();
             Satellites = new List<UbloxSatelliteInfo>().AsReadOnly();
+            RfBlocks = new List<UbloxRfBlockInfo>().AsReadOnly();
             CapturedAtUtc = DateTime.UtcNow;
         }
 
@@ -73,6 +98,10 @@ namespace TimeCardControlCenter
         public string Firmware { get; internal set; }
         public string ProtocolVersion { get; internal set; }
         public string SupportedGnss { get; internal set; }
+        public string ReceiverFamily { get; internal set; }
+        public string UniqueChipId { get; internal set; }
+        public bool IsF9TimingReceiver { get; internal set; }
+        public bool IsPassiveStream { get; internal set; }
         public byte FixType { get; internal set; }
         public bool FixValid { get; internal set; }
         public bool DifferentialSolution { get; internal set; }
@@ -94,6 +123,31 @@ namespace TimeCardControlCenter
         public bool SignalConfigurationSupported { get; internal set; }
         public bool TimePulseConfigurationSupported { get; internal set; }
         public bool MessageConfigurationSupported { get; internal set; }
+        public bool TimingConfigurationSupported { get; internal set; }
+        public bool SurveyInStatusSupported { get; internal set; }
+        public bool SurveyInActive { get; internal set; }
+        public bool SurveyInValid { get; internal set; }
+        public uint SurveyInDurationSeconds { get; internal set; }
+        public uint SurveyInObservations { get; internal set; }
+        public double SurveyInMeanAccuracyMillimeters { get; internal set; }
+        public bool RfStatusSupported { get; internal set; }
+        public IList<UbloxRfBlockInfo> RfBlocks { get; internal set; }
+        public bool GpsTimeSupported { get; internal set; }
+        public bool GpsTimeValid { get; internal set; }
+        public int GpsWeek { get; internal set; }
+        public double GpsTimeOfWeekSeconds { get; internal set; }
+        public int GpsUtcLeapSeconds { get; internal set; }
+        public uint GpsTimeAccuracyNanoseconds { get; internal set; }
+        public bool LeapSecondStatusSupported { get; internal set; }
+        public bool CurrentLeapSecondsValid { get; internal set; }
+        public bool LeapSecondEventValid { get; internal set; }
+        public int CurrentLeapSeconds { get; internal set; }
+        public int LeapSecondChange { get; internal set; }
+        public int SecondsToLeapSecondEvent { get; internal set; }
+        public ushort LeapSecondEventGpsWeek { get; internal set; }
+        public ushort LeapSecondEventGpsDay { get; internal set; }
+        public byte CurrentLeapSecondSource { get; internal set; }
+        public byte LeapSecondEventSource { get; internal set; }
         public IList<string> Warnings { get; private set; }
 
         public ulong Config(uint key, ulong fallback)
@@ -105,6 +159,20 @@ namespace TimeCardControlCenter
         public bool HasConfig(uint key)
         {
             return configuration.ContainsKey(key);
+        }
+
+        public int ConfigSigned32(uint key, int fallback)
+        {
+            ulong value;
+            return configuration.TryGetValue(key, out value) ?
+                unchecked((int)(uint)value) : fallback;
+        }
+
+        public int ConfigSigned8(uint key, int fallback)
+        {
+            ulong value;
+            return configuration.TryGetValue(key, out value) ?
+                unchecked((sbyte)(byte)value) : fallback;
         }
     }
 
@@ -141,6 +209,28 @@ namespace TimeCardControlCenter
         internal const uint CfgMsgNmeaGsvUart1 = 0x209100c5;
         internal const uint CfgMsgNmeaRmcUart1 = 0x209100ac;
         internal const uint CfgMsgNmeaZdaUart1 = 0x209100d9;
+        internal const uint CfgMsgUbxNavTimeGpsUart1 = 0x20910048;
+        internal const uint CfgMsgUbxNavTimeLsUart1 = 0x20910061;
+        internal const uint CfgMsgUbxNavTimeUtcUart1 = 0x2091005c;
+        internal const uint CfgMsgUbxTimSvinUart1 = 0x20910098;
+
+        internal const uint CfgTmodeMode = 0x20030001;
+        internal const uint CfgTmodePositionType = 0x20030002;
+        internal const uint CfgTmodeEcefX = 0x40030003;
+        internal const uint CfgTmodeEcefY = 0x40030004;
+        internal const uint CfgTmodeEcefZ = 0x40030005;
+        internal const uint CfgTmodeEcefXHighPrecision = 0x20030006;
+        internal const uint CfgTmodeEcefYHighPrecision = 0x20030007;
+        internal const uint CfgTmodeEcefZHighPrecision = 0x20030008;
+        internal const uint CfgTmodeLatitude = 0x40030009;
+        internal const uint CfgTmodeLongitude = 0x4003000a;
+        internal const uint CfgTmodeHeight = 0x4003000b;
+        internal const uint CfgTmodeLatitudeHighPrecision = 0x2003000c;
+        internal const uint CfgTmodeLongitudeHighPrecision = 0x2003000d;
+        internal const uint CfgTmodeHeightHighPrecision = 0x2003000e;
+        internal const uint CfgTmodeFixedPositionAccuracy = 0x4003000f;
+        internal const uint CfgTmodeSurveyInMinimumDuration = 0x40030010;
+        internal const uint CfgTmodeSurveyInAccuracyLimit = 0x40030011;
 
         private static readonly uint[] RateKeys =
         {
@@ -165,7 +255,18 @@ namespace TimeCardControlCenter
         {
             CfgMsgUbxNavPvtUart1, CfgMsgNmeaGgaUart1,
             CfgMsgNmeaGsaUart1, CfgMsgNmeaGsvUart1,
-            CfgMsgNmeaRmcUart1, CfgMsgNmeaZdaUart1
+            CfgMsgNmeaRmcUart1, CfgMsgNmeaZdaUart1,
+            CfgMsgUbxNavTimeGpsUart1, CfgMsgUbxNavTimeLsUart1,
+            CfgMsgUbxNavTimeUtcUart1, CfgMsgUbxTimSvinUart1
+        };
+
+        private static readonly uint[] TimingModeKeys =
+        {
+            CfgTmodeMode, CfgTmodePositionType,
+            CfgTmodeLatitude, CfgTmodeLongitude, CfgTmodeHeight,
+            CfgTmodeLatitudeHighPrecision, CfgTmodeLongitudeHighPrecision,
+            CfgTmodeHeightHighPrecision, CfgTmodeFixedPositionAccuracy,
+            CfgTmodeSurveyInMinimumDuration, CfgTmodeSurveyInAccuracyLimit
         };
 
         private readonly TimeCardClient transport;
@@ -190,25 +291,83 @@ namespace TimeCardControlCenter
             Dictionary<uint, ulong> configuration = new Dictionary<uint, ulong>();
             List<string> warnings = new List<string>();
             UbloxReceiverSnapshot snapshot = new UbloxReceiverSnapshot(configuration, warnings);
+            IDictionary<ushort, byte[]> passiveMessages = null;
 
-            ParseVersion(Poll(0x0a, 0x04), snapshot);
             try
             {
-                ParseNavigation(Poll(0x01, 0x07), snapshot);
+                ParseVersion(Poll(0x0a, 0x04), snapshot);
             }
-            catch (Exception ex)
+            catch (Exception pollError)
             {
-                warnings.Add("UBX-NAV-PVT: " + ex.Message);
+                passiveMessages = transport.CaptureUbxMessages(port, baud, 5000);
+                byte[] version;
+                if (!passiveMessages.ContainsKey(MessageKey(0x0a, 0x04)) &&
+                    !LooksLikeF9TimingStream(passiveMessages))
+                {
+                    /*
+                     * A receive-only FPGA path can begin its first capture
+                     * between navigation epochs, particularly just after the
+                     * unanswered MON-VER poll flushed the 16550 FIFO. Merge a
+                     * second full epoch window before classifying the module.
+                     */
+                    IDictionary<ushort, byte[]> retryMessages =
+                        transport.CaptureUbxMessages(port, baud, 5000);
+                    foreach (KeyValuePair<ushort, byte[]> message in retryMessages)
+                        passiveMessages[message.Key] = message.Value;
+                }
+                if (passiveMessages.TryGetValue(MessageKey(0x0a, 0x04),
+                    out version))
+                {
+                    ParseVersion(version, snapshot);
+                }
+                else if (LooksLikeF9TimingStream(passiveMessages))
+                {
+                    snapshot.Module = "ZED/RCB-F9T (passive stream)";
+                    snapshot.Firmware = "reported only in UBX-MON-VER";
+                    snapshot.ProtocolVersion = "F9 UBX";
+                    snapshot.SupportedGnss = "decoded from live stream";
+                    snapshot.ReceiverFamily = "u-blox F9-compatible timing";
+                    snapshot.IsF9TimingReceiver = true;
+                }
+                else if (passiveMessages.Count != 0)
+                {
+                    snapshot.Module = "u-blox receiver (passive stream)";
+                    snapshot.Firmware = "reported only in UBX-MON-VER";
+                    snapshot.ProtocolVersion = "UBX";
+                    snapshot.SupportedGnss = "decoded from live stream";
+                    snapshot.ReceiverFamily = "u-blox GNSS";
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        "The receiver did not answer UBX-MON-VER and no F9 timing stream was observed.",
+                        pollError);
+                }
+                snapshot.IsPassiveStream = true;
+                warnings.Add("Receiver control path did not answer; decoded the live UART stream in read-only passive mode.");
             }
-            try
+            if (snapshot.IsF9TimingReceiver)
             {
-                ParseSatellites(Poll(0x01, 0x35), snapshot);
+                TryParseMessage(passiveMessages, 0x0d, 0x04, "UBX-TIM-SVIN",
+                    payload => ParseSurveyIn(payload, snapshot), warnings);
+                TryParseMessage(passiveMessages, 0x0a, 0x38, "UBX-MON-RF",
+                    payload => ParseRfStatus(payload, snapshot), warnings);
+                TryParseMessage(passiveMessages, 0x27, 0x03, "UBX-SEC-UNIQID",
+                    payload => ParseUniqueId(payload, snapshot), warnings);
+                TryParseMessage(passiveMessages, 0x01, 0x20, "UBX-NAV-TIMEGPS",
+                    payload => ParseGpsTime(payload, snapshot), warnings);
+                TryParseMessage(passiveMessages, 0x01, 0x21, "UBX-NAV-TIMEUTC",
+                    payload => ParseUtcTime(payload, snapshot), warnings);
+                TryParseMessage(passiveMessages, 0x01, 0x26, "UBX-NAV-TIMELS",
+                    payload => ParseLeapSeconds(payload, snapshot), warnings);
             }
-            catch (Exception ex)
-            {
-                warnings.Add("UBX-NAV-SAT: " + ex.Message);
-            }
+            TryParseMessage(passiveMessages, 0x01, 0x07, "UBX-NAV-PVT",
+                payload => ParseNavigation(payload, snapshot), warnings);
+            TryParseMessage(passiveMessages, 0x01, 0x35, "UBX-NAV-SAT",
+                payload => ParseSatellites(payload, snapshot), warnings);
 
+            if (snapshot.IsPassiveStream)
+                return snapshot;
             snapshot.RateConfigurationSupported =
                 TryReadConfiguration("rate and platform", RateKeys,
                 configuration, warnings);
@@ -221,11 +380,59 @@ namespace TimeCardControlCenter
             snapshot.MessageConfigurationSupported =
                 TryReadConfiguration("message output", MessageKeys,
                 configuration, warnings);
+            snapshot.TimingConfigurationSupported = snapshot.IsF9TimingReceiver &&
+                TryReadConfiguration("F9T timing mode", TimingModeKeys,
+                configuration, warnings);
             snapshot.ConfigurationSupported = snapshot.RateConfigurationSupported ||
                 snapshot.SignalConfigurationSupported ||
                 snapshot.TimePulseConfigurationSupported ||
-                snapshot.MessageConfigurationSupported;
+                snapshot.MessageConfigurationSupported ||
+                snapshot.TimingConfigurationSupported;
             return snapshot;
+        }
+
+        private void TryParseMessage(IDictionary<ushort, byte[]> passiveMessages,
+            byte messageClass, byte messageId, string name,
+            Action<byte[]> parser, ICollection<string> warnings)
+        {
+            try
+            {
+                byte[] payload;
+                if (passiveMessages != null)
+                {
+                    if (!passiveMessages.TryGetValue(MessageKey(messageClass,
+                        messageId), out payload))
+                        return;
+                }
+                else
+                {
+                    payload = Poll(messageClass, messageId);
+                }
+                parser(payload);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add(name + ": " + ex.Message);
+            }
+        }
+
+        private static ushort MessageKey(byte messageClass, byte messageId)
+        {
+            return (ushort)((messageClass << 8) | messageId);
+        }
+
+        private static bool LooksLikeF9TimingStream(
+            IDictionary<ushort, byte[]> messages)
+        {
+            bool timingEvidence =
+                messages.ContainsKey(MessageKey(0x0d, 0x04)) ||
+                messages.ContainsKey(MessageKey(0x01, 0x20)) ||
+                messages.ContainsKey(MessageKey(0x01, 0x26));
+            bool receiverEvidence =
+                messages.ContainsKey(MessageKey(0x0a, 0x38)) ||
+                messages.ContainsKey(MessageKey(0x01, 0x07)) ||
+                messages.ContainsKey(MessageKey(0x01, 0x21));
+            return timingEvidence && receiverEvidence;
         }
 
         public void ApplyRateAndModel(ushort measurementMilliseconds,
@@ -274,7 +481,8 @@ namespace TimeCardControlCenter
         }
 
         public void ApplyMessageRates(byte navPvt, byte gga, byte gsa,
-            byte gsv, byte rmc, byte zda, bool persist)
+            byte gsv, byte rmc, byte zda, byte timeGps, byte timeUtc,
+            byte timeLs, byte surveyIn, bool persist)
         {
             SetConfiguration(new[]
             {
@@ -283,8 +491,71 @@ namespace TimeCardControlCenter
                 Pair(CfgMsgNmeaGsaUart1, gsa),
                 Pair(CfgMsgNmeaGsvUart1, gsv),
                 Pair(CfgMsgNmeaRmcUart1, rmc),
-                Pair(CfgMsgNmeaZdaUart1, zda)
+                Pair(CfgMsgNmeaZdaUart1, zda),
+                Pair(CfgMsgUbxNavTimeGpsUart1, timeGps),
+                Pair(CfgMsgUbxNavTimeUtcUart1, timeUtc),
+                Pair(CfgMsgUbxNavTimeLsUart1, timeLs),
+                Pair(CfgMsgUbxTimSvinUart1, surveyIn)
             }, persist);
+        }
+
+        public void ApplyTimingMode(byte mode, uint surveyMinimumSeconds,
+            uint surveyAccuracyTenthsMillimeter, double latitudeDegrees,
+            double longitudeDegrees, double heightMeters,
+            uint fixedAccuracyTenthsMillimeter, bool persist)
+        {
+            if (mode > 2)
+                throw new ArgumentOutOfRangeException("mode");
+
+            List<KeyValuePair<uint, ulong>> values =
+                new List<KeyValuePair<uint, ulong>> { Pair(CfgTmodeMode, mode) };
+            if (mode == 1)
+            {
+                if (surveyMinimumSeconds == 0 || surveyAccuracyTenthsMillimeter == 0)
+                    throw new ArgumentOutOfRangeException("surveyMinimumSeconds",
+                        "Survey-in duration and accuracy must both be greater than zero.");
+                values.Add(Pair(CfgTmodeSurveyInMinimumDuration,
+                    surveyMinimumSeconds));
+                values.Add(Pair(CfgTmodeSurveyInAccuracyLimit,
+                    surveyAccuracyTenthsMillimeter));
+            }
+            else if (mode == 2)
+            {
+                if (double.IsNaN(latitudeDegrees) || latitudeDegrees < -90.0 ||
+                    latitudeDegrees > 90.0)
+                    throw new ArgumentOutOfRangeException("latitudeDegrees");
+                if (double.IsNaN(longitudeDegrees) || longitudeDegrees < -180.0 ||
+                    longitudeDegrees > 180.0)
+                    throw new ArgumentOutOfRangeException("longitudeDegrees");
+                if (double.IsNaN(heightMeters) || double.IsInfinity(heightMeters))
+                    throw new ArgumentOutOfRangeException("heightMeters");
+                if (fixedAccuracyTenthsMillimeter == 0)
+                    throw new ArgumentOutOfRangeException("fixedAccuracyTenthsMillimeter");
+
+                int latitudeBase, latitudeHighPrecision;
+                int longitudeBase, longitudeHighPrecision;
+                int heightBase, heightHighPrecision;
+                SplitCoordinate(latitudeDegrees * 10000000.0,
+                    out latitudeBase, out latitudeHighPrecision);
+                SplitCoordinate(longitudeDegrees * 10000000.0,
+                    out longitudeBase, out longitudeHighPrecision);
+                SplitCoordinate(heightMeters * 100.0,
+                    out heightBase, out heightHighPrecision);
+
+                values.Add(Pair(CfgTmodePositionType, 1));
+                values.Add(PairSigned32(CfgTmodeLatitude, latitudeBase));
+                values.Add(PairSigned32(CfgTmodeLongitude, longitudeBase));
+                values.Add(PairSigned32(CfgTmodeHeight, heightBase));
+                values.Add(PairSigned8(CfgTmodeLatitudeHighPrecision,
+                    latitudeHighPrecision));
+                values.Add(PairSigned8(CfgTmodeLongitudeHighPrecision,
+                    longitudeHighPrecision));
+                values.Add(PairSigned8(CfgTmodeHeightHighPrecision,
+                    heightHighPrecision));
+                values.Add(Pair(CfgTmodeFixedPositionAccuracy,
+                    fixedAccuracyTenthsMillimeter));
+            }
+            SetConfiguration(values, persist);
         }
 
         private byte[] Poll(byte messageClass, byte messageId)
@@ -355,6 +626,115 @@ namespace TimeCardControlCenter
             snapshot.SupportedGnss = extensions.FirstOrDefault(value =>
                 value.IndexOf("GPS", StringComparison.OrdinalIgnoreCase) >= 0 &&
                 value.IndexOf(';') >= 0) ?? "not reported";
+            string identity = string.Join(" ", new[] { snapshot.Module,
+                snapshot.Firmware, snapshot.SoftwareVersion });
+            snapshot.IsF9TimingReceiver =
+                identity.IndexOf("F9T", StringComparison.OrdinalIgnoreCase) >= 0;
+            snapshot.ReceiverFamily = snapshot.IsF9TimingReceiver ?
+                "u-blox F9 high-accuracy timing" : "u-blox GNSS";
+        }
+
+        private static void ParseSurveyIn(byte[] payload,
+            UbloxReceiverSnapshot snapshot)
+        {
+            if (payload.Length < 28)
+                throw new InvalidOperationException(
+                    "The survey-in payload is shorter than 28 bytes.");
+            snapshot.SurveyInDurationSeconds = ReadUInt32(payload, 0);
+            snapshot.SurveyInMeanAccuracyMillimeters = Math.Sqrt(
+                ReadUInt32(payload, 16));
+            snapshot.SurveyInObservations = ReadUInt32(payload, 20);
+            snapshot.SurveyInValid = payload[24] != 0;
+            snapshot.SurveyInActive = payload[25] != 0;
+            snapshot.SurveyInStatusSupported = true;
+        }
+
+        private static void ParseRfStatus(byte[] payload,
+            UbloxReceiverSnapshot snapshot)
+        {
+            if (payload.Length < 4)
+                throw new InvalidOperationException("The RF payload is truncated.");
+            int count = payload[1];
+            if (payload.Length < 4 + count * 24)
+                throw new InvalidOperationException("The RF block count is invalid.");
+            List<UbloxRfBlockInfo> blocks = new List<UbloxRfBlockInfo>();
+            for (int index = 0; index < count; index++)
+            {
+                int offset = 4 + index * 24;
+                blocks.Add(new UbloxRfBlockInfo(payload[offset],
+                    (byte)(payload[offset + 1] & 0x03), payload[offset + 2],
+                    payload[offset + 3], ReadUInt16(payload, offset + 12),
+                    ReadUInt16(payload, offset + 14), payload[offset + 16]));
+            }
+            snapshot.RfBlocks = blocks.AsReadOnly();
+            snapshot.RfStatusSupported = true;
+        }
+
+        private static void ParseUniqueId(byte[] payload,
+            UbloxReceiverSnapshot snapshot)
+        {
+            if (payload.Length < 9)
+                throw new InvalidOperationException(
+                    "The unique-ID payload is shorter than 9 bytes.");
+            snapshot.UniqueChipId = string.Join("", payload.Skip(4).Take(5)
+                .Select(value => value.ToString("X2", CultureInfo.InvariantCulture)));
+        }
+
+        private static void ParseGpsTime(byte[] payload,
+            UbloxReceiverSnapshot snapshot)
+        {
+            if (payload.Length < 16)
+                throw new InvalidOperationException(
+                    "The GPS-time payload is shorter than 16 bytes.");
+            byte valid = payload[11];
+            snapshot.GpsTimeOfWeekSeconds = ReadUInt32(payload, 0) / 1000.0 +
+                ReadInt32(payload, 4) / 1000000000.0;
+            snapshot.GpsWeek = unchecked((short)ReadUInt16(payload, 8));
+            snapshot.GpsUtcLeapSeconds = unchecked((sbyte)payload[10]);
+            snapshot.GpsTimeValid = (valid & 0x03) == 0x03;
+            snapshot.GpsTimeAccuracyNanoseconds = ReadUInt32(payload, 12);
+            snapshot.GpsTimeSupported = true;
+        }
+
+        private static void ParseUtcTime(byte[] payload,
+            UbloxReceiverSnapshot snapshot)
+        {
+            if (payload.Length < 20)
+                throw new InvalidOperationException(
+                    "The UTC-time payload is shorter than 20 bytes.");
+            snapshot.TimeAccuracyNanoseconds = ReadUInt32(payload, 4);
+            if ((payload[19] & 0x04) == 0)
+                return;
+            try
+            {
+                DateTime value = new DateTime(ReadUInt16(payload, 12), payload[14],
+                    payload[15], payload[16], payload[17],
+                    Math.Min(payload[18], (byte)59), DateTimeKind.Utc);
+                long fractionalTicks = ReadInt32(payload, 8) / 100;
+                snapshot.Utc = value.AddTicks(fractionalTicks);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                snapshot.Utc = null;
+            }
+        }
+
+        private static void ParseLeapSeconds(byte[] payload,
+            UbloxReceiverSnapshot snapshot)
+        {
+            if (payload.Length < 24)
+                throw new InvalidOperationException(
+                    "The leap-second payload is shorter than 24 bytes.");
+            snapshot.CurrentLeapSecondSource = payload[8];
+            snapshot.CurrentLeapSeconds = unchecked((sbyte)payload[9]);
+            snapshot.LeapSecondEventSource = payload[10];
+            snapshot.LeapSecondChange = unchecked((sbyte)payload[11]);
+            snapshot.SecondsToLeapSecondEvent = ReadInt32(payload, 12);
+            snapshot.LeapSecondEventGpsWeek = ReadUInt16(payload, 16);
+            snapshot.LeapSecondEventGpsDay = ReadUInt16(payload, 18);
+            snapshot.CurrentLeapSecondsValid = (payload[23] & 0x01) != 0;
+            snapshot.LeapSecondEventValid = (payload[23] & 0x02) != 0;
+            snapshot.LeapSecondStatusSupported = true;
         }
 
         private static void ParseNavigation(byte[] payload, UbloxReceiverSnapshot snapshot)
@@ -464,6 +844,36 @@ namespace TimeCardControlCenter
         private static KeyValuePair<uint, ulong> Pair(uint key, ulong value)
         {
             return new KeyValuePair<uint, ulong>(key, value);
+        }
+
+        private static KeyValuePair<uint, ulong> PairSigned32(uint key, int value)
+        {
+            return Pair(key, unchecked((uint)value));
+        }
+
+        private static KeyValuePair<uint, ulong> PairSigned8(uint key, int value)
+        {
+            if (value < -99 || value > 99)
+                throw new ArgumentOutOfRangeException("value");
+            return Pair(key, unchecked((byte)(sbyte)value));
+        }
+
+        private static void SplitCoordinate(double scaledValue, out int whole,
+            out int highPrecision)
+        {
+            whole = checked((int)Math.Truncate(scaledValue));
+            highPrecision = (int)Math.Round((scaledValue - whole) * 100.0,
+                MidpointRounding.AwayFromZero);
+            if (highPrecision >= 100)
+            {
+                whole = checked(whole + 1);
+                highPrecision -= 100;
+            }
+            else if (highPrecision <= -100)
+            {
+                whole = checked(whole - 1);
+                highPrecision += 100;
+            }
         }
 
         private static int KeySize(uint key)

@@ -6,6 +6,9 @@ $windows = Split-Path -Parent $PSScriptRoot
 $root = (Resolve-Path (Join-Path $windows '..\..')).Path
 $linuxSource = Get-Content -Raw (Join-Path $root 'DRV\Linux\ptp_ocp.c')
 $driverSource = Get-Content -Raw (Join-Path $windows 'driver.c')
+$busSource = Get-Content -Raw (Join-Path $windows 'bus.c')
+$i2cSource = Get-Content -Raw (Join-Path $windows 'i2c.c')
+$serialSource = Get-Content -Raw (Join-Path $windows 'serial.c')
 $headerSource = Get-Content -Raw (Join-Path $windows 'timecard.h')
 $infSource = Get-Content -Raw (Join-Path $windows 'timecard.inf')
 $projectSource = Get-Content -Raw (Join-Path $windows 'timecard.vcxproj')
@@ -87,5 +90,34 @@ Assert-Match $projectSource 'mro50\.c' `
     'mRO-50 implementation is not in the driver build'
 Assert-Match $headerSource 'TIMECARD_SUBSYSTEM_MASK_ART' `
     'ART subsystem capability mask is missing'
+Assert-Match $busSource '\*enabled\s*=\s*TRUE;[\s\S]*STATUS_OBJECT_NAME_NOT_FOUND' `
+    'new supported cards do not default to the full Device Manager hierarchy'
+Assert-Match $i2cSource 'TimeCardMonitorBranchResolveLocked' `
+    'environment and power monitors are not discovered across board-variant mux routes'
+Assert-Match $i2cSource 'AXI-IIC dynamic repeated START' `
+    'register sensors do not have the STOP-then-START compatibility fallback'
+Assert-Match $i2cSource `
+    'TimeCardI2cWriteLocked\([\s\S]*readRequest\.SubaddressLength\s*=\s*0' `
+    'sensor fallback does not perform a STOP-terminated pointer write before the raw read'
+Assert-Match $headerSource 'I2cEnvironmentMuxMask' `
+    'environment-sensor mux route is not cached independently'
+Assert-Match $headerSource 'I2cPowerMuxMask' `
+    'power-monitor mux route is not cached independently'
+Assert-Match $i2cSource (
+    'static const UCHAR candidates\[\][\s\S]*' +
+    'TIMECARD_I2C_MUX_CHANNEL_SENSORS') `
+    'V9 SENS_I2C is no longer the first sensor-route candidate'
+Assert-Match $i2cSource 'imuMask\s*=\s*\(UCHAR\)context->I2cSensorMuxMask' `
+    'Rev00 alternate IMU route is not preserved independently'
+Assert-Match $serialSource `
+    'msiMessages\[TIMECARD_UART_COUNT\]\s*=\s*\{\s*3u,\s*4u,\s*5u,\s*10u\s*\}' `
+    'MSI UART vectors no longer match the Linux resource map'
+Assert-Match $serialSource `
+    'msixMessages\[TIMECARD_UART_COUNT\]\s*=\s*\{\s*35u,\s*36u,\s*37u,\s*42u\s*\}' `
+    'MSI-X UART vectors no longer match the Linux resource map'
+Assert-Match $serialSource 'TIMECARD_UART_RX_RING_SIZE' `
+    'interrupt-backed UART receive buffering is missing'
+Assert-Match $serialSource 'TIMECARD_UART_BURST_IDLE_US' `
+    'burst-aware UART polling fallback is missing'
 
-Write-Host 'Board-profile tests passed (3 PCI identities, ART map, transports, and capability gating).'
+Write-Host 'Board-profile tests passed (3 PCI identities, ART map, transports, independent sensor-route discovery, hierarchy default, UART buffering, and capability gating).'

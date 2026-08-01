@@ -145,6 +145,114 @@ TimeCardCountInterruptMessages(WDFCMRESLIST resourcesRaw,
     return messages;
 }
 
+static BOOLEAN
+TimeCardUartMessageRangeRelevant(PDEVICE_CONTEXT context, ULONG first,
+                                 ULONG count)
+{
+    static const ULONG msiMessages[TIMECARD_UART_COUNT] = {
+        3u, 4u, 5u, 10u
+    };
+    static const ULONG msixMessages[TIMECARD_UART_COUNT] = {
+        35u, 36u, 37u, 42u
+    };
+    static const ULONG artMessages[TIMECARD_UART_COUNT] = {
+        3u, MAXULONG, 7u, MAXULONG
+    };
+    const ULONG *messages = context->Layout == TIMECARD_LAYOUT_MSIX ?
+        msixMessages : context->Layout == TIMECARD_LAYOUT_ART ?
+        artMessages : msiMessages;
+    ULONG port;
+
+    for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
+        if (messages[port] != MAXULONG && messages[port] >= first &&
+            messages[port] - first < count) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static VOID
+TimeCardDeleteUartInterrupts(PDEVICE_CONTEXT context)
+{
+    ULONG index;
+
+    for (index = 0; index < context->UartInterruptCount; ++index) {
+        if (context->UartInterrupt[index] != NULL) {
+            WdfObjectDelete(context->UartInterrupt[index]);
+            context->UartInterrupt[index] = NULL;
+        }
+    }
+    context->UartInterruptCount = 0;
+}
+
+static NTSTATUS
+TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
+                             WDFCMRESLIST resourcesRaw,
+                             WDFCMRESLIST resourcesTranslated)
+{
+    WDF_INTERRUPT_CONFIG config;
+    WDF_OBJECT_ATTRIBUTES attributes;
+    ULONG messageBase = 0;
+    ULONG i;
+
+    RtlZeroMemory(context->UartInterrupt, sizeof(context->UartInterrupt));
+    context->UartInterruptCount = 0;
+    for (i = 0; i < WdfCmResourceListGetCount(resourcesTranslated); ++i) {
+        PCM_PARTIAL_RESOURCE_DESCRIPTOR translated =
+            WdfCmResourceListGetDescriptor(resourcesTranslated, i);
+        PCM_PARTIAL_RESOURCE_DESCRIPTOR raw =
+            WdfCmResourceListGetDescriptor(resourcesRaw, i);
+        ULONG messageCount;
+        NTSTATUS status;
+        WDFINTERRUPT interrupt;
+        PTIMECARD_UART_INTERRUPT_CONTEXT interruptContext;
+
+        if (translated == NULL || raw == NULL ||
+            translated->Type != CmResourceTypeInterrupt ||
+            raw->Type != CmResourceTypeInterrupt) {
+            continue;
+        }
+
+        messageCount = 1;
+        if ((translated->Flags & CM_RESOURCE_INTERRUPT_MESSAGE) != 0 &&
+            raw->u.MessageInterrupt.Raw.MessageCount != 0) {
+            messageCount = raw->u.MessageInterrupt.Raw.MessageCount;
+        }
+        if (!TimeCardUartMessageRangeRelevant(
+                context, messageBase, messageCount)) {
+            messageBase += messageCount;
+            continue;
+        }
+        if (context->UartInterruptCount >=
+            TIMECARD_UART_INTERRUPT_OBJECTS) {
+            TimeCardDeleteUartInterrupts(context);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        WDF_INTERRUPT_CONFIG_INIT(&config, TimeCardEvtUartInterruptIsr, NULL);
+        config.InterruptRaw = raw;
+        config.InterruptTranslated = translated;
+        config.AutomaticSerialization = FALSE;
+        WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(
+            &attributes, TIMECARD_UART_INTERRUPT_CONTEXT);
+        attributes.ParentObject = context->Device;
+        status = WdfInterruptCreate(context->Device, &config, &attributes,
+                                    &interrupt);
+        if (!NT_SUCCESS(status)) {
+            TimeCardDeleteUartInterrupts(context);
+            return status;
+        }
+        interruptContext = UartInterruptGetContext(interrupt);
+        interruptContext->DeviceContext = context;
+        interruptContext->MessageBase = messageBase;
+        context->UartInterrupt[context->UartInterruptCount++] = interrupt;
+        messageBase += messageCount;
+    }
+    return context->UartInterruptCount != 0 ?
+        STATUS_SUCCESS : STATUS_NOT_FOUND;
+}
+
 static NTSTATUS
 TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
 {
@@ -544,6 +652,15 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
         return status;
     }
 
+    status = TimeCardCreateUartInterrupts(
+        context, resourcesRaw, resourcesTranslated);
+    if (!NT_SUCCESS(status)) {
+        /* UART access remains available through the bounded polling path. */
+        context->UartInterruptCount = 0;
+        KdPrint(("timecard: UART interrupt capture unavailable, status 0x%08lx\n",
+                 status));
+    }
+
     context->HardwareReady = TRUE;
     KdPrint(("timecard: PCI %04x:%04x revision 0x%02x, BAR length 0x%lx, "
              "%lu interrupt message(s), layout %lu, clock offset 0x%lx\n",
@@ -564,6 +681,7 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
 
     UNREFERENCED_PARAMETER(resourcesTranslated);
     context->HardwareReady = FALSE;
+    TimeCardDeleteUartInterrupts(context);
     context->Regs = NULL;
     context->Tod = NULL;
     context->NmeaOut = NULL;
@@ -637,7 +755,9 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 NTSTATUS
 TimeCardEvtD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
 {
-    UNREFERENCED_PARAMETER(device);
+    PDEVICE_CONTEXT context = DeviceGetContext(device);
+
+    TimeCardUartDisableInterrupts(context);
     UNREFERENCED_PARAMETER(targetState);
     return STATUS_SUCCESS;
 }

@@ -482,6 +482,48 @@ namespace TimeCardControlCenter
                 payload, 0, 0, true, timeoutMilliseconds);
         }
 
+        internal IDictionary<ushort, byte[]> CaptureUbxMessages(uint port,
+            uint baud, uint durationMilliseconds)
+        {
+            if (port > 1)
+                throw new ArgumentOutOfRangeException("port",
+                    "GNSS receivers use UART 0 or UART 1.");
+            if (baud == 0)
+                throw new ArgumentOutOfRangeException("baud");
+            durationMilliseconds = Math.Max(250u,
+                Math.Min(durationMilliseconds, 5000u));
+
+            lock (gate)
+            {
+                ConfigureUart(port, baud);
+                Stopwatch timer = Stopwatch.StartNew();
+                List<byte> received = new List<byte>();
+                Dictionary<ushort, byte[]> messages =
+                    new Dictionary<ushort, byte[]>();
+                while (timer.ElapsedMilliseconds < durationMilliseconds &&
+                    received.Count < 65536)
+                {
+                    uint remaining = (uint)Math.Max(1L,
+                        (long)durationMilliseconds - timer.ElapsedMilliseconds);
+                    UartReadResult result = ReadUart(port, MaximumUartTransfer,
+                        Math.Min(remaining, 1u));
+                    if (result.Data.Length != 0)
+                        received.AddRange(result.Data);
+
+                    byte frameClass;
+                    byte frameId;
+                    byte[] framePayload;
+                    while (TryTakeUbxFrame(received, out frameClass, out frameId,
+                        out framePayload))
+                    {
+                        messages[(ushort)((frameClass << 8) | frameId)] =
+                            framePayload;
+                    }
+                }
+                return messages;
+            }
+        }
+
         private byte[] ExecuteUbxExchange(uint port, uint baud,
             byte messageClass, byte messageId, byte[] payload,
             byte responseClass, byte responseId, bool expectAcknowledgement,
@@ -519,7 +561,7 @@ namespace TimeCardControlCenter
                     uint remaining = (uint)Math.Max(1L,
                         (long)timeoutMilliseconds - timer.ElapsedMilliseconds);
                     UartReadResult result = ReadUart(port, MaximumUartTransfer,
-                        Math.Min(remaining, 100u));
+                        Math.Min(remaining, 1u));
                     if (result.Data.Length != 0)
                         received.AddRange(result.Data);
 
