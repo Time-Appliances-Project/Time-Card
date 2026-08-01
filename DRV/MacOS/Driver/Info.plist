@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>OCP Time Card Driver</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>DEXT</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>IOKitPersonalities</key>
+    <dict>
+        <key>OCP Time Card</key>
+        <dict>
+            <key>CFBundleIdentifierKernel</key>
+            <string>com.apple.kpi.iokit</string>
+            <key>IOClass</key>
+            <string>IOUserService</string>
+            <key>IOMatchCategory</key>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+            <key>IOPCIMatch</key>
+            <string>0x04001d9b 0x100818d4</string>
+            <key>IOProviderClass</key>
+            <string>IOPCIDevice</string>
+            <key>IOUserClass</key>
+            <string>TimeCardDriver</string>
+            <key>IOUserServerName</key>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+            <key>UserClientProperties</key>
+            <dict>
+                <key>IOClass</key>
+                <string>IOUserUserClient</string>
+                <key>IOServiceDEXTEntitlements</key>
+                <array>
+                    <string>com.apple.developer.driverkit.userclient-access</string>
+                </array>
+                <key>IOUserClass</key>
+                <string>TimeCardUserClient</string>
+            </dict>
+        </dict>
+    </dict>
+    <key>OSBundleUsageDescription</key>
+    <string>Provides access to the OCP Time Card PCIe timing hardware.</string>
+</dict>
+</plist>

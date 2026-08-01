@@ -1,0 +1,201 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A00000000000000000000101 /* TimeCardMacOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000201 /* TimeCardMacOSApp.swift */; };
+		A00000000000000000000102 /* DriverManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000202 /* DriverManager.swift */; };
+		A00000000000000000000103 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000203 /* ContentView.swift */; };
+		A00000000000000000000104 /* TimeCardDriver.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000204 /* TimeCardDriver.cpp */; };
+		A00000000000000000000105 /* TimeCardDriver.iig in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000205 /* TimeCardDriver.iig */; };
+		A00000000000000000000106 /* timecardctl.c in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000206 /* timecardctl.c */; };
+		A00000000000000000000107 /* RegisterMapTests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000207 /* RegisterMapTests.cpp */; };
+		A00000000000000000000108 /* TimeCardDriver.dext in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = A00000000000000000000302 /* TimeCardDriver.dext */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A00000000000000000000109 /* TimeCardUserClient.iig in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000020F /* TimeCardUserClient.iig */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A00000000000000000000401 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A00000000000000000000502;
+			remoteInfo = TimeCardDriver;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A00000000000000000000601 /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(TARGET_BUILD_DIR)/$(SYSTEM_EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 0;
+			files = (
+				A00000000000000000000108 /* TimeCardDriver.dext in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		A00000000000000000000201 /* TimeCardMacOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeCardMacOSApp.swift; sourceTree = "<group>"; };
+		A00000000000000000000202 /* DriverManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriverManager.swift; sourceTree = "<group>"; };
+		A00000000000000000000203 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A00000000000000000000204 /* TimeCardDriver.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = TimeCardDriver.cpp; sourceTree = "<group>"; };
+		A00000000000000000000205 /* TimeCardDriver.iig */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.iig; path = TimeCardDriver.iig; sourceTree = "<group>"; };
+		A00000000000000000000206 /* timecardctl.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = timecardctl.c; sourceTree = "<group>"; };
+		A00000000000000000000207 /* RegisterMapTests.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = RegisterMapTests.cpp; sourceTree = "<group>"; };
+		A00000000000000000000208 /* TimeCardABI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = TimeCardABI.h; sourceTree = "<group>"; };
+		A00000000000000000000209 /* TimeCardRegisters.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = TimeCardRegisters.h; sourceTree = "<group>"; };
+		A0000000000000000000020A /* Driver Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A0000000000000000000020B /* TimeCardDriver.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TimeCardDriver.entitlements; sourceTree = "<group>"; };
+		A0000000000000000000020C /* TimeCardMacOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TimeCardMacOS.entitlements; sourceTree = "<group>"; };
+		A0000000000000000000020D /* timecardctl.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = timecardctl.entitlements; sourceTree = "<group>"; };
+		A0000000000000000000020E /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
+		A0000000000000000000020F /* TimeCardUserClient.iig */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.iig; path = TimeCardUserClient.iig; sourceTree = "<group>"; };
+		A00000000000000000000301 /* TimeCardMacOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TimeCardMacOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000302 /* TimeCardDriver.dext */ = {isa = PBXFileReference; explicitFileType = wrapper.driver-extension; includeInIndex = 0; path = TimeCardDriver.dext; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000303 /* timecardctl */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = timecardctl; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000304 /* timecard-register-tests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "timecard-register-tests"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A00000000000000000000701 /* App Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000702 /* Driver Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000703 /* CLI Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000704 /* Test Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A00000000000000000000801 = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000802 /* App */,
+				A00000000000000000000803 /* Driver */,
+				A00000000000000000000804 /* Shared */,
+				A00000000000000000000805 /* CLI */,
+				A00000000000000000000806 /* Tests */,
+				A0000000000000000000020E /* CMakeLists.txt */,
+				A00000000000000000000807 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A00000000000000000000802 /* App */ = {isa = PBXGroup; path = App; sourceTree = "<group>"; children = (A00000000000000000000201, A00000000000000000000202, A00000000000000000000203, A0000000000000000000020C, ); };
+		A00000000000000000000803 /* Driver */ = {isa = PBXGroup; path = Driver; sourceTree = "<group>"; children = (A00000000000000000000204, A00000000000000000000205, A0000000000000000000020F, A0000000000000000000020A, A0000000000000000000020B, ); };
+		A00000000000000000000804 /* Shared */ = {isa = PBXGroup; path = Shared; sourceTree = "<group>"; children = (A00000000000000000000208, A00000000000000000000209, ); };
+		A00000000000000000000805 /* CLI */ = {isa = PBXGroup; path = CLI; sourceTree = "<group>"; children = (A00000000000000000000206, A0000000000000000000020D, ); };
+		A00000000000000000000806 /* Tests */ = {isa = PBXGroup; path = Tests; sourceTree = "<group>"; children = (A00000000000000000000207, ); };
+		A00000000000000000000807 /* Products */ = {isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (A00000000000000000000301, A00000000000000000000302, A00000000000000000000303, A00000000000000000000304, ); };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A00000000000000000000501 /* TimeCardMacOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000902;
+			buildPhases = (A00000000000000000000A01, A00000000000000000000701, A00000000000000000000601, );
+			buildRules = ();
+			dependencies = (A00000000000000000000B01, );
+			name = TimeCardMacOS;
+			productName = TimeCardMacOS;
+			productReference = A00000000000000000000301;
+			productType = "com.apple.product-type.application";
+		};
+		A00000000000000000000502 /* TimeCardDriver */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000903;
+			buildPhases = (A00000000000000000000A02, A00000000000000000000702, );
+			buildRules = ();
+			dependencies = ();
+			name = TimeCardDriver;
+			productName = TimeCardDriver;
+			productReference = A00000000000000000000302;
+			productType = "com.apple.product-type.driver-extension";
+		};
+		A00000000000000000000503 /* timecardctl */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000904;
+			buildPhases = (A00000000000000000000A03, A00000000000000000000703, );
+			buildRules = ();
+			dependencies = ();
+			name = timecardctl;
+			productName = timecardctl;
+			productReference = A00000000000000000000303;
+			productType = "com.apple.product-type.tool";
+		};
+		A00000000000000000000504 /* timecard-register-tests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000905;
+			buildPhases = (A00000000000000000000A04, A00000000000000000000704, );
+			buildRules = ();
+			dependencies = ();
+			name = "timecard-register-tests";
+			productName = "timecard-register-tests";
+			productReference = A00000000000000000000304;
+			productType = "com.apple.product-type.tool";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					A00000000000000000000501 = {CreatedOnToolsVersion = 26.6; };
+					A00000000000000000000502 = {CreatedOnToolsVersion = 26.6; };
+				};
+			};
+			buildConfigurationList = A00000000000000000000901;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base, );
+			mainGroup = A00000000000000000000801;
+			productRefGroup = A00000000000000000000807;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A00000000000000000000501, A00000000000000000000502, A00000000000000000000503, A00000000000000000000504, );
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00000000000000000000A01 /* App Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000101, A00000000000000000000102, A00000000000000000000103, ); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000A02 /* Driver Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000104, A00000000000000000000105, A00000000000000000000109, ); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000A03 /* CLI Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000106, ); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000A04 /* Test Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000107, ); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A00000000000000000000B01 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A00000000000000000000502 /* TimeCardDriver */; targetProxy = A00000000000000000000401 /* PBXContainerItemProxy */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A00000000000000000000C01 /* Project Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_CXX_LANGUAGE_STANDARD = "c++20"; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_C_LANGUAGE_STANDARD = gnu11; GCC_OPTIMIZATION_LEVEL = 0; ONLY_ACTIVE_ARCH = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; }; name = Debug; };
+		A00000000000000000000C02 /* Project Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_CXX_LANGUAGE_STANDARD = "c++20"; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; GCC_C_LANGUAGE_STANDARD = gnu11; SWIFT_COMPILATION_MODE = wholemodule; }; name = Release; };
+		A00000000000000000000C11 /* App Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = App/TimeCardMacOS.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "OCP Time Card"; INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities"; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 5.0; }; name = Debug; };
+		A00000000000000000000C12 /* App Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = App/TimeCardMacOS.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "OCP Time Card"; INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities"; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 5.0; }; name = Release; };
+		A00000000000000000000C21 /* Driver Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Driver/TimeCardDriver.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DRIVERKIT_DEPLOYMENT_TARGET = 20.0; GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)", ); HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; INFOPLIST_FILE = Driver/Info.plist; MARKETING_VERSION = 0.1.0; ONLY_ACTIVE_ARCH = YES; OTHER_LDFLAGS = ("-framework", DriverKit, "-framework", PCIDriverKit, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.driver; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = driverkit; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = driverkit; }; name = Debug; };
+		A00000000000000000000C22 /* Driver Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Driver/TimeCardDriver.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DRIVERKIT_DEPLOYMENT_TARGET = 20.0; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; INFOPLIST_FILE = Driver/Info.plist; MARKETING_VERSION = 0.1.0; OTHER_LDFLAGS = ("-framework", DriverKit, "-framework", PCIDriverKit, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.driver; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = driverkit; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = driverkit; }; name = Release; };
+		A00000000000000000000C31 /* CLI Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = CLI/timecardctl.entitlements; CODE_SIGN_STYLE = Automatic; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; MACOSX_DEPLOYMENT_TARGET = 14.0; OTHER_LDFLAGS = ("-framework", IOKit, "-framework", CoreFoundation, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.cli; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Debug; };
+		A00000000000000000000C32 /* CLI Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = CLI/timecardctl.entitlements; CODE_SIGN_STYLE = Automatic; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; MACOSX_DEPLOYMENT_TARGET = 14.0; OTHER_LDFLAGS = ("-framework", IOKit, "-framework", CoreFoundation, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.cli; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Release; };
+		A00000000000000000000C41 /* Tests Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; MACOSX_DEPLOYMENT_TARGET = 14.0; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Debug; };
+		A00000000000000000000C42 /* Tests Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; MACOSX_DEPLOYMENT_TARGET = 14.0; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A00000000000000000000901 /* Project config */ = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000C01, A00000000000000000000C02, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A00000000000000000000902 /* App config */ = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000C11, A00000000000000000000C12, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A00000000000000000000903 /* Driver config */ = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000C21, A00000000000000000000C22, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A00000000000000000000904 /* CLI config */ = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000C31, A00000000000000000000C32, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A00000000000000000000905 /* Test config */ = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000C41, A00000000000000000000C42, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = A00000000000000000000001 /* Project object */;
+}

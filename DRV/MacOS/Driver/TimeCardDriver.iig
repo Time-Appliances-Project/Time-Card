@@ -1,0 +1,27 @@
+/* SPDX-License-Identifier: BSD-3-Clause */
+
+#ifndef TIMECARD_DRIVER_IIG
+#define TIMECARD_DRIVER_IIG
+
+#include <Availability.h>
+#include <DriverKit/IOService.iig>
+#include <DriverKit/IOUserClient.iig>
+
+#include "TimeCardABI.h"
+
+class TimeCardDriver : public IOService
+{
+public:
+    virtual kern_return_t Start(IOService *provider) override;
+    virtual kern_return_t Stop(IOService *provider) override;
+    virtual kern_return_t NewUserClient(uint32_t type,
+                                        IOUserClient **userClient) override;
+
+    kern_return_t GetInfo(TimeCardInfo *info) LOCALONLY;
+    kern_return_t GetTime(TimeCardTime *time) LOCALONLY;
+    kern_return_t SetTime(const TimeCardTime *time) LOCALONLY;
+    kern_return_t GetCrossTimestamp(TimeCardCrossTimestamp *timestamp)
+        LOCALONLY;
+};
+
+#endif /* TIMECARD_DRIVER_IIG */
