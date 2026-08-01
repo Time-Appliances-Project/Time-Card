@@ -4,8 +4,10 @@ The Time Card Control Center is a dependency-free Windows desktop dashboard
 for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
-Driver 1.35 / ABI 9 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
-ART profiles from the Linux driver. On ART, the application switches to a
+Driver 1.37 / ABI 10 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
+ART profiles from the Linux driver. The Celestica workspace uses its actual
+LM75B, SHT3x, ICP-10100, and BNO08x population rather than presenting the
+Meta-only BME280 and INA219 devices. On ART, the application switches to a
 native mRO-50 FPGA-bridge workspace, probes all 24c08 banks at `0x50-0x57`,
 uses the fixed ART SMA map, and labels the absent ToD/NMEA, secondary-GNSS,
 sensor-mux, and RGB-LED capabilities as not implemented or not fitted.
@@ -20,7 +22,7 @@ explicitly chooses a new divisor.
 | UART and NMEA | SMA connectors | Generators and frequency |
 | ![UART and NMEA workspace](../assets/timecard-control-center-nmea.png) | ![SMA connector workspace](../assets/timecard-control-center-sma.png) | ![Timing generator workspace](../assets/timecard-control-center-timing.png) |
 | Sensors and IMU | I2C and status LEDs | Subsystem map |
-| ![Sensors and IMU workspace](../assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](../assets/timecard-control-center-i2c.png) | ![Subsystem workspace](../assets/timecard-control-center-subsystems.png) |
+| ![Celestica sensors and compact 3D IMU workspace](../assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](../assets/timecard-control-center-i2c.png) | ![Subsystem workspace](../assets/timecard-control-center-subsystems.png) |
 | Telemetry Studio | Profiles and self-test | FPGA SPI flash |
 | ![Telemetry Studio workspace](../assets/timecard-control-center-telemetry.png) | ![Profiles and self-test workspace](../assets/timecard-control-center-operations.png) | ![FPGA SPI-flash firmware update workspace](../assets/timecard-control-center-flash.png) |
 
@@ -70,8 +72,9 @@ explicitly chooses a new divisor.
 - Manual and automatic control of all six IS32FL3207 RGB subsystem indicators,
   including current limiting, open/short reporting, and a bounded electrical
   test that restores the previous colors.
-- Live one-hertz BME280/BMP280 environment, INA219 +12 V/+5 V/+3.3 V
-  rail telemetry, and BNO055 NDOF or BNO08x SH-2 fused nine-axis IMU data.
+- Live one-hertz board-specific telemetry: BME280/BMP280 and INA219 rails on
+  Meta cards; three LM75B temperatures, SHT3x humidity, and ICP-10100 pressure
+  on Celestica R4006 cards; plus BNO055 NDOF or BNO08x SH-2 fused IMU data.
 - Runtime and persistent Device Manager subsystem-hierarchy controls.
 - A guarded FPGA SPI-flash workspace with JEDEC/geometry discovery, OCPC
   vendor/device/length/CRC validation, explicit raw-image warnings, protected
@@ -507,9 +510,8 @@ shown in the workspace, and automatic mapping marks affected packages as
 
 ## Sensors and IMU
 
-On Meta/Facebook and Celestica profiles, driver 1.35 / ABI 9 and the dedicated
-Sensors & IMU workspace read every populated monitor. The BME280/BMP280,
-INA219, and IMU routes are resolved independently across the known PCA9546A
+On Meta/Facebook profiles, the Sensors & IMU workspace resolves the
+BME280/BMP280, INA219, and IMU routes independently across the known PCA9546A
 branches, with the V9 schematic's sensor channel tried first. This keeps an
 alternate BNO055/BNO08x assembly route from masking populated environmental or
 rail monitors. BME280 and BMP280 are
@@ -526,6 +528,19 @@ NACKs. The
 fallback is limited to this NACK case and preserves the normal repeated-START
 path for devices that accept it.
 
+On Celestica R4006-G0001-03 Rev02, driver 1.37 / ABI 10 follows the schematic's
+TCA9546A routes exactly. Channel 0 provides three LM75B temperatures at
+`0x48`-`0x4a`; channel 1 provides SHT3x temperature, humidity, and calculated
+dew point at `0x44`; channel 2 provides an ICP-10100 pressure/temperature
+sample at `0x63`; and channel 3 provides the BNO08x at `0x4a`. The driver
+validates every SHT3x and ICP-10100 CRC-8 frame, caches all four factory OTP
+coefficients, restores the previous mux mask after sampling, and exposes
+explicit capability flags so the application never presents Meta-only sensors
+as missing Celestica hardware.
+The I2C workspace also follows sheet 26's Celestica LED population: one GPS
+indicator and four SMA indicators at IS32FL3207 address `0x34`, with the
+schematic's green/red sink order and unused second-GNSS group handled safely.
+
 The BNO055 is auto-detected at `0x28` or `0x29`, placed in NDOF fusion mode,
 and uses the V9 schematic's external 32.768 kHz crystal. The
 schematic-permitted BNO080/BNO08x alternative is detected at `0x4a` or `0x4b`;
@@ -534,11 +549,13 @@ acceleration, rotation-vector, and gravity reports. The workspace reports
 heading, roll, pitch, quaternion, calibration levels, acceleration, linear
 acceleration, gravity, angular velocity, and magnetic field. A native 3D cube
 tracks the normalized quaternion in real time with smoothed shortest-path
-rotation and returns to a clearly marked waiting pose if samples stop. BNO055 also
-reports temperature. Sampling is live at one hertz while the workspace is
-visible. Each query temporarily selects the schematic sensor branch and the
-independently discovered IMU branch, reports missing devices separately, and
-restores the previous mux selection. A nonresponding monitor is explicitly
+rotation. The compact visualization holds its last good pose across isolated
+invalid or identity `0°, 0°, 0°` samples; a real zero orientation is
+accepted after three consecutive valid samples. BNO055 also reports
+temperature. Sampling is live at one hertz while the workspace is visible.
+Each query temporarily selects the schematic sensor branch and the independently
+discovered IMU branch, reports missing devices separately, and restores the
+previous mux selection. A nonresponding monitor is explicitly
 shown as **NO I2C ACK - NOT FITTED OR UNPOWERED**; the application never turns
 an absent sensor into a plausible zero reading.
 For BNO08x cards, driver 1.24 also detects a silent or reset SH-2 stream,

@@ -87,10 +87,13 @@
 #define IOCTL_TIMECARD_MRO50_CONTROL \
     TIMECARD_IOCTL(32, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 
-#define TIMECARD_ABI_VERSION 9u
+#define TIMECARD_ABI_VERSION 10u
 #define TIMECARD_LAYOUT_MSI  1u
 #define TIMECARD_LAYOUT_MSIX 2u
 #define TIMECARD_LAYOUT_ART  3u
+#define TIMECARD_BOARD_PROFILE_FB        1u
+#define TIMECARD_BOARD_PROFILE_ART       2u
+#define TIMECARD_BOARD_PROFILE_CELESTICA 3u
 #define TIMECARD_UART_COUNT  4u
 #define TIMECARD_UART_MAX_TRANSFER 256u
 #define TIMECARD_I2C_MAX_TRANSFER 255u
@@ -147,6 +150,12 @@
 #define TIMECARD_I2C_MUX_CHANNEL_DC      (1u << 3)
 #define TIMECARD_I2C_MUX_CHANNEL_MASK    0x0fu
 
+/* Celestica R4006-G0001-03-SC Rev 2.0 fixed TCA9546A channel map. */
+#define TIMECARD_I2C_MUX_CELESTICA_LM75B    (1u << 0)
+#define TIMECARD_I2C_MUX_CELESTICA_SHT3X    (1u << 1)
+#define TIMECARD_I2C_MUX_CELESTICA_ICP10100 (1u << 2)
+#define TIMECARD_I2C_MUX_CELESTICA_BNO08X   (1u << 3)
+
 /*
  * U6, IS32FL3207 on the sensor branch.  The schematic's 0x6e label is
  * the 8-bit write address; Windows and the XIIC API use 7-bit address 0x37.
@@ -191,6 +200,22 @@
 #define TIMECARD_SENSOR_FLAG_HUMIDITY         (1u << 6)
 #define TIMECARD_SENSOR_FLAG_TEMPERATURE      (1u << 7)
 #define TIMECARD_SENSOR_FLAG_TEMPERATURE_Q7   (1u << 8)
+#define TIMECARD_SENSOR_FLAG_CRC_VALID        (1u << 9)
+
+#define TIMECARD_SENSOR_CAP_BME280   (1u << 0)
+#define TIMECARD_SENSOR_CAP_INA219   (1u << 1)
+#define TIMECARD_SENSOR_CAP_BNO055   (1u << 2)
+#define TIMECARD_SENSOR_CAP_BNO08X   (1u << 3)
+#define TIMECARD_SENSOR_CAP_LM75B    (1u << 4)
+#define TIMECARD_SENSOR_CAP_SHT3X    (1u << 5)
+#define TIMECARD_SENSOR_CAP_ICP10100 (1u << 6)
+
+#define TIMECARD_SENSOR_LM75B_COUNT 3u
+#define TIMECARD_SENSOR_LM75B_1_ADDRESS 0x48u
+#define TIMECARD_SENSOR_LM75B_2_ADDRESS 0x49u
+#define TIMECARD_SENSOR_LM75B_3_ADDRESS 0x4au
+#define TIMECARD_SENSOR_SHT3X_ADDRESS 0x44u
+#define TIMECARD_SENSOR_ICP10100_ADDRESS 0x63u
 
 #define TIMECARD_CLOCK_SOURCE_NONE 0x00u
 #define TIMECARD_CLOCK_SOURCE_TOD  0x01u
@@ -447,6 +472,38 @@ typedef struct _TIMECARD_INA219_READING {
     unsigned __int32 RawBus;
 } TIMECARD_INA219_READING;
 
+typedef struct _TIMECARD_LM75B_READING {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Address;
+    signed __int32 RawTemperature;
+    signed __int32 TemperatureMilliCelsius;
+    unsigned __int32 Reserved[3];
+} TIMECARD_LM75B_READING;
+
+typedef struct _TIMECARD_SHT3X_READING {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Address;
+    unsigned __int32 Status;
+    unsigned __int32 RawTemperature;
+    unsigned __int32 RawHumidity;
+    signed __int32 TemperatureMilliCelsius;
+    unsigned __int32 HumidityMilliPercent;
+} TIMECARD_SHT3X_READING;
+
+typedef struct _TIMECARD_ICP10100_READING {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Address;
+    unsigned __int32 ProductId;
+    unsigned __int32 RawPressure;
+    unsigned __int32 RawTemperature;
+    signed __int32 TemperatureMilliCelsius;
+    signed __int32 Otp[4];
+    unsigned __int32 Reserved;
+} TIMECARD_ICP10100_READING;
+
 /* BNO055 raw axes use the scale selected by UnitSelection. */
 typedef struct _TIMECARD_BNO055_READING {
     unsigned __int32 Size;
@@ -496,6 +553,11 @@ typedef struct _TIMECARD_SENSOR_TELEMETRY {
     TIMECARD_INA219_READING Rail5V;
     TIMECARD_INA219_READING Rail3V3;
     TIMECARD_BNO055_READING Imu;
+    unsigned __int32 BoardProfile;
+    unsigned __int32 Capabilities;
+    TIMECARD_LM75B_READING BoardTemperature[TIMECARD_SENSOR_LM75B_COUNT];
+    TIMECARD_SHT3X_READING Humidity;
+    TIMECARD_ICP10100_READING Pressure;
 } TIMECARD_SENSOR_TELEMETRY;
 
 /*

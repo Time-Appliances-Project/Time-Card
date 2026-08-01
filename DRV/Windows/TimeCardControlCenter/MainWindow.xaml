@@ -1740,7 +1740,7 @@
                                 <StackPanel>
                                     <TextBlock Text="ENVIRONMENT &amp; MOTION" Style="{StaticResource Eyebrow}" />
                                     <TextBlock Text="Board sensors &amp; inertial telemetry" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
-                                    <TextBlock Text="Live BME280/BMP280 environment, INA219 power-rail, and BNO055/BNO08x nine-axis readings from the auto-detected sensor branch."
+                                    <TextBlock x:Name="SensorsIntroText" Text="Live BME280/BMP280 environment, INA219 power-rail, and BNO055/BNO08x nine-axis readings from the auto-detected sensor branch."
                                                Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -1757,7 +1757,7 @@
                             <Border Grid.Row="1" Background="#102638" BorderBrush="#28506C" BorderThickness="1" CornerRadius="12" Padding="16,12" Margin="0,22,0,18">
                                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                     <TextBlock Text="&#xE95E;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource CyanBrush}" FontSize="18" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                    <TextBlock x:Name="SensorsDriverText" Grid.Column="1" Text="Connect a Time Card with driver 1.35 / ABI 9 to begin live sampling."
+                                    <TextBlock x:Name="SensorsDriverText" Grid.Column="1" Text="Connect a Time Card with driver 1.37 / ABI 10 to begin live sampling."
                                                Foreground="#B9DCEE" TextWrapping="Wrap" VerticalAlignment="Center" />
                                     <TextBlock x:Name="SensorsLastSampleText" Grid.Column="2" Text="NOT SAMPLED" Foreground="{DynamicResource CyanBrush}" FontFamily="Segoe UI Semibold" FontSize="10" Margin="16,0,0,0" VerticalAlignment="Center" />
                                 </Grid>
@@ -1765,7 +1765,7 @@
 
                             <StackPanel Grid.Row="2">
                                 <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                    <StackPanel><TextBlock Text="Environment" Style="{StaticResource SectionTitle}" /><TextBlock Text="Auto-detected BME280/BMP280 measurements" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0" /></StackPanel>
+                                    <StackPanel><TextBlock Text="Environment" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="EnvironmentDescriptionText" Text="Auto-detected BME280/BMP280 measurements" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,0" /></StackPanel>
                                     <TextBlock x:Name="BmeDetailText" Grid.Column="1" Text="BME280/BMP280 &#x00B7; 0x76/0x77 &#x00B7; NOT SAMPLED" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" VerticalAlignment="Center" />
                                 </Grid>
                                 <UniformGrid Columns="4">
@@ -1777,31 +1777,31 @@
                             </StackPanel>
 
                             <StackPanel Grid.Row="3" Margin="0,24,0,0">
-                                <TextBlock Text="Power rails" Style="{StaticResource SectionTitle}" />
-                                <TextBlock Text="Live bus voltage, shunt current, and calculated load power from the three INA219 monitors."
+                                <TextBlock x:Name="PowerSectionTitleText" Text="Power rails" Style="{StaticResource SectionTitle}" />
+                                <TextBlock x:Name="PowerSectionDescriptionText" Text="Live bus voltage, shunt current, and calculated load power from the three INA219 monitors."
                                            Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,4,0,12" />
                                 <UniformGrid Columns="3">
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="156">
                                         <StackPanel>
-                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="+12 V input" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Rail12StatusText" Grid.Column="1" Text="0x40" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" /></Grid>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Rail12TitleText" Text="+12 V input" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Rail12StatusText" Grid.Column="1" Text="0x40" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" /></Grid>
                                             <TextBlock x:Name="Rail12VoltageText" Text="&#x2014; V" Style="{StaticResource MetricValue}" Margin="0,10,0,8" />
-                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail12CurrentText" Text="&#x2014; A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail12PowerText" Text="&#x2014; W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
+                                            <Grid x:Name="Rail12SecondaryGrid"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail12CurrentText" Text="&#x2014; A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail12PowerText" Text="&#x2014; W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
                                             <TextBlock x:Name="Rail12DetailText" Text="Shunt &#x2014; mV" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,10,0,0" />
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="156">
                                         <StackPanel>
-                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="+5 V rail" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Rail5StatusText" Grid.Column="1" Text="0x41" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" /></Grid>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Rail5TitleText" Text="+5 V rail" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Rail5StatusText" Grid.Column="1" Text="0x41" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" /></Grid>
                                             <TextBlock x:Name="Rail5VoltageText" Text="&#x2014; V" Style="{StaticResource MetricValue}" Margin="0,10,0,8" />
-                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail5CurrentText" Text="&#x2014; A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail5PowerText" Text="&#x2014; W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
+                                            <Grid x:Name="Rail5SecondaryGrid"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail5CurrentText" Text="&#x2014; A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail5PowerText" Text="&#x2014; W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
                                             <TextBlock x:Name="Rail5DetailText" Text="Shunt &#x2014; mV" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,10,0,0" />
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="156" Margin="0,0,0,14">
                                         <StackPanel>
-                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="+3.3 V rail" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Rail3V3StatusText" Grid.Column="1" Text="0x44" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" /></Grid>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Rail3V3TitleText" Text="+3.3 V rail" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Rail3V3StatusText" Grid.Column="1" Text="0x44" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" /></Grid>
                                             <TextBlock x:Name="Rail3V3VoltageText" Text="&#x2014; V" Style="{StaticResource MetricValue}" Margin="0,10,0,8" />
-                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail3V3CurrentText" Text="&#x2014; A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail3V3PowerText" Text="&#x2014; W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
+                                            <Grid x:Name="Rail3V3SecondaryGrid"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail3V3CurrentText" Text="&#x2014; A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail3V3PowerText" Text="&#x2014; W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
                                             <TextBlock x:Name="Rail3V3DetailText" Text="Shunt &#x2014; mV" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,10,0,0" />
                                         </StackPanel>
                                     </Border>

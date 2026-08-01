@@ -100,11 +100,16 @@ TimeCardConfigureBoardProfile(PDEVICE_CONTEXT context)
         context->PciDeviceId == 0xa000u) {
         context->BoardProfile = TIMECARD_BOARD_ART;
         context->SubsystemMask = TIMECARD_SUBSYSTEM_MASK_ART;
+    } else if (context->PciVendorId == 0x18d4u &&
+               context->PciDeviceId == 0x1008u) {
+        context->BoardProfile = TIMECARD_BOARD_CELESTICA;
+        context->SubsystemMask = TIMECARD_SUBSYSTEM_MASK_ALL;
     } else {
         /*
-         * Meta/Facebook (1d9b:0400) and Celestica (18d4:1008) share
-         * the two fb resource maps in Linux. Keep that profile as the
-         * conservative fallback if Windows omits a useful hardware ID.
+         * Meta/Facebook uses the two fb resource maps from Linux. Keep that
+         * profile as the conservative fallback if Windows omits a useful
+         * hardware ID. Celestica shares those MMIO maps but has a different
+         * PCA9546A sensor population and therefore has its own sensor profile.
          */
         context->BoardProfile = TIMECARD_BOARD_FB;
         context->SubsystemMask = TIMECARD_SUBSYSTEM_MASK_ALL;

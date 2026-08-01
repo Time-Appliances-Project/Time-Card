@@ -806,6 +806,44 @@ print_sensor_presence(const char *name, unsigned long flags)
 }
 
 static int
+icp10100_pressure_pa(const TIMECARD_ICP10100_READING *reading,
+                     double *pressure)
+{
+    double t;
+    double quadratic;
+    double s1;
+    double s2;
+    double s3;
+    double denominator;
+    double c;
+    double a;
+    double b;
+
+    if ((reading->Flags & TIMECARD_SENSOR_FLAG_VALID) == 0)
+        return 0;
+    t = (double)reading->RawTemperature - 32768.0;
+    quadratic = t * t / 16777216.0;
+    s1 = 3.5 * 1048576.0 + reading->Otp[0] * quadratic;
+    s2 = 2048.0 * reading->Otp[3] + reading->Otp[1] * quadratic;
+    s3 = 11.5 * 1048576.0 + reading->Otp[2] * quadratic;
+    denominator = s3 * (45000.0 - 80000.0) +
+                  s1 * (80000.0 - 105000.0) +
+                  s2 * (105000.0 - 45000.0);
+    if (denominator > -0.000001 && denominator < 0.000001)
+        return 0;
+    c = (s1 * s2 * (45000.0 - 80000.0) +
+         s2 * s3 * (80000.0 - 105000.0) +
+         s3 * s1 * (105000.0 - 45000.0)) / denominator;
+    if (s1 - s2 > -0.000001 && s1 - s2 < 0.000001)
+        return 0;
+    a = (45000.0 * s1 - 80000.0 * s2 - 35000.0 * c) /
+        (s1 - s2);
+    b = (45000.0 - a) * (s1 + c);
+    *pressure = a + b / (c + reading->RawPressure);
+    return *pressure >= 10000.0 && *pressure <= 130000.0;
+}
+
+static int
 cmd_sensors(HANDLE handle)
 {
     TIMECARD_SENSOR_TELEMETRY telemetry;
@@ -823,38 +861,79 @@ cmd_sensors(HANDLE handle)
     printf("Controller/events: 0x%02lx / 0x%08lx\n",
            (unsigned long)telemetry.ControllerStatus,
            (unsigned long)telemetry.InterruptStatus);
-    print_sensor_presence(
-        telemetry.Environment.ChipId == 0x58u ? "BMP280" : "BME280",
-        telemetry.Environment.Flags);
-    if ((telemetry.Environment.Flags & TIMECARD_SENSOR_FLAG_PRESENT) != 0) {
-        printf("  chip/status:     0x%02lx / 0x%02lx%s\n",
-               (unsigned long)telemetry.Environment.ChipId,
-               (unsigned long)telemetry.Environment.Status,
-               (telemetry.Environment.Flags &
-                TIMECARD_SENSOR_FLAG_HUMIDITY) ? " (humidity capable)" : "");
-        printf("  raw T/P/H:       %ld / %lu / %lu\n",
-               (long)telemetry.Environment.RawTemperature,
-               (unsigned long)telemetry.Environment.RawPressure,
-               (unsigned long)telemetry.Environment.RawHumidity);
+    printf("Board profile:     %s\n",
+           telemetry.BoardProfile == TIMECARD_BOARD_PROFILE_CELESTICA ?
+               "Celestica R4006" :
+           telemetry.BoardProfile == TIMECARD_BOARD_PROFILE_ART ?
+               "Orolia ART" : "Meta/Facebook");
+    if (telemetry.BoardProfile == TIMECARD_BOARD_PROFILE_CELESTICA) {
+        unsigned long index;
+        double pressurePa;
+
+        for (index = 0; index < TIMECARD_SENSOR_LM75B_COUNT; ++index) {
+            char name[24];
+
+            _snprintf_s(name, sizeof(name), _TRUNCATE,
+                        "LM75B sensor %lu", index + 1u);
+            print_sensor_presence(
+                name, telemetry.BoardTemperature[index].Flags);
+            if ((telemetry.BoardTemperature[index].Flags &
+                 TIMECARD_SENSOR_FLAG_VALID) != 0) {
+                printf("  address/temp:    0x%02lx / %.3f C\n",
+                       (unsigned long)telemetry.BoardTemperature[index].Address,
+                       telemetry.BoardTemperature[index].TemperatureMilliCelsius /
+                           1000.0);
+                ++validCount;
+            }
+        }
+        print_sensor_presence("SHT3x", telemetry.Humidity.Flags);
+        if ((telemetry.Humidity.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0) {
+            printf("  temperature/RH:  %.3f C / %.3f %% (CRC OK)\n",
+                   telemetry.Humidity.TemperatureMilliCelsius / 1000.0,
+                   telemetry.Humidity.HumidityMilliPercent / 1000.0);
+            ++validCount;
+        }
+        print_sensor_presence("ICP-10100", telemetry.Pressure.Flags);
+        if (icp10100_pressure_pa(&telemetry.Pressure, &pressurePa)) {
+            printf("  pressure/temp:   %.2f hPa / %.3f C (CRC + OTP OK)\n",
+                   pressurePa / 100.0,
+                   telemetry.Pressure.TemperatureMilliCelsius / 1000.0);
+            ++validCount;
+        }
+    } else {
+        print_sensor_presence(
+            telemetry.Environment.ChipId == 0x58u ? "BMP280" : "BME280",
+            telemetry.Environment.Flags);
+        if ((telemetry.Environment.Flags & TIMECARD_SENSOR_FLAG_PRESENT) != 0) {
+            printf("  chip/status:     0x%02lx / 0x%02lx%s\n",
+                   (unsigned long)telemetry.Environment.ChipId,
+                   (unsigned long)telemetry.Environment.Status,
+                   (telemetry.Environment.Flags &
+                    TIMECARD_SENSOR_FLAG_HUMIDITY) ? " (humidity capable)" : "");
+            printf("  raw T/P/H:       %ld / %lu / %lu\n",
+                   (long)telemetry.Environment.RawTemperature,
+                   (unsigned long)telemetry.Environment.RawPressure,
+                   (unsigned long)telemetry.Environment.RawHumidity);
+        }
+        print_sensor_presence("INA219 +12 V", telemetry.Rail12V.Flags);
+        if ((telemetry.Rail12V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+            printf("  %lu mV, %ld mA, %ld mW\n",
+                   (unsigned long)telemetry.Rail12V.BusMillivolts,
+                   (long)telemetry.Rail12V.CurrentMilliamps,
+                   (long)telemetry.Rail12V.PowerMilliwatts);
+        print_sensor_presence("INA219 +5 V", telemetry.Rail5V.Flags);
+        if ((telemetry.Rail5V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+            printf("  %lu mV, %ld mA, %ld mW\n",
+                   (unsigned long)telemetry.Rail5V.BusMillivolts,
+                   (long)telemetry.Rail5V.CurrentMilliamps,
+                   (long)telemetry.Rail5V.PowerMilliwatts);
+        print_sensor_presence("INA219 +3.3 V", telemetry.Rail3V3.Flags);
+        if ((telemetry.Rail3V3.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+            printf("  %lu mV, %ld mA, %ld mW\n",
+                   (unsigned long)telemetry.Rail3V3.BusMillivolts,
+                   (long)telemetry.Rail3V3.CurrentMilliamps,
+                   (long)telemetry.Rail3V3.PowerMilliwatts);
     }
-    print_sensor_presence("INA219 +12 V", telemetry.Rail12V.Flags);
-    if ((telemetry.Rail12V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
-        printf("  %lu mV, %ld mA, %ld mW\n",
-               (unsigned long)telemetry.Rail12V.BusMillivolts,
-               (long)telemetry.Rail12V.CurrentMilliamps,
-               (long)telemetry.Rail12V.PowerMilliwatts);
-    print_sensor_presence("INA219 +5 V", telemetry.Rail5V.Flags);
-    if ((telemetry.Rail5V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
-        printf("  %lu mV, %ld mA, %ld mW\n",
-               (unsigned long)telemetry.Rail5V.BusMillivolts,
-               (long)telemetry.Rail5V.CurrentMilliamps,
-               (long)telemetry.Rail5V.PowerMilliwatts);
-    print_sensor_presence("INA219 +3.3 V", telemetry.Rail3V3.Flags);
-    if ((telemetry.Rail3V3.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
-        printf("  %lu mV, %ld mA, %ld mW\n",
-               (unsigned long)telemetry.Rail3V3.BusMillivolts,
-               (long)telemetry.Rail3V3.CurrentMilliamps,
-               (long)telemetry.Rail3V3.PowerMilliwatts);
     print_sensor_presence(
         telemetry.Imu.ChipId == TIMECARD_SENSOR_BNO08X_CHIP_ID ?
             "BNO08x IMU" : "BNO055 IMU",
@@ -903,14 +982,16 @@ cmd_sensors(HANDLE handle)
                (long)telemetry.Imu.QuaternionY,
                (long)telemetry.Imu.QuaternionZ);
     }
-    if ((telemetry.Environment.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
-        ++validCount;
-    if ((telemetry.Rail12V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
-        ++validCount;
-    if ((telemetry.Rail5V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
-        ++validCount;
-    if ((telemetry.Rail3V3.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
-        ++validCount;
+    if (telemetry.BoardProfile != TIMECARD_BOARD_PROFILE_CELESTICA) {
+        if ((telemetry.Environment.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+            ++validCount;
+        if ((telemetry.Rail12V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+            ++validCount;
+        if ((telemetry.Rail5V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+            ++validCount;
+        if ((telemetry.Rail3V3.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
+            ++validCount;
+    }
     if ((telemetry.Imu.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
         ++validCount;
     if (validCount == 0) {

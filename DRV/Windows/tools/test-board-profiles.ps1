@@ -14,6 +14,7 @@ $infSource = Get-Content -Raw (Join-Path $windows 'timecard.inf')
 $projectSource = Get-Content -Raw (Join-Path $windows 'timecard.vcxproj')
 $abiSource = Get-Content -Raw (Join-Path $windows 'include\timecard_ioctl.h')
 $mroSource = Get-Content -Raw (Join-Path $windows 'mro50.c')
+$verifySource = Get-Content -Raw (Join-Path $windows 'verify.ps1')
 
 function Assert-Match {
     param(
@@ -78,8 +79,8 @@ Assert-Match $headerSource 'TIMECARD_MRO50_OFFSET_ART\s+0x00340000u' `
     'ART direct mRO-50 bridge offset is missing'
 Assert-Match $headerSource 'TIMECARD_BOARD_CONFIG_OFFSET_ART\s+0x00210000u' `
     'ART board-configuration offset is missing'
-Assert-Match $abiSource 'TIMECARD_ABI_VERSION\s+9u' `
-    'mRO-50 support did not advance the public ABI'
+Assert-Match $abiSource 'TIMECARD_ABI_VERSION\s+10u' `
+    'Celestica sensor support did not advance the public ABI'
 Assert-Match $mroSource 'TimeCardMro50Query' `
     'ART mRO-50 query implementation is missing'
 Assert-Match $projectSource 'i2c_ocores\.c' `
@@ -90,6 +91,42 @@ Assert-Match $projectSource 'mro50\.c' `
     'mRO-50 implementation is not in the driver build'
 Assert-Match $headerSource 'TIMECARD_SUBSYSTEM_MASK_ART' `
     'ART subsystem capability mask is missing'
+Assert-Match $headerSource 'TIMECARD_BOARD_CELESTICA\s+3u' `
+    'Celestica does not have a distinct board profile'
+Assert-Match $driverSource `
+    'PciVendorId\s*==\s*0x18d4u[\s\S]*TIMECARD_BOARD_CELESTICA' `
+    'Celestica PCI identity does not select its sensor profile'
+Assert-Match $abiSource 'TIMECARD_SENSOR_CAP_LM75B' `
+    'Celestica LM75B capability is missing from the ABI'
+Assert-Match $abiSource 'TIMECARD_SENSOR_CAP_SHT3X' `
+    'Celestica SHT3x capability is missing from the ABI'
+Assert-Match $abiSource 'TIMECARD_SENSOR_CAP_ICP10100' `
+    'Celestica ICP-10100 capability is missing from the ABI'
+Assert-Match $i2cSource `
+    'TIMECARD_I2C_MUX_CELESTICA_LM75B[\s\S]*TimeCardLm75bReadLocked' `
+    'Celestica LM75B channel is not sampled'
+Assert-Match $i2cSource `
+    'TIMECARD_I2C_MUX_CELESTICA_SHT3X[\s\S]*TimeCardSht3xReadLocked' `
+    'Celestica SHT3x channel is not sampled'
+Assert-Match $i2cSource `
+    'TIMECARD_I2C_MUX_CELESTICA_ICP10100[\s\S]*TimeCardIcp10100ReadLocked' `
+    'Celestica ICP-10100 channel is not sampled'
+Assert-Match $i2cSource 'TimeCardSensorCrc8' `
+    'Sensirion/TDK CRC validation is missing'
+Assert-Match $i2cSource '0xc5u,\s*0x95u,\s*0x00u,\s*0x66u,\s*0x9cu' `
+    'ICP-10100 OTP pointer sequence is missing'
+Assert-Match $i2cSource `
+    'BoardProfile\s*==\s*TIMECARD_BOARD_ART[\s\S]*Capabilities\s*=\s*0u' `
+    'ART incorrectly advertises an environmental sensor population'
+Assert-Match $i2cSource `
+    'celesticaMap\[TIMECARD_LED_COUNT\][\s\S]*4u,\s*5u,\s*0u,\s*1u,\s*2u,\s*3u' `
+    'Celestica GPS/SMA LED order does not match sheet 26'
+Assert-Match $i2cSource `
+    'TIMECARD_BOARD_CELESTICA[\s\S]*logicalLed\s*!=\s*TIMECARD_LED_GNSS2' `
+    'Celestica unused OUT16-18 group is not capability-gated'
+Assert-Match $verifySource `
+    'hasCelesticaProfile[\s\S]*ABI:\\s\+10[\s\S]*Celestica R4006' `
+    'live verification does not reject an old driver on Celestica'
 Assert-Match $busSource '\*enabled\s*=\s*TRUE;[\s\S]*STATUS_OBJECT_NAME_NOT_FOUND' `
     'new supported cards do not default to the full Device Manager hierarchy'
 Assert-Match $i2cSource 'TimeCardMonitorBranchResolveLocked' `
@@ -120,4 +157,4 @@ Assert-Match $serialSource 'TIMECARD_UART_RX_RING_SIZE' `
 Assert-Match $serialSource 'TIMECARD_UART_BURST_IDLE_US' `
     'burst-aware UART polling fallback is missing'
 
-Write-Host 'Board-profile tests passed (3 PCI identities, ART map, transports, independent sensor-route discovery, hierarchy default, UART buffering, and capability gating).'
+Write-Host 'Board-profile tests passed (3 PCI identities, Celestica sensors, ART map, transports, independent sensor-route discovery, hierarchy default, UART buffering, and capability gating).'

@@ -56,6 +56,16 @@
 #define TIMECARD_BNO08X_GRAVITY 0x06u
 #define TIMECARD_BNO08X_TEMPERATURE 0x0eu
 
+#define TIMECARD_SHT3X_STATUS_COMMAND_HI 0xf3u
+#define TIMECARD_SHT3X_STATUS_COMMAND_LO 0x2du
+#define TIMECARD_SHT3X_MEASURE_COMMAND_HI 0x24u
+#define TIMECARD_SHT3X_MEASURE_COMMAND_LO 0x00u
+#define TIMECARD_ICP10100_PRODUCT_ID 0x08u
+#define TIMECARD_ICP10100_READ_ID_HI 0xefu
+#define TIMECARD_ICP10100_READ_ID_LO 0xc8u
+#define TIMECARD_ICP10100_MEASURE_HI 0x50u
+#define TIMECARD_ICP10100_MEASURE_LO 0x59u
+
 static NTSTATUS
 TimeCardI2cWriteLocked(PDEVICE_CONTEXT context, ULONG address,
                        const UCHAR *data, ULONG length,
@@ -1117,6 +1127,234 @@ TimeCardSensorDelayMilliseconds(ULONG milliseconds)
     (VOID)KeDelayExecutionThread(KernelMode, FALSE, &interval);
 }
 
+static UCHAR
+TimeCardSensorCrc8(const UCHAR *data, ULONG length)
+{
+    UCHAR crc = 0xffu;
+    ULONG byteIndex;
+
+    for (byteIndex = 0; byteIndex < length; ++byteIndex) {
+        ULONG bit;
+
+        crc ^= data[byteIndex];
+        for (bit = 0; bit < 8u; ++bit) {
+            crc = (crc & 0x80u) != 0 ?
+                (UCHAR)((crc << 1) ^ 0x31u) : (UCHAR)(crc << 1);
+        }
+    }
+    return crc;
+}
+
+static BOOLEAN
+TimeCardSensorFrameCrcValid(const UCHAR *frame)
+{
+    return TimeCardSensorCrc8(frame, 2u) == frame[2];
+}
+
+static VOID
+TimeCardLm75bReadLocked(PDEVICE_CONTEXT context, ULONG address,
+                        TIMECARD_LM75B_READING *reading,
+                        ULONG *controllerStatus, ULONG *interruptStatus)
+{
+    UCHAR data[2];
+    SHORT raw;
+    NTSTATUS status;
+
+    RtlZeroMemory(reading, sizeof(*reading));
+    reading->Size = sizeof(*reading);
+    reading->Address = address;
+    status = TimeCardI2cReadBytesLocked(
+        context, address, 1u, 0x00u, data, sizeof(data),
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return;
+
+    reading->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
+    raw = (SHORT)(((USHORT)data[0] << 8) | data[1]);
+    reading->RawTemperature = raw;
+    reading->TemperatureMilliCelsius = ((LONG)raw * 1000l) / 256l;
+    if (reading->TemperatureMilliCelsius < -55000l ||
+        reading->TemperatureMilliCelsius > 125000l) {
+        return;
+    }
+    reading->Flags |= TIMECARD_SENSOR_FLAG_VALID |
+                      TIMECARD_SENSOR_FLAG_CONVERSION_READY |
+                      TIMECARD_SENSOR_FLAG_TEMPERATURE;
+}
+
+static VOID
+TimeCardSht3xReadLocked(PDEVICE_CONTEXT context,
+                        TIMECARD_SHT3X_READING *reading,
+                        ULONG *controllerStatus, ULONG *interruptStatus)
+{
+    static const UCHAR statusCommand[] = {
+        TIMECARD_SHT3X_STATUS_COMMAND_HI,
+        TIMECARD_SHT3X_STATUS_COMMAND_LO
+    };
+    static const UCHAR measureCommand[] = {
+        TIMECARD_SHT3X_MEASURE_COMMAND_HI,
+        TIMECARD_SHT3X_MEASURE_COMMAND_LO
+    };
+    UCHAR statusFrame[3];
+    UCHAR data[6];
+    NTSTATUS status;
+
+    RtlZeroMemory(reading, sizeof(*reading));
+    reading->Size = sizeof(*reading);
+    reading->Address = TIMECARD_SENSOR_SHT3X_ADDRESS;
+    status = TimeCardI2cWriteLocked(
+        context, reading->Address, statusCommand, sizeof(statusCommand),
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return;
+    reading->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
+    TimeCardSensorDelayMilliseconds(1u);
+    status = TimeCardI2cReadBytesLocked(
+        context, reading->Address, 0u, 0u, statusFrame,
+        sizeof(statusFrame), controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status) || !TimeCardSensorFrameCrcValid(statusFrame))
+        return;
+    reading->Status = ((ULONG)statusFrame[0] << 8) | statusFrame[1];
+
+    status = TimeCardI2cWriteLocked(
+        context, reading->Address, measureCommand, sizeof(measureCommand),
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return;
+    TimeCardSensorDelayMilliseconds(20u);
+    status = TimeCardI2cReadBytesLocked(
+        context, reading->Address, 0u, 0u, data, sizeof(data),
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status) || !TimeCardSensorFrameCrcValid(&data[0]) ||
+        !TimeCardSensorFrameCrcValid(&data[3])) {
+        return;
+    }
+
+    reading->RawTemperature = ((ULONG)data[0] << 8) | data[1];
+    reading->RawHumidity = ((ULONG)data[3] << 8) | data[4];
+    reading->TemperatureMilliCelsius = -45000l + (LONG)(
+        (175000ll * reading->RawTemperature) / 65535ll);
+    reading->HumidityMilliPercent = (ULONG)(
+        (100000ull * reading->RawHumidity) / 65535ull);
+    reading->Flags |= TIMECARD_SENSOR_FLAG_VALID |
+                      TIMECARD_SENSOR_FLAG_CONFIGURED |
+                      TIMECARD_SENSOR_FLAG_CONVERSION_READY |
+                      TIMECARD_SENSOR_FLAG_HUMIDITY |
+                      TIMECARD_SENSOR_FLAG_TEMPERATURE |
+                      TIMECARD_SENSOR_FLAG_CRC_VALID;
+}
+
+static NTSTATUS
+TimeCardIcp10100ReadOtpLocked(PDEVICE_CONTEXT context,
+                              ULONG *controllerStatus,
+                              ULONG *interruptStatus)
+{
+    static const UCHAR setPointer[] = { 0xc5u, 0x95u, 0x00u, 0x66u, 0x9cu };
+    static const UCHAR incrementPointer[] = { 0xc7u, 0xf7u };
+    ULONG index;
+    NTSTATUS status;
+
+    if (context->I2cIcp10100OtpValid != 0)
+        return STATUS_SUCCESS;
+    status = TimeCardI2cWriteLocked(
+        context, TIMECARD_SENSOR_ICP10100_ADDRESS,
+        setPointer, sizeof(setPointer), controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return status;
+
+    for (index = 0; index < 4u; ++index) {
+        UCHAR frame[3];
+
+        status = TimeCardI2cWriteLocked(
+            context, TIMECARD_SENSOR_ICP10100_ADDRESS,
+            incrementPointer, sizeof(incrementPointer),
+            controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            return status;
+        status = TimeCardI2cReadBytesLocked(
+            context, TIMECARD_SENSOR_ICP10100_ADDRESS, 0u, 0u,
+            frame, sizeof(frame), controllerStatus, interruptStatus);
+        if (!NT_SUCCESS(status))
+            return status;
+        if (!TimeCardSensorFrameCrcValid(frame))
+            return STATUS_CRC_ERROR;
+        context->I2cIcp10100Otp[index] =
+            (SHORT)(((USHORT)frame[0] << 8) | frame[1]);
+    }
+    context->I2cIcp10100OtpValid = 1u;
+    return STATUS_SUCCESS;
+}
+
+static VOID
+TimeCardIcp10100ReadLocked(PDEVICE_CONTEXT context,
+                           TIMECARD_ICP10100_READING *reading,
+                           ULONG *controllerStatus, ULONG *interruptStatus)
+{
+    static const UCHAR idCommand[] = {
+        TIMECARD_ICP10100_READ_ID_HI, TIMECARD_ICP10100_READ_ID_LO
+    };
+    static const UCHAR measureCommand[] = {
+        TIMECARD_ICP10100_MEASURE_HI, TIMECARD_ICP10100_MEASURE_LO
+    };
+    UCHAR idFrame[3];
+    UCHAR data[9];
+    ULONG index;
+    NTSTATUS status;
+
+    RtlZeroMemory(reading, sizeof(*reading));
+    reading->Size = sizeof(*reading);
+    reading->Address = TIMECARD_SENSOR_ICP10100_ADDRESS;
+    status = TimeCardI2cWriteLocked(
+        context, reading->Address, idCommand, sizeof(idCommand),
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return;
+    reading->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
+    TimeCardSensorDelayMilliseconds(1u);
+    status = TimeCardI2cReadBytesLocked(
+        context, reading->Address, 0u, 0u, idFrame, sizeof(idFrame),
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status) || !TimeCardSensorFrameCrcValid(idFrame))
+        return;
+    reading->ProductId =
+        ((((ULONG)idFrame[0] << 8) | idFrame[1]) & 0x3fu);
+    if (reading->ProductId != TIMECARD_ICP10100_PRODUCT_ID)
+        return;
+
+    status = TimeCardIcp10100ReadOtpLocked(
+        context, controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return;
+    for (index = 0; index < 4u; ++index)
+        reading->Otp[index] = context->I2cIcp10100Otp[index];
+
+    status = TimeCardI2cWriteLocked(
+        context, reading->Address, measureCommand, sizeof(measureCommand),
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status))
+        return;
+    TimeCardSensorDelayMilliseconds(30u);
+    status = TimeCardI2cReadBytesLocked(
+        context, reading->Address, 0u, 0u, data, sizeof(data),
+        controllerStatus, interruptStatus);
+    if (!NT_SUCCESS(status) || !TimeCardSensorFrameCrcValid(&data[0]) ||
+        !TimeCardSensorFrameCrcValid(&data[3]) ||
+        !TimeCardSensorFrameCrcValid(&data[6])) {
+        return;
+    }
+
+    reading->RawPressure = ((ULONG)data[0] << 16) |
+                           ((ULONG)data[1] << 8) | data[3];
+    reading->RawTemperature = ((ULONG)data[6] << 8) | data[7];
+    reading->TemperatureMilliCelsius = -45000l + (LONG)(
+        (175000ll * reading->RawTemperature) / 65536ll);
+    reading->Flags |= TIMECARD_SENSOR_FLAG_VALID |
+                      TIMECARD_SENSOR_FLAG_CONFIGURED |
+                      TIMECARD_SENSOR_FLAG_CONVERSION_READY |
+                      TIMECARD_SENSOR_FLAG_TEMPERATURE |
+                      TIMECARD_SENSOR_FLAG_CRC_VALID;
+}
+
 static NTSTATUS
 TimeCardLedResolveAddressLocked(PDEVICE_CONTEXT context, ULONG *address,
                                 ULONG *controllerStatus,
@@ -1249,7 +1487,24 @@ TimeCardLedUsesLegacyWiring(PDEVICE_CONTEXT context)
      * the V9 Rev02/MSI-X schematic and exchanges each package's R/G sinks.
      * Keep the V9 mapping unchanged for the original card.
      */
-    return context->Layout == TIMECARD_LAYOUT_MSI;
+    return context->BoardProfile == TIMECARD_BOARD_FB &&
+           context->Layout == TIMECARD_LAYOUT_MSI;
+}
+
+static BOOLEAN
+TimeCardLedSwapsRedGreen(PDEVICE_CONTEXT context)
+{
+    /* Celestica drives green, red, blue on each consecutive output group. */
+    return TimeCardLedUsesLegacyWiring(context) ||
+           context->BoardProfile == TIMECARD_BOARD_CELESTICA;
+}
+
+static BOOLEAN
+TimeCardLedIsFitted(PDEVICE_CONTEXT context, ULONG logicalLed)
+{
+    /* R4006 has one GPS indicator and four SMA indicators; OUT16-18 are NC. */
+    return context->BoardProfile != TIMECARD_BOARD_CELESTICA ||
+           logicalLed != TIMECARD_LED_GNSS2;
 }
 
 static ULONG
@@ -1263,9 +1518,13 @@ TimeCardLedPhysicalIndex(PDEVICE_CONTEXT context, ULONG logicalLed)
         TIMECARD_LED_GNSS1,
         TIMECARD_LED_GNSS2
     };
+    static const UCHAR celesticaMap[TIMECARD_LED_COUNT] = {
+        4u, 5u, 0u, 1u, 2u, 3u
+    };
 
-    return TimeCardLedUsesLegacyWiring(context) ?
-        legacyMap[logicalLed] : logicalLed;
+    return context->BoardProfile == TIMECARD_BOARD_CELESTICA ?
+        celesticaMap[logicalLed] : TimeCardLedUsesLegacyWiring(context) ?
+            legacyMap[logicalLed] : logicalLed;
 }
 
 static ULONG
@@ -1305,6 +1564,8 @@ TimeCardLedDetectFaultsLocked(PDEVICE_CONTEXT context, ULONG address,
     if (!NT_SUCCESS(status))
         goto Disable;
     *openMask = TimeCardLedFaultMask(result);
+    if (context->BoardProfile == TIMECARD_BOARD_CELESTICA)
+        *openMask &= (1u << 15) - 1u;
 
     /* OSDE=10 selects short detection and replaces the result registers. */
     writeBuffer[1] = 0x02u;
@@ -1319,6 +1580,8 @@ TimeCardLedDetectFaultsLocked(PDEVICE_CONTEXT context, ULONG address,
         controllerStatus, interruptStatus);
     if (NT_SUCCESS(status))
         *shortMask = TimeCardLedFaultMask(result);
+    if (context->BoardProfile == TIMECARD_BOARD_CELESTICA)
+        *shortMask &= (1u << 15) - 1u;
 
 Disable:
     writeBuffer[1] = 0x00u;
@@ -1355,6 +1618,8 @@ TimeCardLedQuery(PDEVICE_CONTEXT context, ULONG led,
     RtlZeroMemory(control, sizeof(*control));
     control->Size = sizeof(*control);
     control->Led = led;
+    if (!TimeCardLedIsFitted(context, led))
+        return STATUS_SUCCESS;
     WdfWaitLockAcquire(context->RegisterLock, NULL);
     status = TimeCardSensorBranchSelectLocked(
         context, &savedMask, &changed,
@@ -1394,7 +1659,7 @@ TimeCardLedQuery(PDEVICE_CONTEXT context, ULONG led,
             control->Flags |= TIMECARD_LED_FLAG_ENABLED;
         if ((spreadSpectrum & 0x60u) == 0x60u)
             control->Flags |= TIMECARD_LED_FLAG_DC_TEST;
-        if (TimeCardLedUsesLegacyWiring(context)) {
+        if (TimeCardLedSwapsRedGreen(context)) {
             control->Red = pwm[2];
             control->Green = pwm[0];
         } else {
@@ -1463,6 +1728,8 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
     RtlZeroMemory(response, sizeof(*response));
     response->Size = sizeof(*response);
     response->Led = request->Led;
+    if (!TimeCardLedIsFitted(context, request->Led))
+        return STATUS_SUCCESS;
     WdfWaitLockAcquire(context->RegisterLock, NULL);
     status = TimeCardSensorBranchSelectLocked(
         context, &savedMask, &changed,
@@ -1550,10 +1817,10 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
         goto Exit;
 
     writeBuffer[0] = (UCHAR)(0x01u + physicalLed * 6u);
-    writeBuffer[1] = TimeCardLedUsesLegacyWiring(context) ?
+    writeBuffer[1] = TimeCardLedSwapsRedGreen(context) ?
         (UCHAR)request->Green : (UCHAR)request->Red;
     writeBuffer[2] = 0;
-    writeBuffer[3] = TimeCardLedUsesLegacyWiring(context) ?
+    writeBuffer[3] = TimeCardLedSwapsRedGreen(context) ?
         (UCHAR)request->Red : (UCHAR)request->Green;
     writeBuffer[4] = 0;
     writeBuffer[5] = (UCHAR)request->Blue;
@@ -1622,10 +1889,10 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
         readCurrent != (UCHAR)request->GlobalCurrent ||
         readScaling[0] != 0xffu || readScaling[1] != 0xffu ||
         readScaling[2] != 0xffu ||
-        readPwm[0] != (TimeCardLedUsesLegacyWiring(context) ?
+        readPwm[0] != (TimeCardLedSwapsRedGreen(context) ?
             (UCHAR)request->Green : (UCHAR)request->Red) ||
         readPwm[1] != 0 ||
-        readPwm[2] != (TimeCardLedUsesLegacyWiring(context) ?
+        readPwm[2] != (TimeCardLedSwapsRedGreen(context) ?
             (UCHAR)request->Red : (UCHAR)request->Green) ||
         readPwm[3] != 0 ||
         readPwm[4] != (UCHAR)request->Blue || readPwm[5] != 0 ||
@@ -1643,7 +1910,7 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
             response->Flags |= TIMECARD_LED_FLAG_RESET_TEST;
         if (sdbHigh)
             response->Flags |= TIMECARD_LED_FLAG_SDB_HIGH;
-        if (TimeCardLedUsesLegacyWiring(context)) {
+        if (TimeCardLedSwapsRedGreen(context)) {
             response->Red = readPwm[2];
             response->Green = readPwm[0];
         } else {
@@ -2460,8 +2727,100 @@ TimeCardSensorQuery(PDEVICE_CONTEXT context,
     telemetry->Rail3V3.Size = sizeof(telemetry->Rail3V3);
     telemetry->Rail3V3.Address = TIMECARD_SENSOR_INA219_3V3_ADDRESS;
     telemetry->Imu.Size = sizeof(telemetry->Imu);
+    telemetry->BoardProfile = context->BoardProfile;
+    telemetry->BoardTemperature[0].Size =
+        sizeof(telemetry->BoardTemperature[0]);
+    telemetry->BoardTemperature[0].Address =
+        TIMECARD_SENSOR_LM75B_1_ADDRESS;
+    telemetry->BoardTemperature[1].Size =
+        sizeof(telemetry->BoardTemperature[1]);
+    telemetry->BoardTemperature[1].Address =
+        TIMECARD_SENSOR_LM75B_2_ADDRESS;
+    telemetry->BoardTemperature[2].Size =
+        sizeof(telemetry->BoardTemperature[2]);
+    telemetry->BoardTemperature[2].Address =
+        TIMECARD_SENSOR_LM75B_3_ADDRESS;
+    telemetry->Humidity.Size = sizeof(telemetry->Humidity);
+    telemetry->Humidity.Address = TIMECARD_SENSOR_SHT3X_ADDRESS;
+    telemetry->Pressure.Size = sizeof(telemetry->Pressure);
+    telemetry->Pressure.Address = TIMECARD_SENSOR_ICP10100_ADDRESS;
+    if (context->BoardProfile == TIMECARD_BOARD_CELESTICA) {
+        telemetry->Capabilities =
+            TIMECARD_SENSOR_CAP_LM75B | TIMECARD_SENSOR_CAP_SHT3X |
+            TIMECARD_SENSOR_CAP_ICP10100 | TIMECARD_SENSOR_CAP_BNO08X;
+    } else if (context->BoardProfile == TIMECARD_BOARD_ART) {
+        telemetry->Capabilities = 0u;
+    } else {
+        telemetry->Capabilities =
+            TIMECARD_SENSOR_CAP_BME280 | TIMECARD_SENSOR_CAP_INA219 |
+            TIMECARD_SENSOR_CAP_BNO055 | TIMECARD_SENSOR_CAP_BNO08X;
+    }
 
     WdfWaitLockAcquire(context->RegisterLock, NULL);
+    if (context->BoardProfile == TIMECARD_BOARD_CELESTICA) {
+        status = TimeCardI2cMuxReadLocked(
+            context, &savedMask, &controllerStatus, &interruptStatus);
+        telemetry->MuxChannelMask = savedMask;
+        if (!NT_SUCCESS(status))
+            goto Exit;
+        telemetry->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
+
+        status = TimeCardI2cMuxWriteLocked(
+            context, TIMECARD_I2C_MUX_CELESTICA_LM75B,
+            &controllerStatus, &interruptStatus);
+        if (!NT_SUCCESS(status))
+            goto Exit;
+        KeStallExecutionProcessor(10u);
+        TimeCardLm75bReadLocked(
+            context, TIMECARD_SENSOR_LM75B_1_ADDRESS,
+            &telemetry->BoardTemperature[0],
+            &controllerStatus, &interruptStatus);
+        TimeCardLm75bReadLocked(
+            context, TIMECARD_SENSOR_LM75B_2_ADDRESS,
+            &telemetry->BoardTemperature[1],
+            &controllerStatus, &interruptStatus);
+        TimeCardLm75bReadLocked(
+            context, TIMECARD_SENSOR_LM75B_3_ADDRESS,
+            &telemetry->BoardTemperature[2],
+            &controllerStatus, &interruptStatus);
+
+        status = TimeCardI2cMuxWriteLocked(
+            context, TIMECARD_I2C_MUX_CELESTICA_SHT3X,
+            &controllerStatus, &interruptStatus);
+        if (!NT_SUCCESS(status))
+            goto Exit;
+        KeStallExecutionProcessor(10u);
+        TimeCardSht3xReadLocked(
+            context, &telemetry->Humidity,
+            &controllerStatus, &interruptStatus);
+
+        status = TimeCardI2cMuxWriteLocked(
+            context, TIMECARD_I2C_MUX_CELESTICA_ICP10100,
+            &controllerStatus, &interruptStatus);
+        if (!NT_SUCCESS(status))
+            goto Exit;
+        KeStallExecutionProcessor(10u);
+        TimeCardIcp10100ReadLocked(
+            context, &telemetry->Pressure,
+            &controllerStatus, &interruptStatus);
+
+        status = TimeCardI2cMuxWriteLocked(
+            context, TIMECARD_I2C_MUX_CELESTICA_BNO08X,
+            &controllerStatus, &interruptStatus);
+        if (!NT_SUCCESS(status))
+            goto Exit;
+        KeStallExecutionProcessor(10u);
+        context->I2cSensorMuxMask =
+            TIMECARD_I2C_MUX_CELESTICA_BNO08X;
+        context->I2cImuType = TIMECARD_IMU_TYPE_BNO08X;
+        context->I2cImuAddress = TIMECARD_SENSOR_BNO08X_ADDRESS;
+        TimeCardBno08xReadLocked(
+            context, &telemetry->Imu,
+            &controllerStatus, &interruptStatus);
+        telemetry->Flags |= TIMECARD_SENSOR_FLAG_VALID;
+        goto Exit;
+    }
+
     status = TimeCardSensorBranchSelectLocked(
         context, &savedMask, &changed,
         &controllerStatus, &interruptStatus);

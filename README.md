@@ -171,7 +171,7 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
   [`DRV/Windows`](DRV/Windows)
 * CAD files for the custom PCIe bracket 
 
-The Windows package currently ships driver **1.35 / ABI 9** and a native
+The Windows package currently ships driver **1.37 / ABI 10** and a native
 Control Center that brings the complete Time Card into one application:
 
 * Precision-clock telemetry, detail-focused rolling offset graphs, clock-source
@@ -188,9 +188,10 @@ Control Center that brings the complete Time Card into one application:
 * A default-on Device Manager subsystem hierarchy, recovery controls, and
   guarded, verified FPGA SPI-flash updates.
 * Explicit Meta/Facebook, Celestica, and Orolia/Safran ART board profiles
-  matching the PCI identities and resource maps in the Linux driver. ART
-  capability detection prevents absent Meta-only sensors, LEDs, ToD/NMEA,
-  secondary GNSS, PTM, and generator blocks from appearing as hardware faults.
+  matching the PCI identities and resource maps in the Linux driver. Celestica
+  R4006 support follows its four TCA9546A sensor branches for three LM75Bs, an
+  SHT3x, an ICP-10100, and a BNO08x; ART capability detection prevents absent
+  Meta-only blocks from appearing as hardware faults.
 
 See the [Windows driver guide](DRV/Windows/README.md) and the
 [Control Center guide](DRV/Windows/TimeCardControlCenter/README.md) for build,
@@ -200,7 +201,7 @@ installation, safety, and hardware details.
 
 | GNSS receiver and sky map | Sensors and IMU | I2C routing and status LEDs |
 | --- | --- | --- |
-| ![GNSS receiver workspace](DRV/Windows/assets/timecard-control-center-gnss.png) | ![Sensors and IMU workspace](DRV/Windows/assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](DRV/Windows/assets/timecard-control-center-i2c.png) |
+| ![GNSS receiver workspace](DRV/Windows/assets/timecard-control-center-gnss.png) | ![Celestica sensors and compact 3D IMU workspace](DRV/Windows/assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](DRV/Windows/assets/timecard-control-center-i2c.png) |
 
 # Credits
 Hereby we would like to thank these individuals who helped with the initiative, archirecture, design, software development, hardware issue maintanance and upgrades.

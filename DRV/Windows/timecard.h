@@ -61,6 +61,7 @@ extern const GUID GUID_DEVCLASS_TIMECARD;
 
 #define TIMECARD_BOARD_FB                1u
 #define TIMECARD_BOARD_ART               2u
+#define TIMECARD_BOARD_CELESTICA         3u
 #define TIMECARD_I2C_CONTROLLER_XIIC     1u
 #define TIMECARD_I2C_CONTROLLER_OCORES   2u
 #define TIMECARD_FLASH_CONTROLLER_XILINX 1u
@@ -202,6 +203,8 @@ typedef struct _DEVICE_CONTEXT {
     ULONG I2cImuType;
     ULONG I2cBno08xSequence;
     ULONG I2cBno08xConfigured;
+    SHORT I2cIcp10100Otp[4];
+    ULONG I2cIcp10100OtpValid;
     ULONG FlashOffset;
     ULONG FlashJedecId;
     ULONG FlashCapacity;

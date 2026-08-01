@@ -951,7 +951,7 @@ namespace TimeCardControlCenter
         {
             if (CompatibilityMatrixText == null)
                 return;
-            uint abi = productSettings != null && productSettings.DemoMode ? 8 :
+            uint abi = productSettings != null && productSettings.DemoMode ? 10 :
                 snapshot == null ? 0 : snapshot.AbiVersion;
             CompatibilityMatrixText.Text =
                 CompatibilityLine("Core PHC / cross timestamp", abi >= 1, "ABI 1") + "\n" +
@@ -961,7 +961,8 @@ namespace TimeCardControlCenter
                 CompatibilityLine("Guarded FPGA flash", abi >= 6, "ABI 6") + "\n" +
                 CompatibilityLine("Extended management controls", abi >= 7, "ABI 7") + "\n" +
                 CompatibilityLine("Environment / rails / IMU", abi >= 8, "ABI 8") + "\n" +
-                CompatibilityLine("Orolia ART mRO-50 bridge", abi >= 9, "ABI 9");
+                CompatibilityLine("Orolia ART mRO-50 bridge", abi >= 9, "ABI 9") + "\n" +
+                CompatibilityLine("Celestica R4006 sensors", abi >= 10, "ABI 10");
         }
 
         private static string CompatibilityLine(string feature, bool available, string requirement)
@@ -1050,7 +1051,7 @@ namespace TimeCardControlCenter
             ClockChipText.Text = "SIMULATED · IN SYNC";
             ClockChipText.Foreground = healthy;
             HierarchyOverviewText.Text = "DEMO";
-            SidebarDriverText.Text = "Demo data · ABI 9";
+            SidebarDriverText.Text = "Demo data · ABI 10";
             SidebarSerialText.Text = "DEMO-TIMECARD-0001";
             if (!telemetryPaused)
             {
@@ -1087,9 +1088,83 @@ namespace TimeCardControlCenter
             if (telemetrySession.IsRecording)
                 TelemetrySampleCountText.Text = telemetrySession.Points.Count.ToString(
                     CultureInfo.InvariantCulture) + " samples recorded";
+            UpdateDemoCelesticaSensors();
             UpdateHealthExperience();
             LastRefreshText.Text = "Demo sample " + DateTime.Now.ToString("HH:mm:ss",
                 CultureInfo.InvariantCulture);
+        }
+
+        private void UpdateDemoCelesticaSensors()
+        {
+            const uint presentValidReadyTemperature = 1u | 2u | 8u | 128u;
+            double angle = 0.42 + Math.Sin(demoPhase * 0.31) * 0.08;
+            int quaternionY = (int)Math.Round(Math.Sin(angle / 2.0) * 16384.0);
+            int quaternionW = (int)Math.Round(Math.Cos(angle / 2.0) * 16384.0);
+            TimeCardSensorTelemetryRaw raw = new TimeCardSensorTelemetryRaw
+            {
+                Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf(
+                    typeof(TimeCardSensorTelemetryRaw)),
+                Flags = 3u,
+                MuxChannelMask = 0u,
+                ControllerStatus = 0xc0u,
+                InterruptStatus = 0xd0u,
+                BoardProfile = 3u,
+                Capabilities = 16u | 32u | 64u | 8u,
+                BoardTemperature = new[]
+                {
+                    new TimeCardLm75bReadingRaw
+                    {
+                        Size = 32u, Flags = presentValidReadyTemperature,
+                        Address = 0x48u, RawTemperature = 0x2480,
+                        TemperatureMilliCelsius = 36500
+                    },
+                    new TimeCardLm75bReadingRaw
+                    {
+                        Size = 32u, Flags = presentValidReadyTemperature,
+                        Address = 0x49u, RawTemperature = 0x2300,
+                        TemperatureMilliCelsius = 35000
+                    },
+                    new TimeCardLm75bReadingRaw
+                    {
+                        Size = 32u, Flags = presentValidReadyTemperature,
+                        Address = 0x4au, RawTemperature = 0x2180,
+                        TemperatureMilliCelsius = 33500
+                    }
+                },
+                Humidity = new TimeCardSht3xReadingRaw
+                {
+                    Size = 32u, Flags = presentValidReadyTemperature |
+                        4u | 64u | 512u,
+                    Address = 0x44u, Status = 0u,
+                    RawTemperature = 29657u, RawHumidity = 28049u,
+                    TemperatureMilliCelsius = 34200,
+                    HumidityMilliPercent = 42800u
+                },
+                Pressure = new TimeCardIcp10100ReadingRaw
+                {
+                    Size = 48u, Flags = presentValidReadyTemperature |
+                        4u | 512u,
+                    Address = 0x63u, ProductId = 0x08u,
+                    RawPressure = 11477003u, RawTemperature = 28836u,
+                    TemperatureMilliCelsius = 32000,
+                    Otp = new[] { 10000, 20000, 30000, 4000 }
+                },
+                Imu = new TimeCardBno055ReadingRaw
+                {
+                    Size = 136u, Flags = 1u | 2u | 4u | 8u | 128u | 256u,
+                    ChipId = 0x80u, OperationMode = 3u,
+                    SystemStatus = 1u, Calibration = 0xffu,
+                    Temperature = 4032,
+                    AccelerationX = 18, AccelerationY = -10,
+                    AccelerationZ = 980,
+                    LinearAccelerationX = 18, LinearAccelerationY = -10,
+                    GravityZ = 981, GyroscopeY = 2,
+                    MagneticX = 320, MagneticY = 176,
+                    MagneticZ = -96, QuaternionY = quaternionY,
+                    QuaternionW = quaternionW
+                }
+            };
+            ApplySensorTelemetry(new SensorTelemetrySnapshot(raw));
         }
 
         private void ApplyTheme(string theme)

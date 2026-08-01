@@ -33,10 +33,11 @@ applications use the versioned IOCTL ABI through `timecardctl.exe`.
   dedicated IS32FL3207 LED updates, open/short diagnostics, and a bounded
   electrical test. The known identity devices are the board EEPROM at `0x50`
   and MAC EEPROM at `0x58`.
-- Guarded one-shot telemetry for BME280/BMP280 environment sensors and three
-  INA219 power monitors, plus BNO055 or BNO08x nine-axis IMUs. Environment,
-  rail-monitor, and IMU routes are discovered independently across the known
-  PCA9546A branches so one alternate assembly route cannot hide another.
+- Board-specific, guarded telemetry for the Meta BME280/BMP280 environment
+  sensor, three INA219 power monitors, and BNO055/BNO08x IMUs, plus the
+  Celestica R4006's three LM75B board-temperature monitors, SHT3x humidity
+  sensor, ICP-10100 barometric sensor, and BNO08x IMU. Every transaction uses
+  the schematic-defined PCA/TCA9546A route and restores the prior mux state.
 - Guarded Xilinx and Altera SPI/SPI-NOR access for FPGA firmware query,
   4 KiB erase,
   page programming, and bounded read-back. All offsets are relative to the
@@ -60,14 +61,23 @@ controller from starting.
 
 ## Hardware compatibility
 
-Driver 1.35 / ABI 9 selects the same three board profiles and resource maps as
-the Linux `ptp_ocp` driver. Meta/Facebook and Celestica share the rev1 and rev2
-maps. Older PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or
-32 interrupt messages. Current PCI revision 02 LitePCIe gateware exposes 64
-MSI-X messages and uses the rev2 map. The Windows driver also checks that the
-selected PHC and ToD windows fit the assigned BAR and falls back to the other
-known Meta/Celestica map before any register access when firmware does not
-report a useful revision.
+Driver 1.37 / ABI 10 selects the same three PCI profiles and resource maps as
+the Linux `ptp_ocp` driver while keeping their board-level sensor populations
+distinct. Meta/Facebook and Celestica share the rev1 and rev2 FPGA maps. Older
+PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or 32 interrupt
+messages. Current PCI revision 02 LitePCIe gateware exposes 64 MSI-X messages
+and uses the rev2 map. The Windows driver also checks that the selected PHC and
+ToD windows fit the assigned BAR and falls back to the other known FPGA map
+before any register access when firmware does not report a useful revision.
+
+The Celestica R4006-G0001-03 Rev02 profile is identified by
+`PCI\VEN_18D4&DEV_1008`. Its TCA9546A at `0x70` uses fixed, isolated routes:
+channel 0 for three LM75B monitors at `0x48`/`0x49`/`0x4a`, channel 1 for the
+SHT3x at `0x44`, channel 2 for the ICP-10100 at `0x63`, and channel 3 for the
+BNO08x at `0x4a`. Driver 1.37 validates Sensirion/TDK CRC-8 frames, retrieves
+and caches the pressure sensor's four OTP coefficients, and exposes raw values
+plus compensated environmental telemetry without confusing identical I2C
+addresses that live on different mux branches.
 
 The Orolia/Safran ART profile uses its Linux-defined fixed map: PHC at
 `0x01000000`, primary GNSS UART at `0x00161000`, mRO-50 UART at `0x00190000`,
@@ -160,7 +170,7 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-Driver **1.35 / ABI 9** is required for the complete feature set shown below.
+Driver **1.37 / ABI 10** is required for the complete feature set shown below.
 
 ![Control Center overview](assets/timecard-control-center.png)
 
@@ -170,7 +180,7 @@ Driver **1.35 / ABI 9** is required for the complete feature set shown below.
 | UART and NMEA | SMA connectors | Generators and frequency |
 | ![UART and NMEA workspace](assets/timecard-control-center-nmea.png) | ![SMA connector workspace](assets/timecard-control-center-sma.png) | ![Timing generator workspace](assets/timecard-control-center-timing.png) |
 | Sensors and IMU | I2C and status LEDs | Subsystem map |
-| ![Sensors and IMU workspace](assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](assets/timecard-control-center-i2c.png) | ![Subsystem workspace](assets/timecard-control-center-subsystems.png) |
+| ![Celestica sensors and compact 3D IMU workspace](assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](assets/timecard-control-center-i2c.png) | ![Subsystem workspace](assets/timecard-control-center-subsystems.png) |
 | Telemetry Studio | Profiles and self-test | FPGA SPI flash |
 | ![Telemetry Studio workspace](assets/timecard-control-center-telemetry.png) | ![Profiles and self-test workspace](assets/timecard-control-center-operations.png) | ![FPGA SPI-flash firmware update workspace](assets/timecard-control-center-flash.png) |
 
@@ -393,7 +403,23 @@ BMP280, and INA219 reads are retried as a STOP-terminated register-pointer write
 followed by a bounded read. These devices retain their register pointer across
 STOP; the fallback leaves the existing repeated-START path in place for every
 device that accepts it. The Control Center renders the IMU quaternion as a
-smoothed, color-keyed 3D cube alongside the numeric heading, roll, and pitch.
+compact, smoothed, color-keyed 3D cube alongside the numeric heading, roll, and
+pitch. It holds the last good pose across isolated invalid or identity
+`0°, 0°, 0°` samples; a real zero orientation is accepted after three
+consecutive valid samples.
+
+Driver 1.37 / ABI 10 adds the schematic-exact Celestica R4006 sensor profile.
+It reads all three LM75B board-temperature monitors on TCA9546A channel 0,
+factory-compensated SHT3x temperature/humidity on channel 1, CRC-checked
+ICP-10100 raw pressure/temperature and OTP calibration on channel 2, and the
+BNO08x SH-2 stream on channel 3. The command-line tool and Control Center label
+this population directly instead of looking for Meta-only BME280 and INA219
+parts. The IMU visualization is also smaller and rejects isolated identity
+samples before allowing a genuine sustained zero orientation.
+The same profile maps the IS32FL3207 at `0x34` to the schematic's single GPS
+indicator and four SMA indicators, swaps its green/red output order, masks the
+unconnected OUT16-18 fault bits, and reports the second GNSS indicator as not
+fitted rather than driving an unconnected output group.
 
 The schematic's U26 TMUX1072 is not software-controlled. Its `MACSER` select
 comes only from the physical DIP switch: 0 routes MAC I2C and 1 routes the FPGA

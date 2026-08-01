@@ -58,6 +58,8 @@ namespace TimeCardControlCenter
         private bool sensorsRefreshing;
         private QuaternionRotation3D imuCubeRotation;
         private Quaternion imuCubeCurrent = Quaternion.Identity;
+        private readonly ImuOrientationFilter imuOrientationFilter =
+            new ImuOrientationFilter(3);
         private bool i2cRefreshing;
         private bool ledAutomationUpdating;
         private bool ledControlsUpdating;
@@ -464,6 +466,9 @@ namespace TimeCardControlCenter
                 Log("Connected to \\.\\TimeCard0.");
                 await RefreshSnapshotAsync(true);
                 await RefreshIdentityAsync();
+                if (lastSnapshot != null && lastSnapshot.AbiVersion >= 10 &&
+                    lastSnapshot.Layout != "Orolia ART")
+                    await RefreshSensorsAsync(false);
             }
             catch (Win32Exception ex)
             {
@@ -4771,12 +4776,14 @@ namespace TimeCardControlCenter
                 ApplyManualBoardLedState(state);
                 I2cLedOperationText.Text = string.Format(
                     CultureInfo.InvariantCulture,
-                    "LED {0} updated · RGB {1}/{2}/{3} · {4}; previous PCA9546A route restored.",
+                    "LED {0} {5} · RGB {1}/{2}/{3} · {4}; previous I2C route restored.",
                     led + 1, state.Red, state.Green, state.Blue,
-                    DescribeBoardLedFaults(state));
-                Log(string.Format(CultureInfo.InvariantCulture,
-                    "Subsystem LED {0} set to RGB {1}/{2}/{3}.",
-                    led + 1, state.Red, state.Green, state.Blue));
+                    DescribeBoardLedFaults(state),
+                    state.IsPresent ? "updated" : "not fitted");
+                if (state.IsPresent)
+                    Log(string.Format(CultureInfo.InvariantCulture,
+                        "Subsystem LED {0} set to RGB {1}/{2}/{3}.",
+                        led + 1, state.Red, state.Green, state.Blue));
             }
             catch (Exception ex)
             {
@@ -4799,6 +4806,12 @@ namespace TimeCardControlCenter
 
         private uint BoardLedPhysicalIndex(uint logicalLed)
         {
+            if (lastSensorSnapshot != null && lastSensorSnapshot.IsCelestica)
+            {
+                uint[] celesticaMap = { 4u, 5u, 0u, 1u, 2u, 3u };
+                return logicalLed < (uint)celesticaMap.Length ?
+                    celesticaMap[(int)logicalLed] : logicalLed;
+            }
             if (lastSnapshot == null ||
                 !string.Equals(lastSnapshot.Layout, "MSI",
                     StringComparison.OrdinalIgnoreCase))
@@ -4811,6 +4824,8 @@ namespace TimeCardControlCenter
 
         private string DescribeBoardLedFaults(BoardLedState state)
         {
+            if (!state.IsPresent)
+                return "indicator not fitted on this board";
             if (!state.HasFaultDiagnostics)
                 return "hardware fault diagnostics unavailable";
 
@@ -4910,7 +4925,7 @@ namespace TimeCardControlCenter
             I2cMacReadButton.IsEnabled = false;
         }
 
-        private static string FormatI2cAddressMap(I2cRefreshResult result)
+        private string FormatI2cAddressMap(I2cRefreshResult result)
         {
             if (result.Addresses.Count == 0)
                 return result.FullScan ?
@@ -4924,9 +4939,22 @@ namespace TimeCardControlCenter
                 result.Addresses.Count == 1 ? "" : "s");
             foreach (uint address in result.Addresses)
             {
-                string name = address == 0x50 ? "board EEPROM" :
+                bool celestica = lastSensorSnapshot != null &&
+                    lastSensorSnapshot.IsCelestica;
+                string name = celestica && address == 0x34 ?
+                    "IS32FL3207 status LEDs (upstream)" :
+                    celestica && address == 0x44 ?
+                    "SHT3x humidity/temperature (CH1)" :
+                    celestica && address == 0x48 ? "LM75B sensor 1 (CH0)" :
+                    celestica && address == 0x49 ? "LM75B sensor 2 (CH0)" :
+                    celestica && address == 0x4a ?
+                    "LM75B sensor 3 (CH0) or BNO085 (CH3)" :
+                    celestica && address == 0x63 ?
+                    "ICP-10100 pressure/temperature (CH2)" :
+                    address == 0x50 ? "board EEPROM" :
                     address == 0x58 ? "MAC identity" :
-                    address == 0x70 ? "PCA9546A mux" :
+                    address == 0x70 ?
+                    (celestica ? "TCA9546A mux" : "PCA9546A mux") :
                     address == 0x37 ? "IS32FL3207 status LEDs (CH1)" :
                     address == 0x29 ? "BNO055 IMU (CH1)" :
                     address == 0x40 ? "INA219 12 V monitor (CH1)" :
@@ -6349,20 +6377,21 @@ namespace TimeCardControlCenter
                 return;
             }
 
-            bool supported = snapshot != null && snapshot.AbiVersion >= 8;
+            bool supported = snapshot != null && snapshot.AbiVersion >= 10;
             SensorsRefreshButton.IsEnabled = supported && client != null &&
                 !sensorsRefreshing;
             if (supported)
             {
-                SensorsDriverText.Text =
-                    "Sensor branch ready · PCA9546A channel 1 is selected only for each guarded sample, then restored.";
+                if (lastSensorSnapshot == null)
+                    SensorsDriverText.Text =
+                        "Sensor branch ready · board-specific I2C routes are selected only for each guarded sample, then restored.";
                 return;
             }
 
             SensorsDriverText.Text = snapshot == null
-                ? "Connect a Time Card with driver 1.15 / ABI 8 to begin live sampling."
+                ? "Connect a Time Card with driver 1.37 / ABI 10 to begin live sampling."
                 : string.Format(CultureInfo.InvariantCulture,
-                    "Driver {0} / ABI {1} does not expose sensor telemetry. Install Time Card driver 1.15 / ABI 8.",
+                    "Driver {0} / ABI {1} does not expose the board-specific sensor ABI. Install Time Card driver 1.37 / ABI 10.",
                     snapshot.DriverVersion, snapshot.AbiVersion);
             SensorsStatusText.Text = "DRIVER UPDATE REQUIRED";
             SensorsStatusText.Foreground = (Brush)FindResource("GoldBrush");
@@ -6378,7 +6407,7 @@ namespace TimeCardControlCenter
         {
             if (sensorsRefreshing || client == null)
                 return;
-            if (lastSnapshot == null || lastSnapshot.AbiVersion < 8)
+            if (lastSnapshot == null || lastSnapshot.AbiVersion < 10)
             {
                 UpdateSensorsCompatibility(lastSnapshot);
                 return;
@@ -6415,7 +6444,7 @@ namespace TimeCardControlCenter
             {
                 sensorsRefreshing = false;
                 SensorsRefreshButton.IsEnabled = client != null &&
-                    lastSnapshot != null && lastSnapshot.AbiVersion >= 8 &&
+                    lastSnapshot != null && lastSnapshot.AbiVersion >= 10 &&
                     lastSnapshot.Layout != "Orolia ART";
             }
         }
@@ -6428,13 +6457,24 @@ namespace TimeCardControlCenter
             Brush warning = (Brush)FindResource("GoldBrush");
             bool anyValid = telemetry.Environment.IsValid ||
                 telemetry.Rail12V.IsValid || telemetry.Rail5V.IsValid ||
-                telemetry.Rail3V3.IsValid || telemetry.Imu.IsValid;
+                telemetry.Rail3V3.IsValid || telemetry.Imu.IsValid ||
+                telemetry.HumiditySensor.IsValid ||
+                telemetry.PressureSensor.IsValid ||
+                telemetry.BoardTemperatures.Any(item => item.IsValid);
 
             SensorsStatusText.Text = anyValid ? "LIVE · 1 HZ" : "NO SENSOR DATA";
             SensorsStatusText.Foreground = anyValid ? healthy : warning;
             SensorsStatusDot.Fill = anyValid ? healthy : warning;
             SensorsLastSampleText.Text = DateTime.Now.ToString(
                 "HH:mm:ss", CultureInfo.InvariantCulture);
+            if (telemetry.IsCelestica)
+            {
+                ApplyCelesticaSensorTelemetry(telemetry, healthy, warning);
+                ApplyImu(telemetry.Imu);
+                return;
+            }
+
+            ConfigureLegacySensorWorkspace();
             SensorsDriverText.Text = string.Format(CultureInfo.InvariantCulture,
                 "Guarded all-route inventory · BME {3} · INA219 {4}/{5}/{6} · IMU {7} · prior mux 0x{0:X2} · controller 0x{1:X2} · events 0x{2:X8}",
                 telemetry.MuxChannelMask, telemetry.ControllerStatus,
@@ -6485,6 +6525,105 @@ namespace TimeCardControlCenter
                 Rail3V3CurrentText, Rail3V3PowerText, Rail3V3DetailText,
                 Rail3V3StatusText);
             ApplyImu(telemetry.Imu);
+        }
+
+        private void ConfigureLegacySensorWorkspace()
+        {
+            SensorsIntroText.Text =
+                "Live BME280/BMP280 environment, INA219 power-rail, and BNO055/BNO08x nine-axis readings from the auto-detected sensor branch.";
+            EnvironmentDescriptionText.Text =
+                "Auto-detected BME280/BMP280 measurements";
+            PowerSectionTitleText.Text = "Power rails";
+            PowerSectionDescriptionText.Text =
+                "Live bus voltage, shunt current, and calculated load power from the three INA219 monitors.";
+            Rail12TitleText.Text = "+12 V input";
+            Rail5TitleText.Text = "+5 V rail";
+            Rail3V3TitleText.Text = "+3.3 V rail";
+            Rail12SecondaryGrid.Visibility = Visibility.Visible;
+            Rail5SecondaryGrid.Visibility = Visibility.Visible;
+            Rail3V3SecondaryGrid.Visibility = Visibility.Visible;
+        }
+
+        private void ApplyCelesticaSensorTelemetry(
+            SensorTelemetrySnapshot telemetry, Brush healthy, Brush warning)
+        {
+            Sht3xSensorReading humidity = telemetry.HumiditySensor;
+            Icp10100SensorReading pressure = telemetry.PressureSensor;
+            int lm75Valid = telemetry.BoardTemperatures.Count(item => item.IsValid);
+
+            SensorsIntroText.Text =
+                "Celestica R4006 telemetry from three LM75B thermal zones, SHT3x humidity, ICP-10100 pressure, and BNO085 inertial sensing.";
+            EnvironmentDescriptionText.Text =
+                "SHT3x humidity/temperature and ICP-10100 compensated pressure";
+            PowerSectionTitleText.Text = "Board temperature sensors";
+            PowerSectionDescriptionText.Text =
+                "Three independently addressed LM75B sensors on TCA9546A channel 0.";
+            SensorsDriverText.Text = string.Format(CultureInfo.InvariantCulture,
+                "Celestica fixed-channel inventory · LM75B {3}/3 · SHT3x {4} · ICP-10100 {5} · BNO085 {6} · prior mux 0x{0:X2} · controller 0x{1:X2} · events 0x{2:X8}",
+                telemetry.MuxChannelMask, telemetry.ControllerStatus,
+                telemetry.InterruptStatus, lm75Valid,
+                humidity.IsValid ? "CRC OK" : humidity.IsPresent ? "INVALID" : "NO ACK",
+                pressure.IsValid ? "CRC OK" : pressure.IsPresent ? "INVALID" : "NO ACK",
+                telemetry.Imu.IsValid ? "LIVE" : telemetry.Imu.IsPresent ? "INITIALIZING" : "NO ACK");
+
+            bool hasTemperature = humidity.IsValid || pressure.IsValid;
+            double temperature = humidity.IsValid ? humidity.TemperatureCelsius :
+                pressure.TemperatureCelsius;
+            BmeTemperatureText.Text = hasTemperature ?
+                temperature.ToString("F1", CultureInfo.InvariantCulture) + " °C" :
+                "— °C";
+            BmeHumidityText.Text = humidity.IsValid ?
+                humidity.HumidityPercent.ToString("F1",
+                    CultureInfo.InvariantCulture) + " %" : "— %";
+            BmePressureText.Text = pressure.IsValid &&
+                pressure.HasCompensatedPressure ?
+                pressure.PressureHectopascals.ToString("F1",
+                    CultureInfo.InvariantCulture) + " hPa" : "— hPa";
+            BmeDewPointText.Text = humidity.IsValid ?
+                humidity.DewPointCelsius.ToString("F1",
+                    CultureInfo.InvariantCulture) + " °C" : "— °C";
+            BmeDetailText.Text = string.Format(CultureInfo.InvariantCulture,
+                "SHT3x 0x44 {0} · ICP-10100 0x63 {1}",
+                humidity.IsValid ? "CRC OK" : humidity.IsPresent ? "INVALID" : "NO ACK",
+                pressure.IsValid && pressure.HasCompensatedPressure ?
+                    "CRC + OTP OK" : pressure.IsPresent ? "INVALID" : "NO ACK");
+            BmeDetailText.Foreground = humidity.IsValid || pressure.IsValid ?
+                healthy : warning;
+
+            Rail12TitleText.Text = "LM75B sensor 1";
+            Rail5TitleText.Text = "LM75B sensor 2";
+            Rail3V3TitleText.Text = "LM75B sensor 3";
+            Rail12SecondaryGrid.Visibility = Visibility.Collapsed;
+            Rail5SecondaryGrid.Visibility = Visibility.Collapsed;
+            Rail3V3SecondaryGrid.Visibility = Visibility.Collapsed;
+            ApplyBoardTemperature(telemetry.BoardTemperatures[0],
+                Rail12VoltageText, Rail12DetailText, Rail12StatusText,
+                healthy, warning);
+            ApplyBoardTemperature(telemetry.BoardTemperatures[1],
+                Rail5VoltageText, Rail5DetailText, Rail5StatusText,
+                healthy, warning);
+            ApplyBoardTemperature(telemetry.BoardTemperatures[2],
+                Rail3V3VoltageText, Rail3V3DetailText, Rail3V3StatusText,
+                healthy, warning);
+        }
+
+        private static void ApplyBoardTemperature(
+            BoardTemperatureReading sensor, TextBlock value, TextBlock detail,
+            TextBlock status, Brush healthy, Brush warning)
+        {
+            value.Text = sensor.IsValid ?
+                sensor.TemperatureCelsius.ToString("F1",
+                    CultureInfo.InvariantCulture) + " °C" : "— °C";
+            detail.Text = sensor.IsValid ?
+                string.Format(CultureInfo.InvariantCulture,
+                    "Raw 0x{0:X4} · TCA9546A CH0",
+                    (ushort)sensor.RawTemperature) :
+                sensor.IsPresent ? "I²C ACK; sample invalid" :
+                    "No I²C ACK; device not fitted or not powered";
+            status.Text = string.Format(CultureInfo.InvariantCulture,
+                "0x{0:X2} · {1}", sensor.Address,
+                sensor.IsValid ? "LIVE" : sensor.IsPresent ? "INVALID" : "NO ACK");
+            status.Foreground = sensor.IsValid ? healthy : warning;
         }
 
         private void SetEnvironmentUnavailable(string detail)
@@ -6542,7 +6681,17 @@ namespace TimeCardControlCenter
             string imuAddress = isBno08x ? "0x4A" : "0x29";
             if (!imu.IsValid)
             {
-                UpdateImuCubeOrientation(Quaternion.Identity, false);
+                imuOrientationFilter.ShouldAccept(false, false);
+                if (imuOrientationFilter.HasAcceptedSample)
+                {
+                    ImuVisualizationStatusText.Text = "HOLD · NO DATA";
+                    ImuVisualizationStatusText.Foreground =
+                        (Brush)FindResource("GoldBrush");
+                }
+                else
+                {
+                    UpdateImuCubeOrientation(Quaternion.Identity, false);
+                }
                 ImuHeadingText.Text = "—°";
                 ImuRollText.Text = "—°";
                 ImuPitchText.Text = "—°";
@@ -6580,8 +6729,7 @@ namespace TimeCardControlCenter
             ImuQuaternionText.Text = string.Format(CultureInfo.InvariantCulture,
                 "{0:F4}, {1:F4}, {2:F4}, {3:F4}", imu.QuaternionW,
                 imu.QuaternionX, imu.QuaternionY, imu.QuaternionZ);
-            UpdateImuCubeOrientation(new Quaternion(imu.QuaternionX,
-                imu.QuaternionY, imu.QuaternionZ, imu.QuaternionW), true);
+            UpdateImuCubeFromReading(imu);
             ImuTemperatureText.Text = imu.HasTemperature ?
                 imu.TemperatureCelsius.ToString("F1",
                     CultureInfo.InvariantCulture) + " °C" : "— °C";
@@ -6623,7 +6771,7 @@ namespace TimeCardControlCenter
                 new Vector3D(2.1, 0.7, 1.4)));
 
             Model3DGroup cube = new Model3DGroup();
-            const double half = 0.78;
+            const double half = 0.48;
             cube.Children.Add(CreateImuCubeFace(
                 new Point3D(-half, -half, half), new Point3D(half, -half, half),
                 new Point3D(half, half, half), new Point3D(-half, half, half),
@@ -6669,6 +6817,43 @@ namespace TimeCardControlCenter
             materials.Children.Add(new SpecularMaterial(
                 new SolidColorBrush(Color.FromArgb(180, 225, 243, 255)), 42.0));
             return new GeometryModel3D(mesh, materials) { BackMaterial = materials };
+        }
+
+        private void UpdateImuCubeFromReading(ImuSensorReading imu)
+        {
+            Quaternion sample = new Quaternion(imu.QuaternionX,
+                imu.QuaternionY, imu.QuaternionZ, imu.QuaternionW);
+            double lengthSquared = sample.X * sample.X + sample.Y * sample.Y +
+                sample.Z * sample.Z + sample.W * sample.W;
+            bool quaternionValid = !double.IsNaN(lengthSquared) &&
+                !double.IsInfinity(lengthSquared) && lengthSquared >= 0.000001;
+            bool identityQuaternion = quaternionValid &&
+                Math.Abs(sample.X) < 0.0005 && Math.Abs(sample.Y) < 0.0005 &&
+                Math.Abs(sample.Z) < 0.0005 &&
+                Math.Abs(Math.Abs(sample.W) - 1.0) < 0.0005;
+            bool zeroEuler = Math.Abs(imu.HeadingDegrees) < 0.05 &&
+                Math.Abs(imu.RollDegrees) < 0.05 &&
+                Math.Abs(imu.PitchDegrees) < 0.05;
+            bool zeroOrientation = identityQuaternion && zeroEuler;
+
+            if (!imuOrientationFilter.ShouldAccept(quaternionValid,
+                    zeroOrientation))
+            {
+                if (imuOrientationFilter.HasAcceptedSample)
+                {
+                    ImuVisualizationStatusText.Text = zeroOrientation ?
+                        "HOLD · ZERO SAMPLE" : "HOLD · INVALID SAMPLE";
+                    ImuVisualizationStatusText.Foreground =
+                        (Brush)FindResource("GoldBrush");
+                }
+                else
+                {
+                    UpdateImuCubeOrientation(Quaternion.Identity, false);
+                }
+                return;
+            }
+
+            UpdateImuCubeOrientation(sample, true);
         }
 
         private void UpdateImuCubeOrientation(Quaternion orientation, bool valid)

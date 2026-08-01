@@ -199,6 +199,47 @@ namespace TimeCardControlCenter
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardLm75bReadingRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Address;
+        public int RawTemperature;
+        public int TemperatureMilliCelsius;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardSht3xReadingRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Address;
+        public uint Status;
+        public uint RawTemperature;
+        public uint RawHumidity;
+        public int TemperatureMilliCelsius;
+        public uint HumidityMilliPercent;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardIcp10100ReadingRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Address;
+        public uint ProductId;
+        public uint RawPressure;
+        public uint RawTemperature;
+        public int TemperatureMilliCelsius;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
+        public int[] Otp;
+        public uint Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct TimeCardBno055ReadingRaw
     {
         public uint Size;
@@ -250,6 +291,12 @@ namespace TimeCardControlCenter
         public TimeCardIna219ReadingRaw Rail5V;
         public TimeCardIna219ReadingRaw Rail3V3;
         public TimeCardBno055ReadingRaw Imu;
+        public uint BoardProfile;
+        public uint Capabilities;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)]
+        public TimeCardLm75bReadingRaw[] BoardTemperature;
+        public TimeCardSht3xReadingRaw Humidity;
+        public TimeCardIcp10100ReadingRaw Pressure;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -576,6 +623,18 @@ namespace TimeCardControlCenter
             Rail5V = new PowerRailReading("+5 V", value.Rail5V);
             Rail3V3 = new PowerRailReading("+3.3 V", value.Rail3V3);
             Imu = new ImuSensorReading(value.Imu);
+            BoardProfile = value.BoardProfile;
+            Capabilities = value.Capabilities;
+            TimeCardLm75bReadingRaw[] temperatures = value.BoardTemperature ??
+                new TimeCardLm75bReadingRaw[3];
+            BoardTemperatures = new[]
+            {
+                new BoardTemperatureReading("Sensor 1", temperatures[0]),
+                new BoardTemperatureReading("Sensor 2", temperatures[1]),
+                new BoardTemperatureReading("Sensor 3", temperatures[2])
+            };
+            HumiditySensor = new Sht3xSensorReading(value.Humidity);
+            PressureSensor = new Icp10100SensorReading(value.Pressure);
         }
 
         public bool IsAvailable { get; private set; }
@@ -588,6 +647,108 @@ namespace TimeCardControlCenter
         public PowerRailReading Rail5V { get; private set; }
         public PowerRailReading Rail3V3 { get; private set; }
         public ImuSensorReading Imu { get; private set; }
+        public uint BoardProfile { get; private set; }
+        public uint Capabilities { get; private set; }
+        public bool IsCelestica { get { return BoardProfile == 3u; } }
+        public BoardTemperatureReading[] BoardTemperatures { get; private set; }
+        public Sht3xSensorReading HumiditySensor { get; private set; }
+        public Icp10100SensorReading PressureSensor { get; private set; }
+    }
+
+    public sealed class BoardTemperatureReading
+    {
+        internal BoardTemperatureReading(string name,
+                                         TimeCardLm75bReadingRaw value)
+        {
+            Name = name;
+            IsPresent = (value.Flags & 1u) != 0;
+            IsValid = (value.Flags & 2u) != 0;
+            Address = value.Address;
+            RawTemperature = value.RawTemperature;
+            TemperatureCelsius = value.TemperatureMilliCelsius / 1000.0;
+        }
+
+        public string Name { get; private set; }
+        public bool IsPresent { get; private set; }
+        public bool IsValid { get; private set; }
+        public uint Address { get; private set; }
+        public int RawTemperature { get; private set; }
+        public double TemperatureCelsius { get; private set; }
+    }
+
+    public sealed class Sht3xSensorReading
+    {
+        internal Sht3xSensorReading(TimeCardSht3xReadingRaw value)
+        {
+            IsPresent = (value.Flags & 1u) != 0;
+            IsValid = (value.Flags & 2u) != 0;
+            HasValidCrc = (value.Flags & 512u) != 0;
+            Address = value.Address;
+            Status = value.Status;
+            RawTemperature = value.RawTemperature;
+            RawHumidity = value.RawHumidity;
+            TemperatureCelsius = value.TemperatureMilliCelsius / 1000.0;
+            HumidityPercent = value.HumidityMilliPercent / 1000.0;
+            if (IsValid && HumidityPercent > 0.0)
+            {
+                double gamma = Math.Log(HumidityPercent / 100.0) +
+                    17.62 * TemperatureCelsius /
+                    (243.12 + TemperatureCelsius);
+                DewPointCelsius = 243.12 * gamma / (17.62 - gamma);
+            }
+        }
+
+        public bool IsPresent { get; private set; }
+        public bool IsValid { get; private set; }
+        public bool HasValidCrc { get; private set; }
+        public uint Address { get; private set; }
+        public uint Status { get; private set; }
+        public uint RawTemperature { get; private set; }
+        public uint RawHumidity { get; private set; }
+        public double TemperatureCelsius { get; private set; }
+        public double HumidityPercent { get; private set; }
+        public double DewPointCelsius { get; private set; }
+    }
+
+    public sealed class Icp10100SensorReading
+    {
+        internal Icp10100SensorReading(TimeCardIcp10100ReadingRaw value)
+        {
+            IsPresent = (value.Flags & 1u) != 0;
+            IsValid = (value.Flags & 2u) != 0;
+            HasValidCrc = (value.Flags & 512u) != 0;
+            Address = value.Address;
+            ProductId = value.ProductId;
+            RawPressure = value.RawPressure;
+            RawTemperature = value.RawTemperature;
+            TemperatureCelsius = value.TemperatureMilliCelsius / 1000.0;
+            Otp = value.Otp ?? new int[4];
+            CalculateCompensatedPressure();
+        }
+
+        private void CalculateCompensatedPressure()
+        {
+            double pressure;
+            if (IsValid && CelesticaSensorMath.TryCompensateIcp10100(
+                    RawPressure, RawTemperature, Otp, out pressure))
+            {
+                PressurePascals = pressure;
+                HasCompensatedPressure = true;
+            }
+        }
+
+        public bool IsPresent { get; private set; }
+        public bool IsValid { get; private set; }
+        public bool HasValidCrc { get; private set; }
+        public bool HasCompensatedPressure { get; private set; }
+        public uint Address { get; private set; }
+        public uint ProductId { get; private set; }
+        public uint RawPressure { get; private set; }
+        public uint RawTemperature { get; private set; }
+        public double TemperatureCelsius { get; private set; }
+        public double PressurePascals { get; private set; }
+        public double PressureHectopascals { get { return PressurePascals / 100.0; } }
+        public int[] Otp { get; private set; }
     }
 
     public sealed class EnvironmentSensorReading

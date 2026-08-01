@@ -52,6 +52,9 @@ try {
         $_.InstanceId -like 'PCI\VEN_1D9B&DEV_0400*' -or
         $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
     }
+    $hasCelesticaProfile = $devices | Where-Object {
+        $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
+    }
     if ($hasFbProfile) {
         $expectedChildren += @(
             'TIMECARD\TOD\*',
@@ -77,8 +80,14 @@ try {
         throw "Control tool not found: $tool"
     }
 
-    & $tool status
-    if ($LASTEXITCODE -ne 0) { throw 'timecardctl status failed.' }
+    $statusOutput = & $tool status 2>&1
+    $statusExitCode = $LASTEXITCODE
+    $statusOutput | Out-Host
+    if ($statusExitCode -ne 0) { throw 'timecardctl status failed.' }
+    if ($hasCelesticaProfile -and
+        ($statusOutput -join "`n") -notmatch 'ABI:\s+10\b') {
+        throw 'Celestica R4006 requires the running ABI 10 driver. Reboot or restart the controller to finish the driver replacement.'
+    }
     & $tool get
     if ($LASTEXITCODE -ne 0) { throw 'timecardctl get failed.' }
     & $tool serial
@@ -106,9 +115,16 @@ try {
         }
     }
     if ($TestSensors) {
-        & $tool sensors
-        if ($LASTEXITCODE -ne 0) {
+        $sensorOutput = & $tool sensors 2>&1
+        $sensorExitCode = $LASTEXITCODE
+        $sensorOutput | Out-Host
+        if ($sensorExitCode -ne 0) {
             throw 'No valid sensor telemetry was returned.'
+        }
+        if ($hasCelesticaProfile -and
+            ($sensorOutput -join "`n") -notmatch
+                'Board profile:\s+Celestica R4006') {
+            throw 'The connected Celestica card was not recognized by the active driver.'
         }
     }
     if ($TestLeds) {

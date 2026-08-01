@@ -9,14 +9,28 @@ $windowXaml = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
     '..\TimeCardControlCenter\MainWindow.xaml') -Raw -Encoding UTF8
 $windowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
     '..\TimeCardControlCenter\MainWindow.xaml.cs') -Raw -Encoding UTF8
+$productWindowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
+    '..\TimeCardControlCenter\MainWindow.Product.cs') -Raw -Encoding UTF8
 if ($windowXaml -notmatch 'Viewport3D\s+x:Name="ImuOrientationViewport"' -or
     $windowXaml -notmatch 'x:Name="ImuVisualizationStatusText"') {
     throw 'Control Center product test failed: live 3D IMU viewport is missing.'
 }
 if ($windowSource -notmatch 'UpdateImuCubeOrientation' -or
+    $windowSource -notmatch 'UpdateImuCubeFromReading' -or
     $windowSource -notmatch 'UseShortestPath\s*=\s*true' -or
-    $windowSource -notmatch 'target\.Normalize\(\)') {
+    $windowSource -notmatch 'target\.Normalize\(\)' -or
+    $windowSource -notmatch 'const double half\s*=\s*0\.48' -or
+    $windowSource -notmatch 'HOLD . ZERO SAMPLE') {
     throw 'Control Center product test failed: quaternion-driven IMU cube is incomplete.'
+}
+if ($windowSource -notmatch 'AbiVersion\s*>=\s*10' -or
+    $windowSource -notmatch 'driver 1\.37 / ABI 10') {
+    throw 'Control Center product test failed: board-specific sensor ABI gating is missing.'
+}
+if ($productWindowSource -notmatch 'UpdateDemoCelesticaSensors' -or
+    $productWindowSource -notmatch 'BoardProfile\s*=\s*3u' -or
+    $productWindowSource -notmatch 'RawPressure\s*=\s*11477003u') {
+    throw 'Control Center product test failed: Celestica visual demo telemetry is missing.'
 }
 $wpfUsings = "using System.Windows;`r`nusing System.Windows.Input;`r`nusing System.Windows.Media;`r`n"
 $stubs = @'
@@ -125,6 +139,30 @@ namespace TimeCardControlCenter
                     Math.Sqrt(12.5)) > 0.0001)
                 throw new Exception("Vibration telemetry math failed.");
 
+            ImuOrientationFilter orientationFilter = new ImuOrientationFilter(3);
+            if (!orientationFilter.ShouldAccept(true, false) ||
+                orientationFilter.ShouldAccept(true, true) ||
+                orientationFilter.ShouldAccept(true, true) ||
+                !orientationFilter.ShouldAccept(true, true))
+                throw new Exception("IMU zero-orientation debounce failed.");
+            if (!orientationFilter.ShouldAccept(true, false) ||
+                orientationFilter.ShouldAccept(false, false) ||
+                !orientationFilter.HasAcceptedSample)
+                throw new Exception("IMU invalid-orientation hold failed.");
+            orientationFilter.Reset();
+            if (orientationFilter.HasAcceptedSample ||
+                !orientationFilter.ShouldAccept(true, true))
+                throw new Exception("IMU initial identity orientation failed.");
+
+            double icpPressure;
+            if (!CelesticaSensorMath.TryCompensateIcp10100(
+                    8000000u, 40000u,
+                    new[] { 10000, 20000, 30000, 4000 }, out icpPressure) ||
+                Math.Abs(icpPressure - 78224.1342565) > 0.001 ||
+                CelesticaSensorMath.TryCompensateIcp10100(
+                    1u, 1u, null, out icpPressure))
+                throw new Exception("ICP-10100 factory compensation failed.");
+
             TelemetryHistogram histogram = new TelemetryHistogram();
             for (int value = 1; value <= 100; value++)
                 histogram.AddSample(value);
@@ -160,7 +198,7 @@ namespace TimeCardControlCenter
                     restored.LastKnownGoodProfile.Name != roundTrip.Name)
                     throw new Exception("Settings serialization failed.");
             }
-            return "Control Center product tests passed (health graph, profiles, XML round-trip, telemetry retention/export, histogram percentiles, vibration math, 3D IMU view).";
+            return "Control Center product tests passed (health graph, profiles, XML round-trip, telemetry retention/export, histogram percentiles, vibration math, compact 3D IMU view, IMU zero-sample debounce, ICP-10100 compensation).";
         }
     }
 }
