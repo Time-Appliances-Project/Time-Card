@@ -65,7 +65,7 @@ namespace TimeCardControlCenter
         protected override void OnRender(DrawingContext dc)
         {
             base.OnRender(dc);
-            if (ActualWidth < 620 || ActualHeight < 190)
+            if (ActualWidth < 520 || ActualHeight < 190)
                 return;
 
             Rect board = new Rect(12, 12, ActualWidth - 24, ActualHeight - 24);
@@ -89,12 +89,18 @@ namespace TimeCardControlCenter
         private void BuildLayouts(Rect board)
         {
             layouts.Clear();
-            double nodeWidth = Math.Max(108, Math.Min(148, board.Width * 0.15));
+            double smaLaneWidth = GetSmaLaneWidth(board);
+            double left = board.Left + (board.Width < 620 ? 26 : 36);
+            double nodeAreaRight = board.Right - smaLaneWidth;
+            double nodeAreaWidth = nodeAreaRight - left;
+            const double minimumGap = 12;
+            double nodeWidth = Math.Max(88,
+                Math.Min(138, (nodeAreaWidth - minimumGap * 3) / 4.0));
             double nodeHeight = 58;
             double top = board.Top + 28;
             double bottom = board.Bottom - nodeHeight - 42;
-            double left = board.Left + 48;
-            double gap = (board.Width - 96 - nodeWidth * 4) / 3.0;
+            double gap = Math.Max(minimumGap,
+                (nodeAreaWidth - nodeWidth * 4) / 3.0);
 
             Add("gnss", "GNSS", "Gnss", left, top, nodeWidth, nodeHeight);
             Add("tod", "TIME-OF-DAY", "Gnss", left + nodeWidth + gap, top, nodeWidth, nodeHeight);
@@ -103,6 +109,11 @@ namespace TimeCardControlCenter
             Add("atomic", "SA53 ATOMIC", "Atomic", left + nodeWidth * .45, bottom, nodeWidth, nodeHeight);
             Add("controller", "PCIe / FPGA", "Subsystems", left + (nodeWidth + gap) * 1.45, bottom, nodeWidth, nodeHeight);
             Add("i2c", "I2C FABRIC", "I2c", left + (nodeWidth + gap) * 2.55, bottom, nodeWidth, nodeHeight);
+        }
+
+        private static double GetSmaLaneWidth(Rect board)
+        {
+            return Math.Max(122, Math.Min(150, board.Width * .21));
         }
 
         private void Add(string key, string title, string workspace,
@@ -117,10 +128,11 @@ namespace TimeCardControlCenter
 
         private void DrawBoardTraces(DrawingContext dc, Rect board)
         {
+            double smaLaneLeft = board.Right - GetSmaLaneWidth(board);
             Point[] main =
             {
                 new Point(board.Left + 110, board.Top + 58),
-                new Point(board.Right - 110, board.Top + 58)
+                new Point(smaLaneLeft - 18, board.Top + 58)
             };
             Pen glow = new Pen(new SolidColorBrush(Color.FromArgb(45, 76, 201, 240)), 8);
             dc.DrawLine(glow, main[0], main[1]);
@@ -138,7 +150,16 @@ namespace TimeCardControlCenter
                     new Point(x, board.Bottom - 48));
             }
             dc.DrawLine(trace, new Point(board.Left + 70, board.Bottom - 72),
-                new Point(board.Right - 120, board.Bottom - 72));
+                new Point(smaLaneLeft - 18, board.Bottom - 72));
+
+            Pen laneDivider = new Pen(
+                new SolidColorBrush(Color.FromArgb(105, 55, 104, 135)), 1)
+            {
+                DashStyle = new DashStyle(new[] { 2.0, 5.0 }, 0)
+            };
+            dc.DrawLine(laneDivider,
+                new Point(smaLaneLeft, board.Top + 18),
+                new Point(smaLaneLeft, board.Bottom - 18));
         }
 
         private void DrawNode(DrawingContext dc, NodeLayout layout)
@@ -168,10 +189,21 @@ namespace TimeCardControlCenter
         {
             HealthNode sma = report == null ? null : report.Find("sma");
             Color color = SeverityColor(sma == null ? HealthSeverity.Informational : sma.Severity);
+            double laneLeft = board.Right - GetSmaLaneWidth(board);
             double x = board.Right - 26;
+            FormattedText heading = Text("SMA I/O", 9, color,
+                FontWeights.SemiBold);
+            dc.DrawText(heading, new Point(
+                laneLeft + (board.Right - laneLeft - heading.Width) / 2.0,
+                board.Top + 13));
+            Pen routePen = new Pen(
+                new SolidColorBrush(Color.FromArgb(100, color.R, color.G, color.B)),
+                1.0);
             for (int index = 0; index < 4; index++)
             {
-                double y = board.Top + 56 + index * 43;
+                double y = board.Top + 60 + index * 43;
+                dc.DrawLine(routePen, new Point(laneLeft + 12, y),
+                    new Point(x - 13, y));
                 dc.DrawEllipse(new SolidColorBrush(Color.FromRgb(38, 44, 48)),
                     new Pen(new SolidColorBrush(color), 1.4), new Point(x, y), 11, 11);
                 dc.DrawEllipse(new SolidColorBrush(Color.FromRgb(6, 13, 20)), null,
@@ -185,15 +217,14 @@ namespace TimeCardControlCenter
                 FormattedText routeText = Text(route, 8, color, FontWeights.Normal);
                 dc.DrawText(routeText, new Point(x - routeText.Width - 16, y - 6));
             }
-            dc.DrawText(Text("SMA", 9, color, FontWeights.SemiBold),
-                new Point(board.Right - 39, board.Bottom - 27));
         }
 
         private void OnMouseMove(object sender, MouseEventArgs e)
         {
             Point point = e.GetPosition(this);
             NodeLayout layout = layouts.FirstOrDefault(item => item.Bounds.Contains(point));
-            if (layout == null && point.X > ActualWidth - 55)
+            if (layout == null && point.X >
+                ActualWidth - Math.Max(138, ActualWidth * .20))
             {
                 hotKey = "sma";
                 HealthNode sma = report == null ? null : report.Find("sma");

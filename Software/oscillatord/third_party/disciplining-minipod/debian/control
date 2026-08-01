@@ -1,0 +1,30 @@
+Source: disciplining-minipod
+Section: libs
+Priority: optional
+Maintainer: Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>
+Build-Depends: debhelper-compat (= 13), cmake
+Standards-Version: 4.5.0
+Rules-Requires-Root: no
+Homepage: https://github.com/Orolia2s/disciplining-minipod
+
+Package: liboscillator-disciplining3
+Architecture: any
+Multi-Arch: same
+Pre-Depends: ${misc:Pre-Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Minimal disciplining algorithm for mRO-50 (shared lib)
+ Disciplining algorithm used with oscillatord to discipline oscillators using
+ the minipod algorithm developed by Matthias Lorentz.
+ .
+ This package contains the shared library.
+
+Package: liboscillator-disciplining-dev
+Architecture: any
+Depends: ${misc:Depends},
+ liboscillator-disciplining3 (= ${binary:Version})
+Description: Minimal disciplining algorithm for mRO-50 (Development files)
+ Disciplining algorithm used with oscillatord to discipline oscillators using
+ the minipod algorithm developed by Matthias Lorentz.
+ .
+ This package contains the files needed to compile and link programs which
+ use disciplining-minipod.

@@ -264,6 +264,8 @@
                                          Content="&#xE707;" ToolTip="GNSS &amp; ToD" Checked="Navigate_Checked" />
                             <RadioButton x:Name="AtomicNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Atomic"
                                          Content="&#xE950;" ToolTip="Atomic Clock" Checked="Navigate_Checked" />
+                            <RadioButton x:Name="OscillatordNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Oscillatord"
+                                         Content="&#xE9D9;" ToolTip="Oscillator Discipline" Checked="Navigate_Checked" />
                             <RadioButton x:Name="UartNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Uart"
                                          Content="&#xE756;" ToolTip="UART Console" Checked="Navigate_Checked" />
                             <RadioButton x:Name="SmaNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Sma"
@@ -1261,6 +1263,195 @@
                         </Grid>
                     </ScrollViewer>
 
+                    <!-- OSCILLATORD -->
+                    <ScrollViewer x:Name="OscillatordPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="32,28,32,34">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="NATIVE WINDOWS DISCIPLINE" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock Text="Oscillator discipline" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
+                                    <TextBlock Text="The Windows driver supplies variant-safe phase and oscillator primitives; Orolia miniCOD runs locally while SA53 cards use hardware discipline."
+                                               Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Style="{StaticResource StatusChip}" Margin="0,0,10,0">
+                                        <TextBlock x:Name="NativeDisciplineConnectionText" Text="NOT QUERIED"
+                                                   Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" />
+                                    </Border>
+                                    <Button x:Name="NativeDisciplineRefreshButton" Content="Detect capability" Click="RefreshNativeDiscipline_Click" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Grid.Row="1" Style="{StaticResource Panel}" Margin="0,24,0,30">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,18,0"><TextBlock Text="BOARD PROFILE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineBoardText" Text="—" FontFamily="Segoe UI Semibold" FontSize="16" Margin="0,6,0,0" /></StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="0,0,18,0"><TextBlock Text="OSCILLATOR BACKEND" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineOscillatorText" Text="—" FontFamily="Segoe UI Semibold" FontSize="16" Margin="0,6,0,0" /></StackPanel>
+                                        <StackPanel Grid.Column="2"><TextBlock Text="DRIVER CAPABILITY" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineCapabilityText" Text="Install driver 1.38 / ABI 11 to detect native support." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0" /></StackPanel>
+                                    </Grid>
+                                    <UniformGrid Columns="5" Margin="0,20,0,18">
+                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="STATE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineStateText" Text="STOPPED" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock x:Name="NativeDisciplineClassText" Text="Clock class —" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
+                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="PHASE ERROR" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplinePhaseText" Text="—" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock x:Name="NativeDisciplineGnssText" Text="GNSS PPS waiting" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
+                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="MRO CONTROL" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineFineCoarseText" Text="—" Style="{StaticResource MetricValue}" FontSize="18" Margin="0,7,0,3" /><TextBlock Text="Fine / coarse" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
+                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="TEMPERATURE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineTemperatureText" Text="—" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock Text="mRO electronics" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
+                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="LAST ACTION" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineActionText" Text="No action" FontFamily="Segoe UI Semibold" FontSize="14" TextWrapping="Wrap" Margin="0,7,0,3" /><TextBlock Text="Bounded by driver ABI" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
+                                    </UniformGrid>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,18,0">
+                                            <TextBlock x:Name="NativeDisciplineDetailText" Text="Detect the card to select miniCOD, SA53 hardware discipline, or monitor-only mode." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+                                            <TextBlock Text="Software discipline never writes variant-specific registers directly. The signed driver validates every phase jump and mRO-50 setpoint."
+                                                       Foreground="{DynamicResource GoldBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" />
+                                        </StackPanel>
+                                        <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <CheckBox x:Name="NativeDisciplineBypassSurveyCheckBox" Content="Bypass survey"
+                                                      VerticalAlignment="Center" Margin="0,0,12,0"
+                                                      IsEnabled="False"
+                                                      ToolTip="Match oscillatord gnss-bypass-survey. Leave off unless the antenna position is already qualified." />
+                                            <Button x:Name="NativeDisciplineStartButton" Content="Start discipline" Click="StartNativeDiscipline_Click" Margin="0,0,8,0" IsEnabled="False" />
+                                            <Button x:Name="NativeDisciplineStopButton" Content="Stop" Click="StopNativeDiscipline_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,0" IsEnabled="False" />
+                                            <Button x:Name="NativeDisciplineCalibrateButton" Content="Calibrate mRO" Click="CalibrateNativeDiscipline_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" IsEnabled="False" />
+                                            <Button x:Name="NativeDisciplineHoldoverButton" Content="Simulate holdover" Click="ToggleNativeHoldover_Click" Style="{StaticResource SecondaryButton}" IsEnabled="False" />
+                                        </WrapPanel>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <Grid Grid.Row="2">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="LINUX OSCILLATOR DISCIPLINE" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock Text="oscillatord control &amp; telemetry" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
+                                    <TextBlock Text="Observe an Orolia/Safran ART disciplining service and issue guarded operations through its versioned monitoring protocol."
+                                               Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Style="{StaticResource StatusChip}" Margin="0,0,10,0">
+                                        <TextBlock x:Name="OscillatordConnectionText" Text="NOT CONNECTED"
+                                                   Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" />
+                                    </Border>
+                                    <Button x:Name="OscillatordRefreshButton" Content="Refresh service" Click="RefreshOscillatord_Click" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Grid.Row="3" Style="{StaticResource Panel}" Margin="0,24,0,18" Padding="16">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="2*" /><ColumnDefinition Width="0.75*" />
+                                        <ColumnDefinition Width="2*" /><ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,12,0">
+                                        <TextBlock Text="LINUX HOST OR IP" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                        <TextBox x:Name="OscillatordHostTextBox" Text="127.0.0.1" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                                        <TextBlock Text="TCP PORT" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                        <TextBox x:Name="OscillatordPortTextBox" Text="2958" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Margin="0,0,12,0">
+                                        <TextBlock Text="CONTROL TOKEN (NEVER STORED)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                        <PasswordBox x:Name="OscillatordTokenBox" />
+                                    </StackPanel>
+                                    <Button Grid.Column="3" Content="Connect" Click="RefreshOscillatord_Click"
+                                            VerticalAlignment="Bottom" Padding="20,8" />
+                                </Grid>
+                            </Border>
+
+                            <UniformGrid Grid.Row="4" Columns="4" Margin="0,0,0,18">
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel>
+                                    <TextBlock Text="DISCIPLINE STATE" Style="{StaticResource Label}" />
+                                    <TextBlock x:Name="OscillatordStateText" Text="—" Style="{StaticResource MetricValue}" FontSize="22" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="OscillatordProgressText" Text="Awaiting service" Foreground="{DynamicResource MutedBrush}" />
+                                </StackPanel></Border>
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel>
+                                    <TextBlock Text="PHASE OFFSET" Style="{StaticResource Label}" />
+                                    <TextBlock x:Name="OscillatordOffsetText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="OscillatordClockClassText" Text="Clock class —" Foreground="{DynamicResource MutedBrush}" />
+                                </StackPanel></Border>
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel>
+                                    <TextBlock Text="OSCILLATOR" Style="{StaticResource Label}" />
+                                    <TextBlock x:Name="OscillatordOscillatorText" Text="—" Style="{StaticResource MetricValue}" FontSize="22" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="OscillatordLockText" Text="Lock unknown" Foreground="{DynamicResource MutedBrush}" />
+                                </StackPanel></Border>
+                                <Border Style="{StaticResource Panel}"><StackPanel>
+                                    <TextBlock Text="GNSS REFERENCE" Style="{StaticResource Label}" />
+                                    <TextBlock x:Name="OscillatordGnssText" Text="—" Style="{StaticResource MetricValue}" FontSize="22" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="OscillatordGnssDetailText" Text="Awaiting GNSS" Foreground="{DynamicResource MutedBrush}" />
+                                </StackPanel></Border>
+                            </UniformGrid>
+
+                            <Grid Grid.Row="5">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
+                                    <StackPanel>
+                                        <TextBlock Text="Oscillator &amp; phase" Style="{StaticResource SectionTitle}" />
+                                        <TextBlock Text="Values come from the daemon's active oscillator backend and PHC phase meter."
+                                                   Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,15" TextWrapping="Wrap" />
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Service" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordVersionText" Grid.Column="1" Text="—" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Fine control" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordFineText" Grid.Column="1" Text="—" FontFamily="Cascadia Mono, Consolas" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Coarse control" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordCoarseText" Grid.Column="1" Text="—" FontFamily="Cascadia Mono, Consolas" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Temperature" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordTemperatureText" Grid.Column="1" Text="—" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Holdover ready" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordHoldoverText" Grid.Column="1" Text="—" /></Grid>
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource Panel}">
+                                    <StackPanel>
+                                        <TextBlock Text="GNSS timing reference" Style="{StaticResource SectionTitle}" />
+                                        <TextBlock Text="Fix, survey, leap-second, antenna, and time-accuracy state decoded by ubloxcfg."
+                                                   Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,15" TextWrapping="Wrap" />
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Satellites" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordSatellitesText" Grid.Column="1" Text="—" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Time accuracy" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordTimeAccuracyText" Grid.Column="1" Text="—" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Survey error" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordSurveyText" Grid.Column="1" Text="—" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Leap seconds" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordLeapText" Grid.Column="1" Text="—" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Antenna" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordAntennaText" Grid.Column="1" Text="—" /></Grid>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <Border Grid.Row="6" Style="{StaticResource Panel}" Margin="0,18,0,0">
+                                <StackPanel>
+                                    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Guarded service operations" Style="{StaticResource SectionTitle}" />
+                                            <TextBlock x:Name="OscillatordControlPolicyText" Text="Connect to read service policy. State-changing controls are disabled by default."
+                                                       Foreground="{DynamicResource MutedBrush}" Margin="0,5,18,15" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="Read calibration EEPROM" Tag="7" Click="OscillatordAction_Click"
+                                                Style="{StaticResource SecondaryButton}" VerticalAlignment="Top" />
+                                    </Grid>
+                                    <WrapPanel>
+                                        <Button Content="Start calibration" Tag="1" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
+                                        <Button Content="Save calibration" Tag="8" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
+                                        <Button Content="Start fake holdover" Tag="9" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
+                                        <Button Content="Stop fake holdover" Tag="10" Click="OscillatordAction_Click" Margin="0,0,8,8" />
+                                        <Button Content="GNSS start" Tag="2" Click="OscillatordAction_Click" Margin="0,0,8,8" />
+                                        <Button Content="GNSS stop" Tag="3" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
+                                        <Button Content="GNSS soft reset" Tag="4" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
+                                        <Button Content="GNSS cold reset" Tag="6" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
+                                        <Button Content="mRO coarse −1" Tag="12" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
+                                        <Button Content="mRO coarse +1" Tag="11" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
+                                    </WrapPanel>
+                                    <TextBlock Text="Calibration, oscillator steering, holdover simulation, EEPROM writes, and receiver resets can change timing behavior. The app confirms each request; the daemon independently enforces its control policy and token."
+                                               Foreground="{DynamicResource GoldBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,7,0,0" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="7" Style="{StaticResource Panel}" Margin="0,18,0,0" Padding="14">
+                                <TextBlock x:Name="OscillatordResultText" Text="No service response yet."
+                                           Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas"
+                                           FontSize="11" TextWrapping="Wrap" />
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
+
                     <!-- UART -->
                     <Grid x:Name="UartPage" Visibility="Collapsed" Margin="32,28,32,34">
                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
@@ -1737,20 +1928,46 @@
                             </Grid.RowDefinitions>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <StackPanel>
+                                <StackPanel Margin="0,0,16,0">
                                     <TextBlock Text="ENVIRONMENT &amp; MOTION" Style="{StaticResource Eyebrow}" />
                                     <TextBlock Text="Board sensors &amp; inertial telemetry" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
                                     <TextBlock x:Name="SensorsIntroText" Text="Live BME280/BMP280 environment, INA219 power-rail, and BNO055/BNO08x nine-axis readings from the auto-detected sensor branch."
-                                               Foreground="{DynamicResource MutedBrush}" />
+                                               Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
-                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Border Style="{StaticResource StatusChip}" Margin="0,0,10,0">
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
+                                    <Border Style="{StaticResource StatusChip}" Margin="0,0,10,0"
+                                            VerticalAlignment="Center">
                                         <StackPanel Orientation="Horizontal">
                                             <Ellipse x:Name="SensorsStatusDot" Width="8" Height="8" Fill="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
                                             <TextBlock x:Name="SensorsStatusText" Text="WAITING" Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="11" />
                                         </StackPanel>
                                     </Border>
-                                    <Button x:Name="SensorsRefreshButton" Content="Refresh sensors" Click="RefreshSensors_Click" />
+                                    <Border Width="252" Height="76" Padding="10,7"
+                                            Background="#0B1F31" BorderBrush="#24455E"
+                                            BorderThickness="1" CornerRadius="11">
+                                        <Grid>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="*" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <Grid>
+                                                <TextBlock Text="SENSOR READ TIME" Style="{StaticResource Label}" FontSize="9" />
+                                                <TextBlock x:Name="SensorsSamplingDurationText" Text="&#x2014; ms"
+                                                           HorizontalAlignment="Right" Foreground="{DynamicResource CyanBrush}"
+                                                           FontFamily="Segoe UI Semibold" FontSize="11" />
+                                            </Grid>
+                                            <local:RollingTelemetryChart x:Name="SensorsSamplingDurationChart" Grid.Row="1"
+                                                                         Margin="0,4,0,3" Capacity="60" MinimumRange="1"
+                                                                         LineBrush="{DynamicResource CyanBrush}"
+                                                                         AreaBrush="#204CC9F0"
+                                                                         AutomationProperties.Name="Sensor acquisition duration chart"
+                                                                         ToolTip="Last 60 sensor acquisition durations in milliseconds" />
+                                            <TextBlock x:Name="SensorsSamplingDurationRangeText" Grid.Row="2"
+                                                       Text="WAITING FOR SAMPLES" Foreground="#617A90"
+                                                       FontSize="8" TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                    </Border>
                                 </StackPanel>
                             </Grid>
 
@@ -1857,7 +2074,7 @@
                                                 <TextBlock Text="Z" Foreground="#F2C94C" FontFamily="Segoe UI Semibold" FontSize="10"
                                                            HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="5,0,0,3" />
                                             </Grid>
-                                            <TextBlock Grid.Row="2" Text="Quaternion-driven &#x00B7; sensor frame"
+                                            <TextBlock Grid.Row="2" Text="Quaternion-driven &#x00B7; auto showcase without IMU"
                                                        Foreground="{DynamicResource MutedBrush}" FontSize="10" HorizontalAlignment="Center" />
                                         </Grid>
                                     </Border>

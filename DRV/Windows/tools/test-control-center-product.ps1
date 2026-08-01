@@ -11,9 +11,32 @@ $windowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
     '..\TimeCardControlCenter\MainWindow.xaml.cs') -Raw -Encoding UTF8
 $productWindowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
     '..\TimeCardControlCenter\MainWindow.Product.cs') -Raw -Encoding UTF8
+$projectSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
+    '..\TimeCardControlCenter\TimeCardControlCenter.csproj') -Raw -Encoding UTF8
+$topologySource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
+    '..\TimeCardControlCenter\TimeCardTopologyView.cs') -Raw -Encoding UTF8
+if ($windowXaml -notmatch 'x:Name="OscillatordPage"' -or
+    $windowXaml -notmatch 'OscillatordAction_Click' -or
+    $windowXaml -notmatch 'CONTROL TOKEN \(NEVER STORED\)') {
+    throw 'Control Center product test failed: oscillatord workspace is incomplete.'
+}
 if ($windowXaml -notmatch 'Viewport3D\s+x:Name="ImuOrientationViewport"' -or
     $windowXaml -notmatch 'x:Name="ImuVisualizationStatusText"') {
     throw 'Control Center product test failed: live 3D IMU viewport is missing.'
+}
+if ($windowXaml -match 'SensorsRefreshButton' -or
+    $windowXaml -notmatch 'x:Name="SensorsSamplingDurationChart"' -or
+    $windowXaml -notmatch 'SENSOR READ TIME' -or
+    $windowSource -notmatch 'RecordSensorSamplingDuration' -or
+    $windowSource -notmatch 'sampleTimer\.Elapsed\.TotalMilliseconds') {
+    throw 'Control Center product test failed: automatic sensor sampling-duration chart is incomplete.'
+}
+if ($topologySource -notmatch 'GetSmaLaneWidth' -or
+    $topologySource -notmatch 'SMA I/O' -or
+    $topologySource -notmatch 'laneDivider' -or
+    $topologySource -notmatch 'ActualWidth\s*<\s*520' -or
+    $topologySource -notmatch 'nodeAreaRight\s*=\s*board\.Right\s*-\s*smaLaneWidth') {
+    throw 'Control Center product test failed: spaced SMA topology lane is incomplete.'
 }
 if ($windowSource -notmatch 'UpdateImuCubeOrientation' -or
     $windowSource -notmatch 'UpdateImuCubeFromReading' -or
@@ -23,13 +46,31 @@ if ($windowSource -notmatch 'UpdateImuCubeOrientation' -or
     $windowSource -notmatch 'HOLD . ZERO SAMPLE') {
     throw 'Control Center product test failed: quaternion-driven IMU cube is incomplete.'
 }
+$cubeFaces = @('black', 'blue', 'green', 'purple', 'red', 'yellow')
+foreach ($cubeFace in $cubeFaces) {
+    if ($windowSource -notmatch ('logo_' + $cubeFace + '\.png') -or
+        $projectSource -notmatch ('logo_' + $cubeFace + '\.png')) {
+        throw "Control Center product test failed: $cubeFace IMU cube face is missing."
+    }
+}
+if ($windowSource -notmatch 'TextureCoordinates' -or
+    $windowSource -notmatch 'imageWidth\s*=\s*0\.94' -or
+    $windowSource -notmatch 'StartImuCubeShowcase' -or
+    $windowSource -notmatch 'seconds \* 29\.0' -or
+    $windowSource -notmatch 'seconds \* 17\.0' -or
+    $windowSource -notmatch 'seconds \* 11\.0' -or
+    $windowSource -notmatch 'bool showcase\s*=\s*!imu\.IsPresent' -or
+    $windowSource -notmatch 'ApplyImu\(new ImuSensorReading') {
+    throw 'Control Center product test failed: textured six-face/no-IMU showcase is incomplete.'
+}
 if ($windowSource -notmatch 'AbiVersion\s*>=\s*10' -or
     $windowSource -notmatch 'driver 1\.37 / ABI 10') {
     throw 'Control Center product test failed: board-specific sensor ABI gating is missing.'
 }
 if ($productWindowSource -notmatch 'UpdateDemoCelesticaSensors' -or
     $productWindowSource -notmatch 'BoardProfile\s*=\s*3u' -or
-    $productWindowSource -notmatch 'RawPressure\s*=\s*11477003u') {
+    $productWindowSource -notmatch 'RawPressure\s*=\s*11477003u' -or
+    $productWindowSource -notmatch '--demo-no-imu') {
     throw 'Control Center product test failed: Celestica visual demo telemetry is missing.'
 }
 $wpfUsings = "using System.Windows;`r`nusing System.Windows.Input;`r`nusing System.Windows.Media;`r`n"
@@ -198,7 +239,7 @@ namespace TimeCardControlCenter
                     restored.LastKnownGoodProfile.Name != roundTrip.Name)
                     throw new Exception("Settings serialization failed.");
             }
-            return "Control Center product tests passed (health graph, profiles, XML round-trip, telemetry retention/export, histogram percentiles, vibration math, compact 3D IMU view, IMU zero-sample debounce, ICP-10100 compensation).";
+            return "Control Center product tests passed (health graph, spaced SMA topology lane, profiles, XML round-trip, telemetry retention/export, histogram percentiles, vibration math, automatic sensor acquisition-latency chart, textured six-face 3D IMU view, no-IMU showcase, IMU zero-sample debounce, ICP-10100 compensation).";
         }
     }
 }

@@ -1,0 +1,34 @@
+name: oscillatord
+
+on:
+  push:
+    paths:
+      - "Software/oscillatord/**"
+      - ".github/workflows/oscillatord.yml"
+  pull_request:
+    paths:
+      - "Software/oscillatord/**"
+      - ".github/workflows/oscillatord.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  linux-build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git pkg-config libjson-c-dev pps-tools \
+            libsystemd-dev libpath-tiny-perl libdata-float-perl
+      - name: Build pinned dependencies and oscillatord
+        working-directory: Software/oscillatord
+        env:
+          BUILD_TYPE: RelWithDebInfo
+          BUILD_TESTS: ON
+          BUILD_UTILS: ON
+        run: bash ./tools/build-timecard.sh

@@ -15,6 +15,10 @@ applications use the versioned IOCTL ABI through `timecardctl.exe`.
 - PHC read, set, and system-bracketed cross-timestamp operations.
 - Direct Orolia/Safran ART mRO-50 FPGA-bridge telemetry and guarded fine,
   coarse, and nonvolatile coarse-adjustment controls.
+- ABI 11 capability discovery and native ART oscillator discipline: consistent
+  paired GNSS/mRO PPS timestamps, bounded PHC phase steps, exact Orolia miniCOD
+  steering and calibration, and validated, page-aligned 24c08 parameter
+  persistence with full read-back verification.
 - FPGA, TOD, synchronization, selectable clock source, UTC/leap, satellite,
   and GNSS status reporting.
 - Buffered access to the GNSS, GNSS2, atomic-clock, and NMEA 16550 UARTs. The
@@ -61,7 +65,7 @@ controller from starting.
 
 ## Hardware compatibility
 
-Driver 1.37 / ABI 10 selects the same three PCI profiles and resource maps as
+Driver 1.38 / ABI 11 selects the same three PCI profiles and resource maps as
 the Linux `ptp_ocp` driver while keeping their board-level sensor populations
 distinct. Meta/Facebook and Celestica share the rev1 and rev2 FPGA maps. Older
 PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or 32 interrupt
@@ -74,7 +78,7 @@ The Celestica R4006-G0001-03 Rev02 profile is identified by
 `PCI\VEN_18D4&DEV_1008`. Its TCA9546A at `0x70` uses fixed, isolated routes:
 channel 0 for three LM75B monitors at `0x48`/`0x49`/`0x4a`, channel 1 for the
 SHT3x at `0x44`, channel 2 for the ICP-10100 at `0x63`, and channel 3 for the
-BNO08x at `0x4a`. Driver 1.37 validates Sensirion/TDK CRC-8 frames, retrieves
+BNO08x at `0x4a`. Driver 1.38 validates Sensirion/TDK CRC-8 frames, retrieves
 and caches the pressure sensor's four OTP coefficients, and exposes raw values
 plus compensated environmental telemetry without confusing identical I2C
 addresses that live on different mux branches.
@@ -115,6 +119,56 @@ Subsystem availability still depends on the FPGA image and populated board
 options. Missing optional resources never prevent the controller and PHC from
 starting.
 
+## Native oscillator discipline
+
+Driver 1.38 exposes a capability-first ABI instead of asking user mode to infer
+hardware from a PCI ID or probe arbitrary MMIO. `IOCTL_TIMECARD_GET_CAPABILITIES`
+reports the board profile, oscillator type, safe steering ranges, paired-PPS
+indices, phase-step support, temperature telemetry, hardware-discipline support,
+and whether a writable discipline EEPROM is present.
+
+On Orolia/Safran ART, the driver maps the FPGA's GNSS PPS timestamp input 0 and
+internal-oscillator PPS timestamp input 5. A phase sample latches both timestamp
+counters consistently and reports `oscillator - reference`, normalized to one
+PPS period. Capture uses polling mode with its interrupt masks disabled, is
+suspended safely across D0 exit, and is restored only when an application had
+requested it. PHC corrections are relative and bounded to
+`-499999999..499999999` ns. Direct mRO-50 fine and coarse writes are constrained
+to the published miniCOD ranges (`0..4800` and `0..0x3fffff`).
+
+The native `TimeCardDiscipline.dll` is a small stable Windows C ABI around the
+vendored Orolia `disciplining-minipod` 3.6.0 implementation used by
+`oscillatord` 3.10.0. The Control Center feeds it the paired phase, GNSS-valid,
+lock, temperature, fine/coarse, survey state, and the previous u-blox TIM-TP
+quantization error, then applies only the returned bounded action. GNSS fix and
+survey state come from passive NAV-PVT and TIM-SVIN messages without changing
+the ART UART divisor. Full calibration uses miniCOD's three-point plan and 50 valid
+paired PPS samples per point. Parameters are loaded from and saved to the ART
+24c08 layout (configuration at `0x000`, temperature table at `0x090`) and a
+host backup under `%ProgramData%\OCP Time Card`; writes require version-1
+headers and are verified byte for byte.
+
+Meta/Facebook boards with a MAC-SA53 use the existing atomic-clock hardware
+discipline workspace. Celestica and future Linux-listed variants are detected
+through the same capability query; a protocol must identify successfully before
+configuration is offered, otherwise the UI remains monitor-only. ART-only phase,
+mRO, and EEPROM operations return `STATUS_NOT_SUPPORTED` on every other profile.
+
+The command-line surface is also available for automation:
+
+```powershell
+.\out\timecardctl.exe capabilities
+.\out\timecardctl.exe phase-status
+.\out\timecardctl.exe phase-enable
+.\out\timecardctl.exe phase-disable
+.\out\timecardctl.exe discipline-read art-discipline.bin
+```
+
+`phc-adjust` and `discipline-write` are deliberately explicit administrator
+commands. The latter accepts exactly 512 bytes with valid configuration and
+temperature-table headers; the kernel driver performs the final validation and
+read-back.
+
 The rev1 path has been validated on a connected revision 00 implementation
 with a 32 MiB BAR, 16 assigned MSI messages, clock core 1.2.0, and ToD core
 2.0.0.1. Its PHC, primary GNSS/NMEA stream, NMEA generator, four SMA routes,
@@ -151,7 +205,8 @@ sensors and IMU telemetry, I2C mux and status-LED control, subsystem hierarchy,
 FPGA firmware updates, and engineering diagnostics. The application includes
 an animated, aspect-preserving Time Card identity, a polished splash screen,
 clear connection state, and one-click administrator restart when required.
-It also includes a clickable end-to-end timing health topology, a timestamped
+It also includes a clickable end-to-end timing health topology with a dedicated
+right-side lane for the four SMA endpoints, a timestamped
 Telemetry Studio with CSV/JSON recording, cross-timestamp distribution and
 percentiles, and a gravity-compensated IMU vibration trace with rolling RMS;
 verified configuration profiles with automatic rollback; a read-only guided
@@ -170,7 +225,7 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-Driver **1.37 / ABI 10** is required for the complete feature set shown below.
+Driver **1.38 / ABI 11** is required for the complete feature set shown below.
 
 ![Control Center overview](assets/timecard-control-center.png)
 
@@ -404,9 +459,14 @@ followed by a bounded read. These devices retain their register pointer across
 STOP; the fallback leaves the existing repeated-START path in place for every
 device that accepts it. The Control Center renders the IMU quaternion as a
 compact, smoothed, color-keyed 3D cube alongside the numeric heading, roll, and
-pitch. It holds the last good pose across isolated invalid or identity
-`0°, 0°, 0°` samples; a real zero orientation is accepted after three
-consecutive valid samples.
+pitch. Each face carries one of the six color Time Card marks, centered and
+aspect-preserved. It holds the last good pose across isolated invalid or
+identity `0°, 0°, 0°` samples; a real zero orientation is accepted after three
+consecutive valid samples. Cards without an IMU use an automatic three-axis
+showcase rotation so all six faces are presented.
+The Sensors workspace samples automatically and replaces its former manual
+refresh control with a rolling 60-second acquisition-latency graph, including
+the current and minimum/maximum sensor-read time.
 
 Driver 1.37 / ABI 10 adds the schematic-exact Celestica R4006 sensor profile.
 It reads all three LM75B board-temperature monitors on TCA9546A channel 0,

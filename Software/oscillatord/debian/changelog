@@ -1,0 +1,39 @@
+oscillatord (3.10.0) unstable; urgency=medium
+
+  * Add per-band satellite monitoring from UBX-RXM-RAWX.
+  * Auto-detect L5 receiver.
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Tue, 23 Jun 2026 08:38:55 +0200
+
+oscillatord (3.9.3) unstable; urgency=medium
+
+  * Forward raw observations and ephemeris over the RTCM socket.
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Wed, 03 Jun 2026 17:48:13 +0200
+
+oscillatord (3.9.2) unstable; urgency=medium
+
+  * mro50: configure serial port explicitly.
+  * fix set_rtcm_output to avoid receiver restart.
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Thu, 21 May 2026 15:22:22 +0200
+
+oscillatord (3.9.1) unstable; urgency=medium
+
+  * Add recent ubloxcfg compatibility.
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Mon, 04 May 2026 20:52:57 +0200
+
+oscillatord (3.9.0) unstable; urgency=medium
+
+  * Add RTCM socket.
+  * Adjust SA5x performance holdover.
+  * Improve JSON monitoring output.
+
+ -- Nicolas BOURDAUD <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Mon, 06 Apr 2026 18:55:05 +0200
+
+oscillatord (3.8.4) unstable; urgency=medium
+
+  * Initial release.
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Thu, 21 Aug 2025 16:39:18 +0200

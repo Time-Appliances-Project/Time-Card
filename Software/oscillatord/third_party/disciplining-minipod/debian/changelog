@@ -1,0 +1,35 @@
+disciplining-minipod (3.10.0) unstable; urgency=medium
+
+  * Bump version to 3.10.0
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Tue, 23 Jun 2026 08:34:15 +0200
+
+disciplining-minipod (3.9.3) unstable; urgency=medium
+
+  * Bump version to 3.9.3
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Wed, 03 Jun 2026 17:51:43 +0200
+
+disciplining-minipod (3.9.2) unstable; urgency=medium
+
+  * Bump version to 3.9.2
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Thu, 21 May 2026 15:29:38 +0200
+
+disciplining-minipod (3.9.1) unstable; urgency=medium
+
+  * Bump version to 3.9.1
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Mon, 04 May 2026 20:47:53 +0200
+
+disciplining-minipod (3.9.0) unstable; urgency=medium
+
+  * Bump version to 3.9.0
+
+ -- Nicolas BOURDAUD <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Mon, 06 Apr 2026 20:42:19 +0200
+
+disciplining-minipod (3.8.4) unstable; urgency=medium
+
+  * Initial release.
+
+ -- Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>  Thu, 21 Aug 2025 16:37:27 +0200

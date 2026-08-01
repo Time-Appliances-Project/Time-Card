@@ -1,0 +1,7 @@
+build/
+*.o
+test-minipod-lib
+test-utils
+test-checks
+test-fine-circular-buffer
+output_buffer.txt

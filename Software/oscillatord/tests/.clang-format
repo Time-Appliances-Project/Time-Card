@@ -1,0 +1,109 @@
+﻿---
+Language: Cpp
+
+# ----- Indentation -----
+TabWidth: 4
+UseTab: Never
+IndentCaseLabels: false
+IndentPPDirectives: AfterHash
+IndentWidth: 4
+IndentWrappedFunctionNames: false
+PPIndentWidth: 4
+
+# ----- Line length -----
+ColumnLimit: 90
+PenaltyBreakAssignment: 20
+PenaltyBreakBeforeFirstCallParameter: 40
+PenaltyBreakComment: 25
+PenaltyBreakFirstLessLess: 10
+PenaltyBreakString: 35
+PenaltyExcessCharacter: 1
+PenaltyReturnTypeOnItsOwnLine: 15
+ReflowComments: true
+
+# ----- Macros -----
+AlignConsecutiveMacros: AcrossEmptyLinesAndComments
+#    Enabled: true
+#    AcrossEmptyLines: true
+#    AcrossComments: true
+AlignEscapedNewlines: Left
+
+# ----- Align -----
+AlignAfterOpenBracket: 'Align'
+AlignArrayOfStructures: 'Right'
+AlignConsecutiveAssignments: AcrossEmptyLinesAndComments
+#    Enabled: true
+#    AcrossEmptyLines: true
+#    AcrossComments: true
+#    AlignCompound: true
+#    PadOperators: true
+AlignConsecutiveBitFields: AcrossEmptyLinesAndComments
+AlignConsecutiveDeclarations: AcrossEmptyLinesAndComments
+#    Enabled: true
+#    AcrossEmptyLines: true
+#    AcrossComments: true
+AlignOperands: Align
+AlignTrailingComments: true
+#    OverEmptyLines: 2
+
+# ----- Misc -----
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+
+BinPackArguments: false
+BinPackParameters: false
+BitFieldColonSpacing: Before
+BreakBeforeBinaryOperators: NonAssignment
+BreakBeforeBraces: Attach
+BreakBeforeTernaryOperators: false
+BreakConstructorInitializers: AfterColon
+BreakInheritanceList: AfterColon
+BreakStringLiterals: true
+ContinuationIndentWidth: 4
+DerivePointerAlignment: false
+FixNamespaceComments: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+NamespaceIndentation: None
+PointerAlignment: Left
+QualifierAlignment: Left
+# QualifierOrder: ['static', 'inline', 'volatile', 'const', 'type']
+ReferenceAlignment: Pointer
+
+SortUsingDeclarations: 'true'
+SpaceAfterCStyleCast: 'false'
+SpaceAfterLogicalNot: 'false'
+SpaceAfterTemplateKeyword: 'false'
+SpaceBeforeAssignmentOperators: 'true'
+SpaceBeforeCpp11BracedList: 'false'
+SpaceBeforeCtorInitializerColon: 'true'
+SpaceBeforeInheritanceColon: 'true'
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: 'true'
+SpaceInEmptyParentheses: 'false'
+SpacesBeforeTrailingComments: '1'
+SpacesInAngles: 'false'
+SpacesInCStyleCastParentheses: 'false'
+SpacesInContainerLiterals: 'false'
+SpacesInParentheses: 'false'
+SpacesInSquareBrackets: 'false'
+
+# ----- Includes -----
+SortIncludes: 'true'
+IncludeBlocks: Regroup
+IncludeIsMainRegex: '$'
+IncludeCategories:
+  - Regex:           '^<(assert|complex|w?ctype|errno|float|inttypes|limits|locale|(tg)?math|signal|string|threads|time|[uw]char|.*std.*)\.h>$'
+    Priority:        -2
+  - Regex:           '^<'
+    Priority:        -1
+  - Regex:           '^"'
+    Priority:        1
+
+...

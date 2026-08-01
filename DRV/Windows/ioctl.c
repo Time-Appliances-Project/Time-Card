@@ -689,6 +689,111 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         break;
     }
 
+    case IOCTL_TIMECARD_GET_CAPABILITIES:
+    {
+        TIMECARD_CAPABILITIES *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardGetCapabilities(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_PHASE_QUERY:
+    {
+        TIMECARD_PHASE_SAMPLE *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardPhaseQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_PHASE_CONTROL:
+    {
+        TIMECARD_PHASE_CONTROL *input;
+        TIMECARD_PHASE_CONTROL requestValue;
+        TIMECARD_PHASE_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardPhaseControl(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_PHC_ADJUST:
+    {
+        TIMECARD_PHC_ADJUST *input;
+        TIMECARD_PHC_ADJUST requestValue;
+        TIMECARD_PHC_ADJUST *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardAdjustPhc(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_DISCIPLINE_READ:
+    {
+        TIMECARD_DISCIPLINE_BLOB *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardDisciplineRead(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_DISCIPLINE_WRITE:
+    {
+        TIMECARD_DISCIPLINE_BLOB *input;
+        TIMECARD_DISCIPLINE_BLOB requestValue;
+        TIMECARD_DISCIPLINE_BLOB *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardDisciplineWrite(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
     default:
         status = STATUS_INVALID_DEVICE_REQUEST;
         break;

@@ -4,7 +4,7 @@ The Time Card Control Center is a dependency-free Windows desktop dashboard
 for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
-Driver 1.37 / ABI 10 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
+Driver 1.38 / ABI 11 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
 ART profiles from the Linux driver. The Celestica workspace uses its actual
 LM75B, SHT3x, ICP-10100, and BNO08x population rather than presenting the
 Meta-only BME280 and INA219 devices. On ART, the application switches to a
@@ -32,7 +32,9 @@ explicitly chooses a new divisor.
   with rolling 200-second offset histories and 60-second uncertainty histories.
 - A live, clickable source-to-system topology that evaluates the PCIe
   controller, GNSS receiver, ToD engine, SA53, PHC, SMA fabric, I2C management
-  bus, and Windows UTC as one health path. Highlighted components open the
+  bus, and Windows UTC as one health path. The four SMA endpoints occupy a
+  dedicated, separated I/O lane so their direction and route state remain
+  readable beside the core timing flow. Highlighted components open the
   appropriate corrective workspace.
 - Clock engine, synchronization, PCIe layout, BAR, interrupt status, and a
   guarded selector for all FPGA clock sources exposed by Linux `ptp_ocp`.
@@ -158,7 +160,12 @@ application:
 ```powershell
 TimeCardControlCenter.exe --demo --page Telemetry
 TimeCardControlCenter.exe --demo --compact --theme=High-contrast
+TimeCardControlCenter.exe --demo --demo-no-imu --page Sensors
 ```
+
+`--demo-no-imu` exercises the Sensors workspace exactly as a supported card
+without a fitted IMU: the readouts remain unavailable while the six-face Time
+Card cube runs its multi-axis showcase rotation.
 
 `--theme=Dark`, `--theme=Midnight-blue`, and `--theme=High-contrast` are
 available for repeatable visual validation. `--compact` forces the responsive
@@ -297,6 +304,7 @@ product and protocol suites from `DRV\Windows`:
 ```powershell
 .\tools\test-control-center-product.ps1
 .\tools\test-ublox-decoder.ps1
+.\tools\test-oscillatord-client.ps1
 ```
 
 The first validates the health graph, built-in profile catalog, XML profile
@@ -421,6 +429,71 @@ the underlying alarm condition. JamSync, loading stored settings, and writing
 configuration to flash each require confirmation. Calibration latching, CPU
 reset, and serial-baud changes are intentionally unavailable because they can
 be irreversible or interrupt communication.
+
+## Oscillator discipline
+
+The top half of **Oscillator Discipline** is native Windows control. It queries
+ABI 11 rather than assuming one oscillator implementation for every card:
+
+- **Orolia/Safran ART + mRO-50:** the application uses the driver's paired GNSS
+  and internal-oscillator PPS samples and the exact vendored Orolia miniCOD
+  3.6.0 algorithm. It displays phase, state, clock class, GNSS validity,
+  convergence/holdover, mRO fine/coarse words, raw temperature, and every
+  requested/applied action. Start, stop, full three-point calibration, and a
+  simulated holdover test are available with confirmations where appropriate.
+- **Meta/Facebook + MAC-SA53:** the page routes configuration to the Atomic
+  Clock workspace, where the SA53's hardware discipline, phase meter, loop,
+  PPS, JamSync, and steering controls already live.
+- **Celestica and other variants:** capability and protocol discovery select
+  supported controls. Unknown oscillators remain visible but monitor-only; the
+  application never attempts ART offsets on a different PCI profile.
+
+ART discipline starts only when the mRO bridge and paired phase meter are both
+reported. A sample is valid only after both PPS counters advance without a
+gateware error. miniCOD actions are bounded again in user mode before the
+driver enforces its own ranges. Stop releases phase capture and persists only
+changed calibration data. The application loads a valid card EEPROM image
+first, then its atomic host backup in
+`%ProgramData%\OCP Time Card\discipline-profile-N.bin`; card writes are
+page-aligned and verified by the driver. Closing the application stops the loop
+and releases capture. A loss of valid measurements drives miniCOD into its
+native holdover behavior rather than continuing open-loop adjustments.
+
+While native discipline is running, the application passively owns the primary
+GNSS UART long enough to collect each UBX epoch. It preserves the gateware baud,
+requires TIM-TP plus a valid NAV-PVT fix, tracks TIM-SVIN completion, rejects
+quantization errors beyond the upstream 5,000 ps limit, and feeds miniCOD the
+previous epoch's `qErr` just like Linux `oscillatord`. The UART console should
+not monitor GNSS port 0 at the same time. **Bypass survey** matches upstream
+`gnss-bypass-survey`; it is off by default and adds an explicit warning to the
+start confirmation.
+
+`TimeCardDiscipline.dll` must remain beside `TimeCardControlCenter.exe`; the
+Release build copies it automatically. `tools\test-native-discipline.ps1`
+exercises the native ABI, one process step, and exact 512-byte EEPROM
+serialization without requiring hardware.
+
+### Remote Linux oscillatord
+
+The lower half of the same workspace is a remote client for the integrated
+Linux [`oscillatord`](../../../Software/oscillatord) monitoring protocol. It
+shows service and protocol versions, phase offset and clock class, disciplining
+state and convergence, holdover readiness, mRO-50 lock/temperature/fine/coarse
+controls, and GNSS fix, satellites, accuracy, survey, leap-second, and antenna
+state. The Linux service normally listens on TCP port 2958.
+
+The token is held only in the password field for the current process and is
+never written to application settings, telemetry exports, support bundles, or
+logs. Status and calibration-EEPROM reads work against a read-only service.
+Calibration, EEPROM saves, fake holdover, GNSS start/stop/reset, and mRO-50
+coarse changes require confirmation in the app and independent authorization
+by `monitoring-allow-control` plus `monitoring-control-token` on the daemon.
+Keep the daemon on loopback unless remote management is required; when remote,
+the protocol is not encrypted, so prefer an SSH local forward such as
+`ssh -L 2958:127.0.0.1:2958 timecard-host`. Otherwise bind a trusted interface
+and restrict TCP/2958 with the Linux host firewall.
+
+![oscillatord discipline and telemetry workspace](../assets/timecard-control-center-oscillatord.png)
 
 ## SMA connector control
 
@@ -549,10 +622,18 @@ acceleration, rotation-vector, and gravity reports. The workspace reports
 heading, roll, pitch, quaternion, calibration levels, acceleration, linear
 acceleration, gravity, angular velocity, and magnetic field. A native 3D cube
 tracks the normalized quaternion in real time with smoothed shortest-path
-rotation. The compact visualization holds its last good pose across isolated
+rotation. Its six faces use the black, blue, green, purple, red, and yellow
+Time Card artwork, centered at a consistent scale without stretching or
+clipping. The compact visualization holds its last good pose across isolated
 invalid or identity `0°, 0°, 0°` samples; a real zero orientation is
-accepted after three consecutive valid samples. BNO055 also reports
+accepted after three consecutive valid samples. On cards without an IMU,
+including Orolia ART, the same cube rotates continuously about all three axes
+so every face remains visible. BNO055 also reports
 temperature. Sampling is live at one hertz while the workspace is visible.
+The header's rolling **Sensor read time** graph records the last 60 complete
+driver acquisitions in milliseconds, shows the current and minimum/maximum
+latency, and marks failed transactions without interrupting automatic sampling.
+No manual refresh is needed while the workspace is open.
 Each query temporarily selects the schematic sensor branch and the independently
 discovered IMU branch, reports missing devices separately, and restores the
 previous mux selection. A nonresponding monitor is explicitly

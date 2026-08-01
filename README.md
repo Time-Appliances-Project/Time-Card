@@ -169,9 +169,17 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
 * Linux Time Card driver in [`DRV/Linux`](DRV/Linux)
 * Windows KMDF driver, command-line tools, and Control Center in
   [`DRV/Windows`](DRV/Windows)
+* The integrated Orolia/Safran [`oscillatord`](Software/oscillatord) service,
+  which disciplines an ART mRO-50 from the GNSS/PHC phase measurements exposed
+  by `ptp_ocp`, initializes the PHC, feeds NTP shared memory, and publishes live
+  oscillator, GNSS, phase, convergence, and holdover telemetry. Its pinned,
+  reproducible build includes the complete upstream v3.10.0 source and utilities.
+  The same upstream miniCOD algorithm is built as a native Windows DLL and
+  connected to the Windows driver's guarded phase, mRO-50, PHC, and calibration
+  EEPROM operations.
 * CAD files for the custom PCIe bracket 
 
-The Windows package currently ships driver **1.37 / ABI 10** and a native
+The Windows package currently ships driver **1.38 / ABI 11** and a native
 Control Center that brings the complete Time Card into one application:
 
 * Precision-clock telemetry, detail-focused rolling offset graphs, clock-source
@@ -181,10 +189,19 @@ Control Center that brings the complete Time Card into one application:
 * Board-aware atomic-clock control for Microchip MAC-SA53 and the Orolia ART
   mRO-50 FPGA bridge, plus multi-format UART consoles and FPGA NMEA where
   implemented.
+* Native oscillator discipline on Orolia/Safran ART: paired GNSS/oscillator PPS
+  phase capture, the exact Orolia miniCOD state machine, mRO-50 steering,
+  calibration, convergence and holdover state, and verified 24c08 persistence.
+  SA53-based and future variants are selected through capability discovery and
+  use their hardware discipline interface without touching ART-only registers.
 * SMA routing plus four PHC-aligned generators and four frequency counters.
 * Schematic-aware I2C routing, card identity, automatic/manual RGB status LEDs,
   electrical diagnostics, live environmental sensors, power rails, and a live
-  quaternion-driven 3D IMU orientation view.
+  quaternion-driven 3D IMU orientation view. Its six faces carry the supplied
+  color Time Card artwork; non-IMU cards use an automatic three-axis showcase
+  rotation so every face is visible. Sensor acquisition remains automatic at
+  one hertz, with a rolling 60-second read-time graph showing current and
+  minimum/maximum latency instead of a flashing manual-refresh control.
 * A default-on Device Manager subsystem hierarchy, recovery controls, and
   guarded, verified FPGA SPI-flash updates.
 * Explicit Meta/Facebook, Celestica, and Orolia/Safran ART board profiles
@@ -202,6 +219,8 @@ installation, safety, and hardware details.
 | GNSS receiver and sky map | Sensors and IMU | I2C routing and status LEDs |
 | --- | --- | --- |
 | ![GNSS receiver workspace](DRV/Windows/assets/timecard-control-center-gnss.png) | ![Celestica sensors and compact 3D IMU workspace](DRV/Windows/assets/timecard-control-center-sensors.png) | ![I2C and LED workspace](DRV/Windows/assets/timecard-control-center-i2c.png) |
+
+![Integrated oscillatord discipline and telemetry workspace](DRV/Windows/assets/timecard-control-center-oscillatord.png)
 
 # Credits
 Hereby we would like to thank these individuals who helped with the initiative, archirecture, design, software development, hardware issue maintanance and upgrades.

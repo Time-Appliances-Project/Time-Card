@@ -20,6 +20,8 @@ if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
 )
 
 echo === Building OCP Time Card Control Center ^(%CONFIG%^) ===
+call build-discipline-library.cmd
+if errorlevel 1 exit /b 1
 "%MSBUILD%" TimeCardControlCenter\TimeCardControlCenter.csproj /t:Rebuild /p:Configuration=%CONFIG% /p:Platform=AnyCPU /nologo /v:minimal
 if errorlevel 1 exit /b 1
 

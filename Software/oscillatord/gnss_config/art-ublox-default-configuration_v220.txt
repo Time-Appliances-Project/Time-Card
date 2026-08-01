@@ -1,0 +1,313 @@
+# TIM 2.20 (ZED-F9T), layer Flash
+# Note: When gnss-rtcm-enabled=true, UART1 output protocol becomes UBX,RTCM3
+# and RTCM messages below are enabled at rate=1 on UART1.
+UART1     115200  UBX                  UBX                 # default:    38400  UBX,NMEA,RTCM3       UBX,NMEA,RTCM3
+UART2      38400  RTCM3                RTCM3               # default:    38400  RTCM3                RTCM3
+SPI            -  UBX,NMEA,RTCM3       UBX,NMEA,RTCM3      # default:        -  UBX,NMEA,RTCM3       UBX,NMEA,RTCM3
+I2C            -  UBX,NMEA,RTCM3       UBX,NMEA,RTCM3      # default:        -  UBX,NMEA,RTCM3       UBX,NMEA,RTCM3
+USB            -  UBX,NMEA,RTCM3       UBX,NMEA,RTCM3      # default:        -  UBX,NMEA,RTCM3       UBX,NMEA,RTCM3
+NMEA-PUBX-POSITION         0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-PUBX-SVSTATUS         0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-PUBX-TIME             0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-STANDARD-DTM          0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-STANDARD-GBS          0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-STANDARD-GGA          0   0   0   0   0               # default:   1   1   1   1   1
+NMEA-STANDARD-GLL          0   0   0   0   0               # default:   1   1   1   1   1
+NMEA-STANDARD-GNS          0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-STANDARD-GRS          0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-STANDARD-GSA          0   0   0   0   0               # default:   1   1   1   1   1
+NMEA-STANDARD-GST          0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-STANDARD-GSV          0   0   0   0   0               # default:   1   1   1   1   1
+#NMEA-STANDARD-RLM          0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-STANDARD-RMC          0   0   0   0   0               # default:   1   1   1   1   1
+NMEA-STANDARD-VLW          0   0   0   0   0               # default:   0   0   0   0   0
+NMEA-STANDARD-VTG          0   0   0   0   0               # default:   1   1   1   1   1
+NMEA-STANDARD-ZDA          0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1005           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1074           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1077           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1084           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1087           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1094           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1097           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1124           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1127           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE1230           0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE4072_0         0   0   0   0   0               # default:   0   0   0   0   0
+RTCM-3X-TYPE4072_1         0   0   0   0   0               # default:   0   0   0   0   0
+UBX-LOG-INFO               0   0   0   0   0               # default:   0   0   0   0   0
+UBX-MON-COMMS              0   0   0   0   0               # default:   0   0   0   0   0
+UBX-MON-HW                 0   0   0   0   0               # default:   0   0   0   0   0
+UBX-MON-HW2                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-MON-HW3                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-MON-IO                 0   0   0   0   0               # default:   0   0   0   0   0
+UBX-MON-MSGPP              0   0   0   0   0               # default:   0   0   0   0   0
+UBX-MON-RF                 1   1   1   1   1               # default:   0   0   0   0   0
+UBX-MON-RXBUF              0   0   0   0   0               # default:   0   0   0   0   0
+UBX-MON-RXR                0   0   0   0   0               # default:   0   0   0   0   0
+#UBX-MON-SPAN               0   0   0   0   0               # default:   0   0   0   0   0
+UBX-MON-TXBUF              0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-CLOCK              0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-COV                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-DOP                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-EOE                1   1   1   1   1               # default:   0   0   0   0   0
+UBX-NAV-GEOFENCE           0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-ODO                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-ORB                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-POSECEF            0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-POSLLH             0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-PVT                1   1   1   1   1               # default:   0   0   0   0   0
+UBX-NAV-SAT                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-SBAS               0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-SIG                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-STATUS             0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-TIMEBDS            0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-TIMEGAL            0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-TIMEGLO            0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-TIMEGPS            0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-TIMELS             1   1   1   1   1               # default:   0   0   0   0   0
+UBX-NAV-TIMEUTC            1   1   1   1   1               # default:   0   0   0   0   0
+UBX-NAV-VELECEF            0   0   0   0   0               # default:   0   0   0   0   0
+UBX-NAV-VELNED             0   0   0   0   0               # default:   0   0   0   0   0
+UBX-RXM-MEASX              0   0   0   0   0               # default:   0   0   0   0   0
+UBX-RXM-RAWX               0   0   0   0   0               # default:   0   0   0   0   0
+UBX-RXM-RLM                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-RXM-RTCM               0   0   0   0   0               # default:   0   0   0   0   0
+UBX-RXM-SFRBX              0   0   0   0   0               # default:   0   0   0   0   0
+UBX-TIM-TM2                0   0   0   0   0               # default:   0   0   0   0   0
+UBX-TIM-TP                 1   1   1   1   1               # default:   0   0   0   0   0
+UBX-TIM-VRFY               0   0   0   0   0               # default:   0   0   0   0   0
+UBX-TIM-SVIN               1   1   1   1   1               # default:   0   0   0   0   0
+#CFG-BDS-USE_PRN_1_TO_5             true                    # default: true                      (type L)  # unsuported by cfgtool
+CFG-GEOFENCE-CONFLVL               L000                    # default: L000                      (type E1)
+CFG-GEOFENCE-USE_PIO               false                   # default: false                     (type L)
+CFG-GEOFENCE-PINPOL                LOW_IN                  # default: LOW_IN                    (type E1)
+CFG-GEOFENCE-PIN                   3                       # default: 3                         (type U1)
+CFG-GEOFENCE-USE_FENCE1            false                   # default: false                     (type L)
+CFG-GEOFENCE-FENCE1_LAT            0                       # default: 0                         (type I4 [deg])
+CFG-GEOFENCE-FENCE1_LON            0                       # default: 0                         (type I4 [deg])
+CFG-GEOFENCE-FENCE1_RAD            0                       # default: 0                         (type U4 [m])
+CFG-GEOFENCE-USE_FENCE2            false                   # default: false                     (type L)
+CFG-GEOFENCE-FENCE2_LAT            0                       # default: 0                         (type I4 [deg])
+CFG-GEOFENCE-FENCE2_LON            0                       # default: 0                         (type I4 [deg])
+CFG-GEOFENCE-FENCE2_RAD            0                       # default: 0                         (type U4 [m])
+CFG-GEOFENCE-USE_FENCE3            false                   # default: false                     (type L)
+CFG-GEOFENCE-FENCE3_LAT            0                       # default: 0                         (type I4 [deg])
+CFG-GEOFENCE-FENCE3_LON            0                       # default: 0                         (type I4 [deg])
+CFG-GEOFENCE-FENCE3_RAD            0                       # default: 0                         (type U4 [m])
+CFG-GEOFENCE-USE_FENCE4            false                   # default: false                     (type L)
+CFG-GEOFENCE-FENCE4_LAT            0                       # default: 0                         (type I4 [deg])
+CFG-GEOFENCE-FENCE4_LON            0                       # default: 0                         (type I4 [deg])
+CFG-GEOFENCE-FENCE4_RAD            0                       # default: 0                         (type U4 [m])
+CFG-HW-ANT_CFG_VOLTCTRL            false                   # default: false                     (type L)
+CFG-HW-ANT_CFG_SHORTDET            false                   # default: false                     (type L)
+CFG-HW-ANT_CFG_SHORTDET_POL        true                    # default: true                      (type L)
+CFG-HW-ANT_CFG_OPENDET             false                   # default: false                     (type L)
+CFG-HW-ANT_CFG_OPENDET_POL         true                    # default: true                      (type L)
+CFG-HW-ANT_CFG_PWRDOWN             false                   # default: false                     (type L)
+CFG-HW-ANT_CFG_PWRDOWN_POL         true                    # default: true                      (type L)
+CFG-HW-ANT_CFG_RECOVER             false                   # default: false                     (type L)
+CFG-HW-ANT_SUP_SWITCH_PIN          16                      # default: 16                        (type U1)
+CFG-HW-ANT_SUP_SHORT_PIN           15                      # default: 15                        (type U1)
+CFG-HW-ANT_SUP_OPEN_PIN            14                      # default: 14                        (type U1)
+CFG-HW-ANT_SUP_ENGINE              EXT                     # default: EXT                       (type E1)
+CFG-HW-ANT_SUP_SHORT_THR           0                       # default: 0                         (type U1 [mV])
+CFG-HW-ANT_SUP_OPEN_THR            0                       # default: 0                         (type U1 [mV])
+CFG-I2C-ADDRESS                    132                     # default: 132                       (type U1)
+CFG-I2C-EXTENDEDTIMEOUT            false                   # default: false                     (type L)
+CFG-I2C-ENABLED                    true                    # default: true                      (type L)
+CFG-INFMSG-UBX_I2C                 0x00                    # default: 0x00                      (type X1)
+CFG-INFMSG-UBX_UART1               0x00                    # default: 0x00                      (type X1)
+CFG-INFMSG-UBX_UART2               0x00                    # default: 0x00                      (type X1)
+CFG-INFMSG-UBX_USB                 0x00                    # default: 0x00                      (type X1)
+CFG-INFMSG-UBX_SPI                 0x00                    # default: 0x00                      (type X1)
+CFG-INFMSG-NMEA_I2C                ERROR|WARNING|NOTICE    # default: ERROR|WARNING|NOTICE      (type X1)
+CFG-INFMSG-NMEA_UART1              ERROR|WARNING|NOTICE    # default: ERROR|WARNING|NOTICE      (type X1)
+CFG-INFMSG-NMEA_UART2              ERROR|WARNING|NOTICE    # default: ERROR|WARNING|NOTICE      (type X1)
+CFG-INFMSG-NMEA_USB                ERROR|WARNING|NOTICE    # default: ERROR|WARNING|NOTICE      (type X1)
+CFG-INFMSG-NMEA_SPI                ERROR|WARNING|NOTICE    # default: ERROR|WARNING|NOTICE      (type X1)
+CFG-ITFM-BBTHRESHOLD               3                       # default: 3                         (type U1)
+CFG-ITFM-CWTHRESHOLD               15                      # default: 15                        (type U1)
+CFG-ITFM-ENABLE                    false                   # default: false                     (type L)
+CFG-ITFM-ANTSETTING                UNKNOWN                 # default: UNKNOWN                   (type E1)
+CFG-ITFM-ENABLE_AUX                false                   # default: false                     (type L)
+CFG-LOGFILTER-RECORD_ENA           false                   # default: false                     (type L)
+CFG-LOGFILTER-ONCE_PER_WAKE_UP_ENA false                   # default: false                     (type L)
+CFG-LOGFILTER-APPLY_ALL_FILTERS    false                   # default: false                     (type L)
+CFG-LOGFILTER-MIN_INTERVAL         0                       # default: 0                         (type U2 [s])
+CFG-LOGFILTER-TIME_THRS            0                       # default: 0                         (type U2 [s])
+CFG-LOGFILTER-SPEED_THRS           0                       # default: 0                         (type U2 [m/s])
+CFG-LOGFILTER-POSITION_THRS        0                       # default: 0                         (type U4 [m])
+CFG-MOT-GNSSSPEED_THRS             0                       # default: 0                         (type U1 [m/s])
+CFG-MOT-GNSSDIST_THRS              0                       # default: 0                         (type U2)
+CFG-NAVSPG-FIXMODE                 AUTO                    # default: AUTO                      (type E1)
+CFG-NAVSPG-INIFIX3D                false                   # default: false                     (type L)
+CFG-NAVSPG-WKNROLLOVER             2185                    # default: 2185                      (type U2)
+CFG-NAVSPG-USE_PPP                 true                    # default: true                      (type L)
+CFG-NAVSPG-UTCSTANDARD             AUTO                    # default: AUTO                      (type E1)
+CFG-NAVSPG-DYNMODEL                STAT                    # default: STAT                      (type E1)
+CFG-NAVSPG-ACKAIDING               false                   # default: false                     (type L)
+CFG-NAVSPG-USE_USRDAT              false                   # default: false                     (type L)
+CFG-NAVSPG-USRDAT_MAJA             6378137                 # default: 6378137                   (type R8 [m])
+CFG-NAVSPG-USRDAT_FLAT             298.25722356300002502393908798694610595703125 # default: 298.25722356300002502393908798694610595703125 (type R8)
+CFG-NAVSPG-USRDAT_DX               0                       # default: 0                         (type R4 [m])
+CFG-NAVSPG-USRDAT_DY               0                       # default: 0                         (type R4 [m])
+CFG-NAVSPG-USRDAT_DZ               0                       # default: 0                         (type R4 [m])
+CFG-NAVSPG-USRDAT_ROTX             0                       # default: 0                         (type R4 [arcsec])
+CFG-NAVSPG-USRDAT_ROTY             0                       # default: 0                         (type R4 [arcsec])
+CFG-NAVSPG-USRDAT_ROTZ             0                       # default: 0                         (type R4 [arcsec])
+CFG-NAVSPG-USRDAT_SCALE            0                       # default: 0                         (type R4 [ppm])
+CFG-NAVSPG-INFIL_MINSVS            1                       # default: 1                         (type U1)
+CFG-NAVSPG-INFIL_MAXSVS            32                      # default: 32                        (type U1)
+CFG-NAVSPG-INFIL_MINCNO            9                       # default: 9                         (type U1 [dBHz])
+CFG-NAVSPG-INFIL_MINELEV           10                      # default: 10                        (type I1 [deg])
+CFG-NAVSPG-INFIL_NCNOTHRS          0                       # default: 0                         (type U1)
+CFG-NAVSPG-INFIL_CNOTHRS           0                       # default: 0                         (type U1)
+CFG-NAVSPG-OUTFIL_PDOP             250                     # default: 250                       (type U2, 0.1)
+CFG-NAVSPG-OUTFIL_TDOP             250                     # default: 250                       (type U2, 0.1)
+CFG-NAVSPG-OUTFIL_PACC             100                     # default: 100                       (type U2 [m])
+CFG-NAVSPG-OUTFIL_TACC             350                     # default: 350                       (type U2 [m])
+CFG-NAVSPG-OUTFIL_FACC             150                     # default: 150                       (type U2 [m/s])
+CFG-NAVSPG-CONSTR_ALT              0                       # default: 0                         (type I4 [m])
+CFG-NAVSPG-CONSTR_ALTVAR           10000                   # default: 10000                     (type U4 [m^2])
+CFG-NAVSPG-CONSTR_DGNSSTO          60                      # default: 60                        (type U1 [s])
+CFG-NMEA-PROTVER                   V411                    # default: V411                      (type E1)
+CFG-NMEA-MAXSVS                    UNLIM                   # default: UNLIM                     (type E1)
+CFG-NMEA-COMPAT                    false                   # default: false                     (type L)
+CFG-NMEA-CONSIDER                  true                    # default: true                      (type L)
+CFG-NMEA-LIMIT82                   false                   # default: false                     (type L)
+CFG-NMEA-HIGHPREC                  false                   # default: false                     (type L)
+CFG-NMEA-SVNUMBERING               STRICT                  # default: STRICT                    (type E1)
+CFG-NMEA-FILT_GPS                  false                   # default: false                     (type L)
+CFG-NMEA-FILT_SBAS                 false                   # default: false                     (type L)
+CFG-NMEA-FILT_GAL                  false                   # default: false                     (type L)
+CFG-NMEA-FILT_QZSS                 false                   # default: false                     (type L)
+CFG-NMEA-FILT_GLO                  false                   # default: false                     (type L)
+CFG-NMEA-FILT_BDS                  false                   # default: false                     (type L)
+CFG-NMEA-OUT_INVFIX                false                   # default: false                     (type L)
+CFG-NMEA-OUT_MSKFIX                false                   # default: false                     (type L)
+CFG-NMEA-OUT_INVTIME               false                   # default: false                     (type L)
+CFG-NMEA-OUT_INVDATE               false                   # default: false                     (type L)
+CFG-NMEA-OUT_ONLYGPS               false                   # default: false                     (type L)
+CFG-NMEA-OUT_FROZENCOG             false                   # default: false                     (type L)
+CFG-NMEA-MAINTALKERID              AUTO                    # default: AUTO                      (type E1)
+CFG-NMEA-GSVTALKERID               GNSS                    # default: GNSS                      (type E1)
+CFG-NMEA-BDSTALKERID               0                       # default: 0                         (type U2)
+CFG-ODO-USE_ODO                    false                   # default: false                     (type L)
+CFG-ODO-USE_COG                    false                   # default: false                     (type L)
+CFG-ODO-OUTLPVEL                   false                   # default: false                     (type L)
+CFG-ODO-OUTLPCOG                   false                   # default: false                     (type L)
+CFG-ODO-PROFILE                    RUN                     # default: RUN                       (type E1)
+CFG-ODO-COGMAXSPEED                10                      # default: 10                        (type U1 [m/s])
+CFG-ODO-COGMAXPOSACC               50                      # default: 50                        (type U1)
+CFG-ODO-VELLPGAIN                  153                     # default: 153                       (type U1)
+CFG-ODO-COGLPGAIN                  76                      # default: 76                        (type U1)
+CFG-RATE-MEAS                      1000                    # default: 1000                      (type U2 [s])
+CFG-RATE-NAV                       1                       # default: 1                         (type U2)
+CFG-RATE-TIMEREF                   GPS                     # default: GPS                       (type E1)
+CFG-RINV-DUMP                      false                   # default: false                     (type L)
+CFG-RINV-BINARY                    false                   # default: false                     (type L)
+CFG-RINV-DATA_SIZE                 22                      # default: 22                        (type U1)
+CFG-RINV-CHUNK0                    0x203a656369746f4e      # default: 0x203a656369746f4e        (type X8)
+CFG-RINV-CHUNK1                    0x2061746164206f6e      # default: 0x2061746164206f6e        (type X8)
+CFG-RINV-CHUNK2                    0x0000216465766173      # default: 0x0000216465766173        (type X8)
+CFG-RINV-CHUNK3                    0x0000000000000000      # default: 0x0000000000000000        (type X8)
+CFG-RTCM-DF003_OUT                 0                       # default: 0                         (type U2)
+CFG-RTCM-DF003_IN                  0                       # default: 0                         (type U2)
+CFG-RTCM-DF003_IN_FILTER           DISABLED                # default: DISABLED                  (type E1)
+CFG-SBAS-USE_TESTMODE              false                   # default: false                     (type L)
+CFG-SBAS-USE_RANGING               true                    # default: true                      (type L)
+CFG-SBAS-USE_DIFFCORR              true                    # default: true                      (type L)
+CFG-SBAS-USE_INTEGRITY             false                   # default: false                     (type L)
+CFG-SBAS-PRNSCANMASK               PRN123|PRN127|PRN128|PRN129|PRN131|PRN133|PRN136|PRN137|PRN138 # default: PRN123|PRN127|PRN128|PRN129|PRN131|PRN133|PRN136|PRN137|PRN138 (type X8)
+CFG-SEC-CFG_LOCK                   false                   # default: false                     (type L)
+CFG-SEC-CFG_LOCK_UNLOCKGRP1        0                       # default: 0                         (type U2)
+CFG-SEC-CFG_LOCK_UNLOCKGRP2        0                       # default: 0                         (type U2)
+CFG-SIGNAL-GPS_ENA                 true                    # default: true                      (type L)
+CFG-SIGNAL-GPS_L1CA_ENA            true                    # default: true                      (type L)
+CFG-SIGNAL-GPS_L2C_ENA             true                    # default: true                      (type L)
+CFG-SIGNAL-SBAS_ENA                true                    # default: true                      (type L)
+CFG-SIGNAL-SBAS_L1CA_ENA           false                   # default: false                     (type L)
+CFG-SIGNAL-GAL_ENA                 true                    # default: true                      (type L)
+CFG-SIGNAL-GAL_E1_ENA              true                    # default: true                      (type L)
+CFG-SIGNAL-GAL_E5B_ENA             true                    # default: true                      (type L)
+CFG-SIGNAL-BDS_ENA                 true                    # default: true                      (type L)
+CFG-SIGNAL-BDS_B1_ENA              true                    # default: true                      (type L)
+CFG-SIGNAL-BDS_B2_ENA              true                    # default: true                      (type L)
+CFG-SIGNAL-QZSS_ENA                true                    # default: true                      (type L)
+CFG-SIGNAL-QZSS_L1CA_ENA           true                    # default: true                      (type L)
+CFG-SIGNAL-QZSS_L2C_ENA            true                    # default: true                      (type L)
+CFG-SIGNAL-GLO_ENA                 true                    # default: true                      (type L)
+CFG-SIGNAL-GLO_L1_ENA              true                    # default: true                      (type L)
+CFG-SIGNAL-GLO_L2_ENA              true                    # default: true                      (type L)
+CFG-SPI-MAXFF                      50                      # default: 50                        (type U1)
+CFG-SPI-CPOLARITY                  false                   # default: false                     (type L)
+CFG-SPI-CPHASE                     false                   # default: false                     (type L)
+CFG-SPI-EXTENDEDTIMEOUT            false                   # default: false                     (type L)
+CFG-SPI-ENABLED                    false                   # default: false                     (type L)
+CFG-TMODE-MODE                     SURVEY_IN               # default: DISABLED                  (type E1)
+CFG-TMODE-POS_TYPE                 ECEF                    # default: ECEF                      (type E1)
+CFG-TMODE-ECEF_X                   0                       # default: 0                         (type I4 [cm])
+CFG-TMODE-ECEF_Y                   0                       # default: 0                         (type I4 [cm])
+CFG-TMODE-ECEF_Z                   0                       # default: 0                         (type I4 [cm])
+CFG-TMODE-ECEF_X_HP                0                       # default: 0                         (type I1 [mm])
+CFG-TMODE-ECEF_Y_HP                0                       # default: 0                         (type I1 [mm])
+CFG-TMODE-ECEF_Z_HP                0                       # default: 0                         (type I1 [mm])
+CFG-TMODE-LAT                      0                       # default: 0                         (type I4 [deg])
+CFG-TMODE-LON                      0                       # default: 0                         (type I4 [deg])
+CFG-TMODE-HEIGHT                   0                       # default: 0                         (type I4 [cm])
+CFG-TMODE-LAT_HP                   0                       # default: 0                         (type I1 [deg])
+CFG-TMODE-LON_HP                   0                       # default: 0                         (type I1 [deg])
+CFG-TMODE-HEIGHT_HP                0                       # default: 0                         (type I1 [mm])
+CFG-TMODE-FIXED_POS_ACC            0                       # default: 0                         (type U4 [mm])
+CFG-TMODE-SVIN_MIN_DUR             1200                    # default: 0                         (type U4 [s])
+CFG-TMODE-SVIN_ACC_LIMIT           90000                   # default: 0                         (type U4 [mm])
+CFG-TP-PULSE_DEF                   PERIOD                  # default: PERIOD                    (type E1)
+CFG-TP-PULSE_LENGTH_DEF            LENGTH                  # default: LENGTH                    (type E1)
+CFG-TP-ANT_CABLEDELAY              50                      # default: 50                        (type I2 [s])
+CFG-TP-PERIOD_TP1                  1000000                 # default: 1000000                   (type U4 [s]) ?
+CFG-TP-PERIOD_LOCK_TP1             1000000                 # default: 1000000                   (type U4 [s])
+CFG-TP-FREQ_TP1                    1                       # default: 1                         (type U4 [Hz])
+CFG-TP-FREQ_LOCK_TP1               1                       # default: 1                         (type U4 [Hz])
+CFG-TP-LEN_TP1                     0                       # default: 0                         (type U4 [s])
+CFG-TP-LEN_LOCK_TP1                100000                  # default: 100000                    (type U4 [s])
+CFG-TP-DUTY_TP1                    0                       # default: 0                         (type R8 [%])
+CFG-TP-DUTY_LOCK_TP1               10                      # default: 10                        (type R8 [%])
+CFG-TP-USER_DELAY_TP1              0                       # default: 0                         (type I4 [s])
+CFG-TP-TP1_ENA                     true                    # default: true                      (type L)
+CFG-TP-SYNC_GNSS_TP1               true                    # default: true                      (type L)
+CFG-TP-USE_LOCKED_TP1              true                    # default: true                      (type L)
+CFG-TP-ALIGN_TO_TOW_TP1            true                    # default: true                      (type L)
+CFG-TP-POL_TP1                     true                    # default: true                      (type L)
+CFG-TP-TIMEGRID_TP1                GPS                     # default: GPS                       (type E1)
+CFG-TXREADY-ENABLED                false                   # default: false                     (type L)
+CFG-TXREADY-POLARITY               false                   # default: false                     (type L)
+CFG-TXREADY-PIN                    0                       # default: 0                         (type U1)
+CFG-TXREADY-THRESHOLD              0                       # default: 0                         (type U2)
+CFG-TXREADY-INTERFACE              I2C                     # default: I2C                       (type E1)
+CFG-UART1-STOPBITS                 ONE                     # default: ONE                       (type E1)
+CFG-UART1-DATABITS                 EIGHT                   # default: EIGHT                     (type E1)
+CFG-UART1-PARITY                   NONE                    # default: NONE                      (type E1)
+CFG-UART1-ENABLED                  true                    # default: true                      (type L)
+CFG-UART2-STOPBITS                 ONE                     # default: ONE                       (type E1)
+CFG-UART2-DATABITS                 EIGHT                   # default: EIGHT                     (type E1)
+CFG-UART2-PARITY                   NONE                    # default: NONE                      (type E1)
+CFG-UART2-ENABLED                  true                    # default: true                      (type L)
+CFG-UART2-REMAP                    false                   # default: false                     (type L)
+CFG-USB-ENABLED                    true                    # default: true                      (type L)
+CFG-USB-SELFPOW                    true                    # default: true                      (type L)
+CFG-USB-VENDOR_ID                  5446                    # default: 5446                      (type U2)
+CFG-USB-PRODUCT_ID                 425                     # default: 425                       (type U2)
+CFG-USB-POWER                      0                       # default: 0                         (type U2 [mA])
+CFG-USB-VENDOR_STR0                0x4120786f6c622d75      # default: 0x4120786f6c622d75        (type X8)
+CFG-USB-VENDOR_STR1                0x2e777777202d2047      # default: 0x2e777777202d2047        (type X8)
+CFG-USB-VENDOR_STR2                0x632e786f6c622d75      # default: 0x632e786f6c622d75        (type X8)
+CFG-USB-VENDOR_STR3                0x0000000000006d6f      # default: 0x0000000000006d6f        (type X8)
+CFG-USB-PRODUCT_STR0               0x4720786f6c622d75      # default: 0x4720786f6c622d75        (type X8)
+CFG-USB-PRODUCT_STR1               0x656365722053534e      # default: 0x656365722053534e        (type X8)
+CFG-USB-PRODUCT_STR2               0x0000000072657669      # default: 0x0000000072657669        (type X8)
+CFG-USB-PRODUCT_STR3               0x0000000000000000      # default: 0x0000000000000000        (type X8)
+CFG-USB-SERIAL_NO_STR0             0x0000000000000000      # default: 0x0000000000000000        (type X8)
+CFG-USB-SERIAL_NO_STR1             0x0000000000000000      # default: 0x0000000000000000        (type X8)
+CFG-USB-SERIAL_NO_STR2             0x0000000000000000      # default: 0x0000000000000000        (type X8)
+CFG-USB-SERIAL_NO_STR3             0x0000000000000000      # default: 0x0000000000000000        (type X8)

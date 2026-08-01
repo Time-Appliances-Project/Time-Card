@@ -1,0 +1,25 @@
+Source: oscillatord
+Section: misc
+Priority: optional
+Maintainer: Nicolas Bourdaud <nicolas.bourdaud@fr.nav-timing.safrangroup.com>
+Build-Depends: debhelper-compat (= 13),
+ cmake, pkg-config,
+ libjson-c-dev, libubloxcfg-dev, liboscillator-disciplining-dev, pps-tools
+Standards-Version: 4.5.0
+Rules-Requires-Root: no
+Homepage: https://github.com/Orolia2s/oscillatord
+
+Package: oscillatord
+Architecture: any
+Pre-Depends: ${misc:Pre-Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: daemon for disciplining an oscillator
+ Oscillatord aims at disciplining an oscillator to an external reference. It is
+ responsible for fetching oscillator and reference data and pass them to a
+ disciplining algorithm, and apply the decision of the algorithm regarding the
+ oscillator.
+ .
+ It can be used to discipline the Atomic Reference Time Card from Orolia
+ .
+ Oscillatord can either be used to discipline and/or monitor a oscillatord a
+ GNSS external reference.

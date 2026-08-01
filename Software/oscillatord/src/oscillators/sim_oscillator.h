@@ -1,0 +1,6 @@
+#ifndef SRC_OSCILLATORS_SIM_OSCILLATOR_H_
+#define SRC_OSCILLATORS_SIM_OSCILLATOR_H_
+
+#define CONTROL_FIFO_PATH "oscillator_sim.control"
+
+#endif /* SRC_OSCILLATORS_SIM_OSCILLATOR_H_ */

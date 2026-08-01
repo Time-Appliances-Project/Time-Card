@@ -55,6 +55,9 @@ try {
     $hasCelesticaProfile = $devices | Where-Object {
         $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
     }
+    $hasArtProfile = $devices | Where-Object {
+        $_.InstanceId -like 'PCI\VEN_1AD7&DEV_A000*'
+    }
     if ($hasFbProfile) {
         $expectedChildren += @(
             'TIMECARD\TOD\*',
@@ -84,9 +87,29 @@ try {
     $statusExitCode = $LASTEXITCODE
     $statusOutput | Out-Host
     if ($statusExitCode -ne 0) { throw 'timecardctl status failed.' }
-    if ($hasCelesticaProfile -and
-        ($statusOutput -join "`n") -notmatch 'ABI:\s+10\b') {
-        throw 'Celestica R4006 requires the running ABI 10 driver. Reboot or restart the controller to finish the driver replacement.'
+    if (($statusOutput -join "`n") -notmatch 'ABI:\s+11\b') {
+        throw 'Native oscillator discipline requires the running ABI 11 driver. Reboot or restart the controller to finish the driver replacement.'
+    }
+    $capabilityOutput = & $tool capabilities 2>&1
+    $capabilityExitCode = $LASTEXITCODE
+    $capabilityOutput | Out-Host
+    if ($capabilityExitCode -ne 0) {
+        throw 'timecardctl capabilities failed.'
+    }
+    if ($hasArtProfile) {
+        $capabilityText = $capabilityOutput -join "`n"
+        if ($capabilityText -notmatch
+                'Board profile:\s+Orolia/Safran ART' -or
+            $capabilityText -notmatch
+                'Paired PPS phase meter\s+yes' -or
+            $capabilityText -notmatch
+                'Direct mRO-50 control\s+yes') {
+            throw 'The Orolia ART oscillator-discipline capabilities are not active.'
+        }
+        & $tool phase-status
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Orolia ART paired-PPS phase query failed.'
+        }
     }
     & $tool get
     if ($LASTEXITCODE -ne 0) { throw 'timecardctl get failed.' }

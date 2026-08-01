@@ -97,6 +97,15 @@
                 <Setter Property="SelectionBrush" Value="#5969C441" />
             </Style>
 
+            <Style TargetType="PasswordBox">
+                <Setter Property="Background" Value="#091522" />
+                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="11,8" />
+                <Setter Property="CaretBrush" Value="{DynamicResource AccentBrush}" />
+            </Style>
+
             <Style TargetType="ComboBoxItem">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />

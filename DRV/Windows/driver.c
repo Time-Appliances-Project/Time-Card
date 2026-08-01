@@ -281,6 +281,8 @@ TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
     context->ArtSma = NULL;
     context->ArtBoardConfig = NULL;
     context->Mro50 = NULL;
+    context->PhaseReference = NULL;
+    context->PhaseOscillator = NULL;
     context->I2c = NULL;
     context->Flash = NULL;
     context->I2cKnownDeviceMask = 0;
@@ -332,6 +334,18 @@ TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
                           sizeof(TIMECARD_MRO50_REG))) {
         context->Mro50 = (volatile TIMECARD_MRO50_REG *)(
             context->Bar0Base + TIMECARD_MRO50_OFFSET_ART);
+    }
+    if (TimeCardRangeFits(context->Bar0Length,
+                          TIMECARD_PHASE_REFERENCE_OFFSET_ART,
+                          sizeof(TIMECARD_TIMESTAMP_REG))) {
+        context->PhaseReference = (volatile TIMECARD_TIMESTAMP_REG *)(
+            context->Bar0Base + TIMECARD_PHASE_REFERENCE_OFFSET_ART);
+    }
+    if (TimeCardRangeFits(context->Bar0Length,
+                          TIMECARD_PHASE_OSCILLATOR_OFFSET_ART,
+                          sizeof(TIMECARD_TIMESTAMP_REG))) {
+        context->PhaseOscillator = (volatile TIMECARD_TIMESTAMP_REG *)(
+            context->Bar0Base + TIMECARD_PHASE_OSCILLATOR_OFFSET_ART);
     }
     if (TimeCardRangeFits(context->Bar0Length, context->I2cOffset, 0x100u))
         context->I2c = context->Bar0Base + context->I2cOffset;
@@ -656,7 +670,6 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
         context->Bar0Length = 0;
         return status;
     }
-
     status = TimeCardCreateUartInterrupts(
         context, resourcesRaw, resourcesTranslated);
     if (!NT_SUCCESS(status)) {
@@ -695,6 +708,8 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
     context->ArtSma = NULL;
     context->ArtBoardConfig = NULL;
     context->Mro50 = NULL;
+    context->PhaseReference = NULL;
+    context->PhaseOscillator = NULL;
     context->I2c = NULL;
     context->Flash = NULL;
     context->FlashJedecId = 0;
@@ -719,6 +734,8 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 {
     PDEVICE_CONTEXT context = DeviceGetContext(device);
     TIMECARD_UART_CONFIG uartConfig;
+    TIMECARD_PHASE_CONTROL phaseRequest;
+    TIMECARD_PHASE_CONTROL phaseResponse;
     NTSTATUS status;
 
     UNREFERENCED_PARAMETER(previousState);
@@ -754,6 +771,19 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
         KdPrint(("timecard: NMEA output initialization unavailable, "
                  "status 0x%08lx\n", status));
     }
+    if (context->PhaseCaptureEnabled) {
+        RtlZeroMemory(&phaseRequest, sizeof(phaseRequest));
+        phaseRequest.Size = sizeof(phaseRequest);
+        phaseRequest.Action = TIMECARD_PHASE_CONTROL_ENABLE;
+        phaseRequest.ReferencePolarity = context->PhaseReferencePolarity;
+        phaseRequest.OscillatorPolarity = context->PhaseOscillatorPolarity;
+        status = TimeCardPhaseControl(
+            context, &phaseRequest, &phaseResponse);
+        if (!NT_SUCCESS(status)) {
+            KdPrint(("timecard: phase capture resume unavailable, "
+                     "status 0x%08lx\n", status));
+        }
+    }
     return STATUS_SUCCESS;
 }
 
@@ -763,6 +793,7 @@ TimeCardEvtD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
     PDEVICE_CONTEXT context = DeviceGetContext(device);
 
     TimeCardUartDisableInterrupts(context);
+    TimeCardPhaseSuspend(context);
     UNREFERENCED_PARAMETER(targetState);
     return STATUS_SUCCESS;
 }

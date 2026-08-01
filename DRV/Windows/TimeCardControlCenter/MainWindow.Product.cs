@@ -228,6 +228,7 @@ namespace TimeCardControlCenter
             RadioButton navigation = workspace == "Clock" ? ClockNav :
                 workspace == "Gnss" ? GnssNav :
                 workspace == "Atomic" ? AtomicNav :
+                workspace == "Oscillatord" ? OscillatordNav :
                 workspace == "Uart" ? UartNav :
                 workspace == "Sma" ? SmaNav :
                 workspace == "Timing" ? TimingNav :
@@ -1051,7 +1052,7 @@ namespace TimeCardControlCenter
             ClockChipText.Text = "SIMULATED · IN SYNC";
             ClockChipText.Foreground = healthy;
             HierarchyOverviewText.Text = "DEMO";
-            SidebarDriverText.Text = "Demo data · ABI 10";
+            SidebarDriverText.Text = "Demo data · ABI 11";
             SidebarSerialText.Text = "DEMO-TIMECARD-0001";
             if (!telemetryPaused)
             {
@@ -1088,7 +1089,11 @@ namespace TimeCardControlCenter
             if (telemetrySession.IsRecording)
                 TelemetrySampleCountText.Text = telemetrySession.Points.Count.ToString(
                     CultureInfo.InvariantCulture) + " samples recorded";
+            Stopwatch sensorSampleTimer = Stopwatch.StartNew();
             UpdateDemoCelesticaSensors();
+            sensorSampleTimer.Stop();
+            RecordSensorSamplingDuration(
+                sensorSampleTimer.Elapsed.TotalMilliseconds, true);
             UpdateHealthExperience();
             LastRefreshText.Text = "Demo sample " + DateTime.Now.ToString("HH:mm:ss",
                 CultureInfo.InvariantCulture);
@@ -1164,6 +1169,15 @@ namespace TimeCardControlCenter
                     QuaternionW = quaternionW
                 }
             };
+            if (startupArguments.Any(argument => string.Equals(argument,
+                    "--demo-no-imu", StringComparison.OrdinalIgnoreCase)))
+            {
+                raw.Imu = new TimeCardBno055ReadingRaw
+                {
+                    Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf(
+                        typeof(TimeCardBno055ReadingRaw))
+                };
+            }
             ApplySensorTelemetry(new SensorTelemetrySnapshot(raw));
         }
 

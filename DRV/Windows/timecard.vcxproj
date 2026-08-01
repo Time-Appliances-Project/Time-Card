@@ -61,6 +61,7 @@
   <ItemGroup>
     <ClCompile Include="bus.c" />
     <ClCompile Include="driver.c" />
+    <ClCompile Include="discipline.c" />
     <ClCompile Include="flash.c" />
     <ClCompile Include="flash_altera.c" />
     <ClCompile Include="i2c.c" />

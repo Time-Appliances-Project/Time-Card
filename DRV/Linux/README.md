@@ -79,6 +79,42 @@ After the driver loads, the card exposes:
 Standard `linuxptp` tools such as `phc2sys`, `ptp4l`, and `ts2phc` can use the
 PHC.
 
+## Oscillator disciplining service
+
+The repository includes the complete Orolia/Safran
+[`oscillatord`](../../Software/oscillatord) v3.10.0 source. On an ART card it
+disciplines the mRO-50 from GNSS and PHC external timestamps, initializes the
+PHC, exports PPS to NTP shared memory, and serves live monitoring telemetry.
+The integrated backend prefers this driver's `/dev/mro50.N` IOCTL bridge and
+falls back to `ttyMAC` only when the direct bridge is absent.
+
+Install Linux prerequisites on Debian or Ubuntu, then build all pinned source
+dependencies into an isolated prefix:
+
+```sh
+sudo apt-get install build-essential cmake git pkg-config libjson-c-dev \
+  pps-tools libsystemd-dev libpath-tiny-perl libdata-float-perl
+cd Software/oscillatord
+bash ./tools/build-timecard.sh
+```
+
+For a system installation, use `sudo bash ./tools/install-timecard.sh`, review
+`/etc/oscillatord.conf`, and only then run:
+
+```sh
+sudo systemctl enable --now oscillatord.service
+systemctl status oscillatord.service
+journalctl -u oscillatord.service -f
+```
+
+Monitoring binds to `127.0.0.1:2958` by default. State-changing requests are
+disabled unless `monitoring-allow-control=true`; a long
+`monitoring-control-token` is strongly recommended before exposing the endpoint
+to the Control Center on another host. The protocol itself is not encrypted;
+prefer an SSH tunnel such as `ssh -L 2958:127.0.0.1:2958 timecard-host` and keep
+the Control Center endpoint at `127.0.0.1:2958`. Otherwise, restrict TCP/2958
+to the management network with the host firewall.
+
 ## Upstream kernel support
 
 - [Initial driver in Linux 5.2](https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net-next.git/commit/?id=a7e1abad13f3f0366ee625831fecda2b603cdc17)

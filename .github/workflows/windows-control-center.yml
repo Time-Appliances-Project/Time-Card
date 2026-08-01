@@ -1,0 +1,37 @@
+name: Windows Control Center
+
+on:
+  push:
+    paths:
+      - "DRV/Windows/**"
+      - "Software/oscillatord/third_party/disciplining-minipod/**"
+      - ".github/workflows/windows-control-center.yml"
+  pull_request:
+    paths:
+      - "DRV/Windows/**"
+      - "Software/oscillatord/third_party/disciplining-minipod/**"
+      - ".github/workflows/windows-control-center.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native miniCOD DLL and Control Center
+        shell: cmd
+        working-directory: DRV/Windows
+        run: build-gui.cmd release
+      - name: Run native discipline and product tests
+        shell: powershell
+        working-directory: DRV/Windows
+        run: |
+          .\tools\test-native-discipline.ps1
+          .\tools\test-oscillatord-client.ps1
+          .\tools\test-control-center-product.ps1
+          .\tools\test-ublox-decoder.ps1
+          .\tools\test-ublox-f9t.ps1
+          .\tools\test-board-profiles.ps1

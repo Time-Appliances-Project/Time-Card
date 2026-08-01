@@ -79,8 +79,8 @@ Assert-Match $headerSource 'TIMECARD_MRO50_OFFSET_ART\s+0x00340000u' `
     'ART direct mRO-50 bridge offset is missing'
 Assert-Match $headerSource 'TIMECARD_BOARD_CONFIG_OFFSET_ART\s+0x00210000u' `
     'ART board-configuration offset is missing'
-Assert-Match $abiSource 'TIMECARD_ABI_VERSION\s+10u' `
-    'Celestica sensor support did not advance the public ABI'
+Assert-Match $abiSource 'TIMECARD_ABI_VERSION\s+11u' `
+    'Native discipline support did not advance the public ABI'
 Assert-Match $mroSource 'TimeCardMro50Query' `
     'ART mRO-50 query implementation is missing'
 Assert-Match $projectSource 'i2c_ocores\.c' `
@@ -125,8 +125,11 @@ Assert-Match $i2cSource `
     'TIMECARD_BOARD_CELESTICA[\s\S]*logicalLed\s*!=\s*TIMECARD_LED_GNSS2' `
     'Celestica unused OUT16-18 group is not capability-gated'
 Assert-Match $verifySource `
-    'hasCelesticaProfile[\s\S]*ABI:\\s\+10[\s\S]*Celestica R4006' `
-    'live verification does not reject an old driver on Celestica'
+    'ABI:\\s\+11[\s\S]*Native oscillator discipline requires the running ABI 11 driver' `
+    'live verification does not reject a pre-discipline driver'
+Assert-Match $verifySource `
+    'hasArtProfile[\s\S]*Paired PPS phase meter\\s\+yes[\s\S]*Direct mRO-50 control\\s\+yes' `
+    'live verification does not validate ART discipline capabilities'
 Assert-Match $busSource '\*enabled\s*=\s*TRUE;[\s\S]*STATUS_OBJECT_NAME_NOT_FOUND' `
     'new supported cards do not default to the full Device Manager hierarchy'
 Assert-Match $i2cSource 'TimeCardMonitorBranchResolveLocked' `

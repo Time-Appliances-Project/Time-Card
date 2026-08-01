@@ -50,6 +50,8 @@ extern const GUID GUID_DEVCLASS_TIMECARD;
 #define TIMECARD_FLASH_OFFSET_ART       0x00310000u
 #define TIMECARD_BOARD_CONFIG_OFFSET_ART 0x00210000u
 #define TIMECARD_MRO50_OFFSET_ART       0x00340000u
+#define TIMECARD_PHASE_REFERENCE_OFFSET_ART  0x00360000u
+#define TIMECARD_PHASE_OSCILLATOR_OFFSET_ART 0x00330000u
 
 #define TIMECARD_REGISTER_WINDOW_SIZE   0x00010000u
 #define TIMECARD_UART_CLOCK_HZ          50000000u
@@ -165,6 +167,25 @@ typedef struct _TIMECARD_MRO50_REG {
     ULONG Temperature;
 } TIMECARD_MRO50_REG, *PTIMECARD_MRO50_REG;
 
+typedef struct _TIMECARD_TIMESTAMP_REG {
+    ULONG Enable;
+    ULONG Error;
+    ULONG Polarity;
+    ULONG Version;
+    ULONG Reserved0[4];
+    ULONG CableDelay;
+    ULONG Reserved1[3];
+    ULONG Interrupt;
+    ULONG InterruptMask;
+    ULONG EventCount;
+    ULONG Reserved2;
+    ULONG TimestampCount;
+    ULONG TimeNanoseconds;
+    ULONG TimeSeconds;
+    ULONG DataWidth;
+    ULONG Data;
+} TIMECARD_TIMESTAMP_REG, *PTIMECARD_TIMESTAMP_REG;
+
 typedef struct _DEVICE_CONTEXT {
     WDFDEVICE Device;
     volatile UCHAR *Bar0Base;
@@ -177,6 +198,8 @@ typedef struct _DEVICE_CONTEXT {
     volatile TIMECARD_ART_SMA_REG *ArtSma;
     volatile ULONG *ArtBoardConfig;
     volatile TIMECARD_MRO50_REG *Mro50;
+    volatile TIMECARD_TIMESTAMP_REG *PhaseReference;
+    volatile TIMECARD_TIMESTAMP_REG *PhaseOscillator;
     volatile TIMECARD_SIGNAL_REG *Signal[TIMECARD_SIGNAL_COUNT];
     volatile TIMECARD_FREQUENCY_REG *Frequency[TIMECARD_FREQUENCY_COUNT];
     volatile UCHAR *I2c;
@@ -221,6 +244,9 @@ typedef struct _DEVICE_CONTEXT {
     UCHAR PciRevision;
     BOOLEAN HardwareReady;
     BOOLEAN HierarchyCreated;
+    BOOLEAN PhaseCaptureEnabled;
+    UCHAR PhaseReferencePolarity;
+    UCHAR PhaseOscillatorPolarity;
     WDFDEVICE ChildDevices[TIMECARD_SUBSYSTEM_COUNT];
     WDFWAITLOCK RegisterLock;
     WDFINTERRUPT UartInterrupt[TIMECARD_UART_INTERRUPT_OBJECTS];
@@ -363,6 +389,22 @@ NTSTATUS TimeCardMro50Query(PDEVICE_CONTEXT context,
 NTSTATUS TimeCardMro50Control(PDEVICE_CONTEXT context,
                               const TIMECARD_MRO50_CONTROL *control,
                               TIMECARD_MRO50_STATUS *status);
+NTSTATUS TimeCardGetCapabilities(PDEVICE_CONTEXT context,
+                                 TIMECARD_CAPABILITIES *capabilities);
+NTSTATUS TimeCardPhaseQuery(PDEVICE_CONTEXT context,
+                            TIMECARD_PHASE_SAMPLE *sample);
+NTSTATUS TimeCardPhaseControl(PDEVICE_CONTEXT context,
+                              const TIMECARD_PHASE_CONTROL *request,
+                              TIMECARD_PHASE_CONTROL *response);
+VOID TimeCardPhaseSuspend(PDEVICE_CONTEXT context);
+NTSTATUS TimeCardAdjustPhc(PDEVICE_CONTEXT context,
+                           const TIMECARD_PHC_ADJUST *request,
+                           TIMECARD_PHC_ADJUST *response);
+NTSTATUS TimeCardDisciplineRead(PDEVICE_CONTEXT context,
+                                TIMECARD_DISCIPLINE_BLOB *blob);
+NTSTATUS TimeCardDisciplineWrite(PDEVICE_CONTEXT context,
+                                 const TIMECARD_DISCIPLINE_BLOB *request,
+                                 TIMECARD_DISCIPLINE_BLOB *response);
 NTSTATUS TimeCardGetIdentity(PDEVICE_CONTEXT context,
                              TIMECARD_IDENTITY *identity);
 

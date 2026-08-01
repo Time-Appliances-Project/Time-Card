@@ -2972,3 +2972,125 @@ TimeCardGetIdentity(PDEVICE_CONTEXT context, TIMECARD_IDENTITY *identity)
         identity->Flags |= TIMECARD_IDENTITY_FLAG_VALID;
     return STATUS_SUCCESS;
 }
+
+static BOOLEAN
+TimeCardDisciplineBlobValid(const UCHAR *data)
+{
+    /* Version-1 config and temperature-table headers used by oscillatord. */
+    return data[0] == 'O' && data[1] == 1u &&
+           data[0x90] == 'O' && data[0x91] == 1u;
+}
+
+static NTSTATUS
+TimeCardDisciplineReadLocked(PDEVICE_CONTEXT context, UCHAR *data)
+{
+    TIMECARD_I2C_READ_REQUEST request;
+    TIMECARD_I2C_TRANSFER transfer;
+    ULONG block;
+    ULONG offset;
+    NTSTATUS status;
+
+    for (block = 0; block < 2u; ++block) {
+        for (offset = 0; offset < 256u; offset += 128u) {
+            RtlZeroMemory(&request, sizeof(request));
+            request.Size = sizeof(request);
+            request.Address = 0x50u + block;
+            request.SubaddressLength = 1u;
+            request.Subaddress = offset;
+            request.Length = 128u;
+            request.TimeoutMilliseconds = TIMECARD_I2C_DEFAULT_TIMEOUT_MS;
+            status = TimeCardI2cReadLocked(context, &request, &transfer);
+            if (!NT_SUCCESS(status))
+                return status;
+            if (transfer.Length != 128u)
+                return STATUS_IO_DEVICE_ERROR;
+            RtlCopyMemory(data + block * 256u + offset,
+                          transfer.Data, 128u);
+        }
+    }
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+TimeCardDisciplineRead(PDEVICE_CONTEXT context,
+                       TIMECARD_DISCIPLINE_BLOB *blob)
+{
+    NTSTATUS status;
+
+    if (!context->HardwareReady || context->I2c == NULL)
+        return STATUS_DEVICE_NOT_READY;
+    if (context->BoardProfile != TIMECARD_BOARD_ART)
+        return STATUS_NOT_SUPPORTED;
+
+    RtlZeroMemory(blob, sizeof(*blob));
+    blob->Size = sizeof(*blob);
+    blob->Length = TIMECARD_DISCIPLINE_EEPROM_SIZE;
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    status = TimeCardDisciplineReadLocked(context, blob->Data);
+    WdfWaitLockRelease(context->RegisterLock);
+    if (!NT_SUCCESS(status))
+        return status;
+    blob->Flags = TIMECARD_DISCIPLINE_FLAG_PRESENT;
+    if (TimeCardDisciplineBlobValid(blob->Data))
+        blob->Flags |= TIMECARD_DISCIPLINE_FLAG_VALID;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+TimeCardDisciplineWrite(PDEVICE_CONTEXT context,
+                        const TIMECARD_DISCIPLINE_BLOB *request,
+                        TIMECARD_DISCIPLINE_BLOB *response)
+{
+    LARGE_INTEGER writeDelay;
+    UCHAR payload[17];
+    UCHAR verify[TIMECARD_DISCIPLINE_EEPROM_SIZE];
+    ULONG controllerStatus;
+    ULONG interruptStatus;
+    ULONG absoluteOffset;
+    ULONG block;
+    ULONG offset;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    if (!context->HardwareReady || context->I2c == NULL)
+        return STATUS_DEVICE_NOT_READY;
+    if (context->BoardProfile != TIMECARD_BOARD_ART)
+        return STATUS_NOT_SUPPORTED;
+    if (request->Size < sizeof(*request) || request->Reserved != 0u ||
+        request->Length != TIMECARD_DISCIPLINE_EEPROM_SIZE ||
+        !TimeCardDisciplineBlobValid(request->Data)) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    writeDelay.QuadPart = -50000; /* Five milliseconds, relative. */
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    for (block = 0; block < 2u && NT_SUCCESS(status); ++block) {
+        for (offset = 0; offset < 256u; offset += 16u) {
+            absoluteOffset = block * 256u + offset;
+            payload[0] = (UCHAR)offset;
+            RtlCopyMemory(payload + 1, request->Data + absoluteOffset, 16u);
+            status = TimeCardI2cWriteLocked(
+                context, 0x50u + block, payload, sizeof(payload),
+                &controllerStatus, &interruptStatus);
+            if (!NT_SUCCESS(status))
+                break;
+            KeDelayExecutionThread(KernelMode, FALSE, &writeDelay);
+        }
+    }
+    if (NT_SUCCESS(status))
+        status = TimeCardDisciplineReadLocked(context, verify);
+    WdfWaitLockRelease(context->RegisterLock);
+    if (!NT_SUCCESS(status))
+        return status;
+    if (RtlCompareMemory(verify, request->Data, sizeof(verify)) !=
+        sizeof(verify)) {
+        return STATUS_DATA_ERROR;
+    }
+
+    RtlZeroMemory(response, sizeof(*response));
+    response->Size = sizeof(*response);
+    response->Flags = TIMECARD_DISCIPLINE_FLAG_PRESENT |
+                      TIMECARD_DISCIPLINE_FLAG_VALID;
+    response->Length = TIMECARD_DISCIPLINE_EEPROM_SIZE;
+    RtlCopyMemory(response->Data, verify, sizeof(verify));
+    return STATUS_SUCCESS;
+}

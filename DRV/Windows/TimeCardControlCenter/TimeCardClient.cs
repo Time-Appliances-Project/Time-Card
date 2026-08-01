@@ -59,6 +59,12 @@ namespace TimeCardControlCenter
         private static readonly uint IoctlSensorQuery = ControlCode(30, FileReadAccess | FileWriteAccess);
         private static readonly uint IoctlMro50Query = ControlCode(31, FileReadAccess);
         private static readonly uint IoctlMro50Control = ControlCode(32, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlGetCapabilities = ControlCode(33, FileReadAccess);
+        private static readonly uint IoctlPhaseQuery = ControlCode(34, FileReadAccess);
+        private static readonly uint IoctlPhaseControl = ControlCode(35, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlPhcAdjust = ControlCode(36, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlDisciplineRead = ControlCode(37, FileReadAccess);
+        private static readonly uint IoctlDisciplineWrite = ControlCode(38, FileReadAccess | FileWriteAccess);
 
         private readonly object gate = new object();
         private SafeFileHandle handle;
@@ -485,17 +491,32 @@ namespace TimeCardControlCenter
         internal IDictionary<ushort, byte[]> CaptureUbxMessages(uint port,
             uint baud, uint durationMilliseconds)
         {
+            return CaptureUbxMessagesCore(port, baud, true,
+                durationMilliseconds);
+        }
+
+        internal IDictionary<ushort, byte[]> CaptureUbxMessagesPreserveBaud(
+            uint port, uint durationMilliseconds)
+        {
+            return CaptureUbxMessagesCore(port, 0u, false,
+                durationMilliseconds);
+        }
+
+        private IDictionary<ushort, byte[]> CaptureUbxMessagesCore(uint port,
+            uint baud, bool configureBaud, uint durationMilliseconds)
+        {
             if (port > 1)
                 throw new ArgumentOutOfRangeException("port",
                     "GNSS receivers use UART 0 or UART 1.");
-            if (baud == 0)
+            if (configureBaud && baud == 0)
                 throw new ArgumentOutOfRangeException("baud");
             durationMilliseconds = Math.Max(250u,
                 Math.Min(durationMilliseconds, 5000u));
 
             lock (gate)
             {
-                ConfigureUart(port, baud);
+                if (configureBaud)
+                    ConfigureUart(port, baud);
                 Stopwatch timer = Stopwatch.StartNew();
                 List<byte> received = new List<byte>();
                 Dictionary<ushort, byte[]> messages =
@@ -864,11 +885,15 @@ namespace TimeCardControlCenter
 
         public Mro50Status SetMro50FineAdjustment(uint value)
         {
+            if (value > 4800u)
+                throw new ArgumentOutOfRangeException("value");
             return ControlMro50(1, value);
         }
 
         public Mro50Status SetMro50CoarseAdjustment(uint value)
         {
+            if (value > 0x003fffffu)
+                throw new ArgumentOutOfRangeException("value");
             return ControlMro50(2, value);
         }
 
@@ -880,6 +905,80 @@ namespace TimeCardControlCenter
         public Mro50Status SetMro50SerialRoute(bool enabled)
         {
             return ControlMro50(4, enabled ? 1u : 0u);
+        }
+
+        public TimeCardCapabilities GetCapabilities()
+        {
+            return new TimeCardCapabilities(
+                GetOutput<TimeCardCapabilitiesRaw>(IoctlGetCapabilities));
+        }
+
+        public TimeCardPhaseSample GetPhaseSample()
+        {
+            return new TimeCardPhaseSample(
+                GetOutput<TimeCardPhaseSampleRaw>(IoctlPhaseQuery));
+        }
+
+        public bool SetPhaseMeter(bool enabled, bool referenceFalling,
+                                  bool oscillatorFalling)
+        {
+            TimeCardPhaseControlRaw request = new TimeCardPhaseControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardPhaseControlRaw)),
+                Action = enabled ? 1u : 0u,
+                ReferencePolarity = referenceFalling ? 1u : 0u,
+                OscillatorPolarity = oscillatorFalling ? 1u : 0u
+            };
+            byte[] output = Call(IoctlPhaseControl, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardPhaseControlRaw)));
+            return BytesToStruct<TimeCardPhaseControlRaw>(output).Enabled != 0u;
+        }
+
+        public DateTime AdjustPhc(long offsetNanoseconds)
+        {
+            if (offsetNanoseconds < -499999999L ||
+                offsetNanoseconds > 499999999L)
+                throw new ArgumentOutOfRangeException("offsetNanoseconds");
+            TimeCardPhcAdjustRaw request = new TimeCardPhcAdjustRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardPhcAdjustRaw)),
+                OffsetNanoseconds = offsetNanoseconds
+            };
+            byte[] output = Call(IoctlPhcAdjust, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardPhcAdjustRaw)));
+            TimeCardPhcAdjustRaw result =
+                BytesToStruct<TimeCardPhcAdjustRaw>(output);
+            DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0,
+                DateTimeKind.Utc);
+            return epoch.AddSeconds(result.ResultingTime.Seconds)
+                .AddTicks(result.ResultingTime.Nanoseconds / 100);
+        }
+
+        public TimeCardDisciplineParameters ReadDisciplineParameters()
+        {
+            return new TimeCardDisciplineParameters(
+                GetOutput<TimeCardDisciplineBlobRaw>(IoctlDisciplineRead));
+        }
+
+        public TimeCardDisciplineParameters WriteDisciplineParameters(
+            byte[] data)
+        {
+            if (data == null || data.Length != 512)
+                throw new ArgumentException(
+                    "The ART discipline EEPROM image must be exactly 512 bytes.",
+                    "data");
+            TimeCardDisciplineBlobRaw request = new TimeCardDisciplineBlobRaw
+            {
+                Size = (uint)Marshal.SizeOf(
+                    typeof(TimeCardDisciplineBlobRaw)),
+                Length = 512,
+                Data = (byte[])data.Clone()
+            };
+            byte[] output = Call(IoctlDisciplineWrite,
+                StructToBytes(request), Marshal.SizeOf(
+                    typeof(TimeCardDisciplineBlobRaw)));
+            return new TimeCardDisciplineParameters(
+                BytesToStruct<TimeCardDisciplineBlobRaw>(output));
         }
 
         private Mro50Status ControlMro50(uint action, uint value)

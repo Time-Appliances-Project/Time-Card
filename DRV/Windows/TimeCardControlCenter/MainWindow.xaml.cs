@@ -58,6 +58,9 @@ namespace TimeCardControlCenter
         private bool sensorsRefreshing;
         private QuaternionRotation3D imuCubeRotation;
         private Quaternion imuCubeCurrent = Quaternion.Identity;
+        private readonly DispatcherTimer imuCubeShowcaseTimer;
+        private readonly Stopwatch imuCubeShowcaseClock = new Stopwatch();
+        private bool imuCubeShowcaseActive;
         private readonly ImuOrientationFilter imuOrientationFilter =
             new ImuOrientationFilter(3);
         private bool i2cRefreshing;
@@ -256,6 +259,11 @@ namespace TimeCardControlCenter
         {
             InitializeComponent();
             InitializeImuCube();
+            imuCubeShowcaseTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(40)
+            };
+            imuCubeShowcaseTimer.Tick += ImuCubeShowcaseTimer_Tick;
             signalGeneratorControls = new[]
             {
                 new SignalGeneratorControls { Status = Generator1StatusText, Enabled = Generator1EnabledCheckBox, Frequency = Generator1FrequencyTextBox, Duty = Generator1DutyTextBox, Phase = Generator1PhaseTextBox, Invert = Generator1InvertCheckBox, Route = Generator1RouteCombo, Detail = Generator1DetailText, Apply = Generator1ApplyButton },
@@ -330,6 +338,7 @@ namespace TimeCardControlCenter
             RadioButton navigation = page.Equals("Clock", StringComparison.OrdinalIgnoreCase) ? ClockNav :
                 page.Equals("Gnss", StringComparison.OrdinalIgnoreCase) ? GnssNav :
                 page.Equals("Atomic", StringComparison.OrdinalIgnoreCase) ? AtomicNav :
+                page.Equals("Oscillatord", StringComparison.OrdinalIgnoreCase) ? OscillatordNav :
                 page.Equals("Uart", StringComparison.OrdinalIgnoreCase) ? UartNav :
                 page.Equals("Sma", StringComparison.OrdinalIgnoreCase) ? SmaNav :
                 page.Equals("Timing", StringComparison.OrdinalIgnoreCase) ? TimingNav :
@@ -424,8 +433,14 @@ namespace TimeCardControlCenter
         private void Window_Closed(object sender, EventArgs e)
         {
             refreshTimer.Stop();
+            imuCubeShowcaseTimer.Stop();
             StopUartMonitor();
             CloseMonitoredGenericComPort();
+            if (nativeDisciplineEngine != null)
+            {
+                nativeDisciplineEngine.Dispose();
+                nativeDisciplineEngine = null;
+            }
             if (client != null)
             {
                 client.Dispose();
@@ -449,7 +464,7 @@ namespace TimeCardControlCenter
             await RefreshSnapshotAsync(false);
             if (SensorsPage.Visibility == Visibility.Visible ||
                 TelemetryPage.Visibility == Visibility.Visible)
-                await RefreshSensorsAsync(false);
+                await RefreshSensorsAsync();
         }
 
         private async Task ConnectAsync()
@@ -468,7 +483,7 @@ namespace TimeCardControlCenter
                 await RefreshIdentityAsync();
                 if (lastSnapshot != null && lastSnapshot.AbiVersion >= 10 &&
                     lastSnapshot.Layout != "Orolia ART")
-                    await RefreshSensorsAsync(false);
+                    await RefreshSensorsAsync();
             }
             catch (Win32Exception ex)
             {
@@ -6356,7 +6371,6 @@ namespace TimeCardControlCenter
             if (snapshot != null && snapshot.Layout == "Orolia ART")
             {
                 lastSensorSnapshot = null;
-                SensorsRefreshButton.IsEnabled = false;
                 SensorsDriverText.Text =
                     "The Orolia ART profile has no PCA9546A sensor branch. The mRO-50 raw temperature word is available in the Atomic workspace.";
                 SensorsStatusText.Text = "NOT FITTED ON ART";
@@ -6369,6 +6383,14 @@ namespace TimeCardControlCenter
                 Rail12StatusText.Text = "NOT FITTED";
                 Rail5StatusText.Text = "NOT FITTED";
                 Rail3V3StatusText.Text = "NOT FITTED";
+                SensorsSamplingDurationChart.Clear();
+                SensorsSamplingDurationText.Text = "N/A";
+                SensorsSamplingDurationRangeText.Text = "NO SENSOR FABRIC";
+                ApplyImu(new ImuSensorReading(new TimeCardBno055ReadingRaw
+                {
+                    Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf(
+                        typeof(TimeCardBno055ReadingRaw))
+                }));
                 ImuStatusText.Text = "NOT FITTED";
                 ImuDetailText.Text =
                     "IMU sensor branch is not implemented by the Orolia ART profile";
@@ -6378,8 +6400,6 @@ namespace TimeCardControlCenter
             }
 
             bool supported = snapshot != null && snapshot.AbiVersion >= 10;
-            SensorsRefreshButton.IsEnabled = supported && client != null &&
-                !sensorsRefreshing;
             if (supported)
             {
                 if (lastSensorSnapshot == null)
@@ -6396,14 +6416,12 @@ namespace TimeCardControlCenter
             SensorsStatusText.Text = "DRIVER UPDATE REQUIRED";
             SensorsStatusText.Foreground = (Brush)FindResource("GoldBrush");
             SensorsStatusDot.Fill = (Brush)FindResource("GoldBrush");
+            SensorsSamplingDurationChart.Clear();
+            SensorsSamplingDurationText.Text = "N/A";
+            SensorsSamplingDurationRangeText.Text = "DRIVER UPDATE REQUIRED";
         }
 
-        private async void RefreshSensors_Click(object sender, RoutedEventArgs e)
-        {
-            await RefreshSensorsAsync(true);
-        }
-
-        private async Task RefreshSensorsAsync(bool logSuccess)
+        private async Task RefreshSensorsAsync()
         {
             if (sensorsRefreshing || client == null)
                 return;
@@ -6419,20 +6437,24 @@ namespace TimeCardControlCenter
             }
 
             sensorsRefreshing = true;
-            SensorsRefreshButton.IsEnabled = false;
             SensorsStatusText.Text = "SAMPLING";
             SensorsStatusText.Foreground = (Brush)FindResource("CyanBrush");
             SensorsStatusDot.Fill = (Brush)FindResource("CyanBrush");
+            Stopwatch sampleTimer = Stopwatch.StartNew();
             try
             {
                 SensorTelemetrySnapshot telemetry = await Task.Run(
                     () => client.GetSensorTelemetry());
+                sampleTimer.Stop();
+                RecordSensorSamplingDuration(sampleTimer.Elapsed.TotalMilliseconds,
+                    true);
                 ApplySensorTelemetry(telemetry);
-                if (logSuccess)
-                    Log("Environment, power-rail, and IMU telemetry refreshed.");
             }
             catch (Exception ex)
             {
+                sampleTimer.Stop();
+                RecordSensorSamplingDuration(sampleTimer.Elapsed.TotalMilliseconds,
+                    false);
                 SensorsStatusText.Text = "SAMPLE FAILED";
                 SensorsStatusText.Foreground = (Brush)FindResource("DangerBrush");
                 SensorsStatusDot.Fill = (Brush)FindResource("DangerBrush");
@@ -6443,10 +6465,34 @@ namespace TimeCardControlCenter
             finally
             {
                 sensorsRefreshing = false;
-                SensorsRefreshButton.IsEnabled = client != null &&
-                    lastSnapshot != null && lastSnapshot.AbiVersion >= 10 &&
-                    lastSnapshot.Layout != "Orolia ART";
             }
+        }
+
+        private void RecordSensorSamplingDuration(double milliseconds,
+                                                  bool succeeded)
+        {
+            if (double.IsNaN(milliseconds) || double.IsInfinity(milliseconds))
+                return;
+            milliseconds = Math.Max(0, milliseconds);
+            SensorsSamplingDurationChart.AddSample(DateTime.UtcNow, milliseconds);
+            string value = milliseconds >= 100 ?
+                milliseconds.ToString("F0", CultureInfo.InvariantCulture) :
+                milliseconds >= 10 ?
+                    milliseconds.ToString("F1", CultureInfo.InvariantCulture) :
+                    milliseconds.ToString("F2", CultureInfo.InvariantCulture);
+            SensorsSamplingDurationText.Text = succeeded ? value + " ms" :
+                "FAIL " + value + " ms";
+            SensorsSamplingDurationText.Foreground = (Brush)FindResource(
+                succeeded ? "CyanBrush" : "DangerBrush");
+            if (SensorsSamplingDurationChart.SampleCount < 2)
+            {
+                SensorsSamplingDurationRangeText.Text = "COLLECTING · 1/60";
+                return;
+            }
+            SensorsSamplingDurationRangeText.Text = string.Format(
+                CultureInfo.InvariantCulture, "MIN {0:F2} · MAX {1:F2} MS · 60 S",
+                SensorsSamplingDurationChart.Minimum,
+                SensorsSamplingDurationChart.Maximum);
         }
 
         private void ApplySensorTelemetry(SensorTelemetrySnapshot telemetry)
@@ -6681,6 +6727,11 @@ namespace TimeCardControlCenter
             string imuAddress = isBno08x ? "0x4A" : "0x29";
             if (!imu.IsValid)
             {
+                bool showcase = !imu.IsPresent;
+                if (showcase)
+                    StartImuCubeShowcase();
+                else
+                    StopImuCubeShowcase();
                 imuOrientationFilter.ShouldAccept(false, false);
                 if (imuOrientationFilter.HasAcceptedSample)
                 {
@@ -6688,7 +6739,7 @@ namespace TimeCardControlCenter
                     ImuVisualizationStatusText.Foreground =
                         (Brush)FindResource("GoldBrush");
                 }
-                else
+                else if (!showcase)
                 {
                     UpdateImuCubeOrientation(Quaternion.Identity, false);
                 }
@@ -6717,9 +6768,16 @@ namespace TimeCardControlCenter
                     "Mode 0x{0:X2} · Status 0x{1:X2}",
                     imu.OperationMode, imu.SystemStatus);
                 ImuClockText.Text = "Clock source not available";
+                if (showcase)
+                {
+                    ImuVisualizationStatusText.Text = "SHOWCASE · NO IMU";
+                    ImuVisualizationStatusText.Foreground =
+                        (Brush)FindResource("MutedBrush");
+                }
                 return;
             }
 
+            StopImuCubeShowcase();
             ImuHeadingText.Text = imu.HeadingDegrees.ToString("F1",
                 CultureInfo.InvariantCulture) + "°";
             ImuRollText.Text = imu.RollDegrees.ToString("F1",
@@ -6775,27 +6833,27 @@ namespace TimeCardControlCenter
             cube.Children.Add(CreateImuCubeFace(
                 new Point3D(-half, -half, half), new Point3D(half, -half, half),
                 new Point3D(half, half, half), new Point3D(-half, half, half),
-                Color.FromRgb(41, 105, 201)));
+                "logo_blue.png", Color.FromRgb(42, 65, 121)));
             cube.Children.Add(CreateImuCubeFace(
                 new Point3D(half, -half, -half), new Point3D(-half, -half, -half),
                 new Point3D(-half, half, -half), new Point3D(half, half, -half),
-                Color.FromRgb(24, 61, 123)));
+                "logo_black.png", Color.FromRgb(13, 17, 23)));
             cube.Children.Add(CreateImuCubeFace(
                 new Point3D(-half, half, half), new Point3D(half, half, half),
                 new Point3D(half, half, -half), new Point3D(-half, half, -half),
-                Color.FromRgb(242, 201, 76)));
+                "logo_yellow.png", Color.FromRgb(112, 111, 34)));
             cube.Children.Add(CreateImuCubeFace(
                 new Point3D(-half, -half, -half), new Point3D(half, -half, -half),
                 new Point3D(half, -half, half), new Point3D(-half, -half, half),
-                Color.FromRgb(20, 77, 104)));
+                "logo_purple.png", Color.FromRgb(74, 43, 117)));
             cube.Children.Add(CreateImuCubeFace(
                 new Point3D(half, -half, half), new Point3D(half, -half, -half),
                 new Point3D(half, half, -half), new Point3D(half, half, half),
-                Color.FromRgb(68, 202, 148)));
+                "logo_green.png", Color.FromRgb(20, 100, 76)));
             cube.Children.Add(CreateImuCubeFace(
                 new Point3D(-half, -half, -half), new Point3D(-half, -half, half),
                 new Point3D(-half, half, half), new Point3D(-half, half, -half),
-                Color.FromRgb(33, 126, 172)));
+                "logo_red.png", Color.FromRgb(116, 28, 26)));
 
             imuCubeRotation = new QuaternionRotation3D(Quaternion.Identity);
             cube.Transform = new RotateTransform3D(imuCubeRotation);
@@ -6805,18 +6863,90 @@ namespace TimeCardControlCenter
 
         private static GeometryModel3D CreateImuCubeFace(Point3D p0, Point3D p1,
                                                           Point3D p2, Point3D p3,
-                                                          Color color)
+                                                          string imageName,
+                                                          Color background)
         {
             MeshGeometry3D mesh = new MeshGeometry3D
             {
                 Positions = new Point3DCollection { p0, p1, p2, p3 },
-                TriangleIndices = new Int32Collection { 0, 1, 2, 0, 2, 3 }
+                TriangleIndices = new Int32Collection { 0, 1, 2, 0, 2, 3 },
+                TextureCoordinates = new PointCollection
+                {
+                    new Point(0, 1), new Point(1, 1),
+                    new Point(1, 0), new Point(0, 0)
+                }
+            };
+            ImageSource image = LoadImuCubeFaceImage(imageName);
+            const double imageWidth = 0.94;
+            double imageHeight = imageWidth * image.Height / image.Width;
+            Rect imageBounds = new Rect((1.0 - imageWidth) / 2.0,
+                (1.0 - imageHeight) / 2.0, imageWidth, imageHeight);
+            DrawingGroup drawing = new DrawingGroup();
+            drawing.Children.Add(new GeometryDrawing(
+                new SolidColorBrush(background), null,
+                new RectangleGeometry(new Rect(0, 0, 1, 1))));
+            drawing.Children.Add(new ImageDrawing(image, imageBounds));
+            DrawingBrush faceBrush = new DrawingBrush(drawing)
+            {
+                Viewbox = new Rect(0, 0, 1, 1),
+                ViewboxUnits = BrushMappingMode.Absolute,
+                Stretch = Stretch.Fill
             };
             MaterialGroup materials = new MaterialGroup();
-            materials.Children.Add(new DiffuseMaterial(new SolidColorBrush(color)));
+            materials.Children.Add(new DiffuseMaterial(faceBrush));
             materials.Children.Add(new SpecularMaterial(
-                new SolidColorBrush(Color.FromArgb(180, 225, 243, 255)), 42.0));
+                new SolidColorBrush(Color.FromArgb(80, 225, 243, 255)), 34.0));
             return new GeometryModel3D(mesh, materials) { BackMaterial = materials };
+        }
+
+        private static ImageSource LoadImuCubeFaceImage(string imageName)
+        {
+            BitmapImage image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.UriSource = new Uri(
+                "pack://application:,,,/Assets/imu-cube/" + imageName,
+                UriKind.Absolute);
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+
+        private void StartImuCubeShowcase()
+        {
+            if (imuCubeShowcaseActive)
+                return;
+            imuCubeShowcaseActive = true;
+            imuCubeShowcaseClock.Restart();
+            imuCubeShowcaseTimer.Start();
+        }
+
+        private void StopImuCubeShowcase()
+        {
+            if (!imuCubeShowcaseActive)
+                return;
+            imuCubeShowcaseActive = false;
+            imuCubeShowcaseTimer.Stop();
+            imuCubeShowcaseClock.Stop();
+        }
+
+        private void ImuCubeShowcaseTimer_Tick(object sender, EventArgs e)
+        {
+            if (!imuCubeShowcaseActive || imuCubeRotation == null)
+                return;
+            double seconds = imuCubeShowcaseClock.Elapsed.TotalSeconds;
+            Quaternion yaw = new Quaternion(new Vector3D(0, 1, 0),
+                (seconds * 29.0) % 360.0);
+            Quaternion pitch = new Quaternion(new Vector3D(1, 0, 0),
+                (seconds * 17.0) % 360.0);
+            Quaternion roll = new Quaternion(new Vector3D(0, 0, 1),
+                (seconds * 11.0) % 360.0);
+            Quaternion target = yaw * pitch * roll;
+            target.Normalize();
+            imuCubeRotation.BeginAnimation(
+                QuaternionRotation3D.QuaternionProperty, null);
+            imuCubeRotation.Quaternion = target;
+            imuCubeCurrent = target;
         }
 
         private void UpdateImuCubeFromReading(ImuSensorReading imu)
@@ -6914,6 +7044,11 @@ namespace TimeCardControlCenter
                 await RefreshUbloxAsync(false);
             else if (page == "Atomic")
                 await RefreshAtomicAsync(false);
+            else if (page == "Oscillatord")
+            {
+                await RefreshNativeDisciplineAsync(false);
+                await RefreshOscillatordAsync(false);
+            }
             else if (page == "Uart" && UartPortCombo.SelectedIndex == 3)
                 await RefreshNmeaAsync(false);
             else if (page == "Sma")
@@ -6921,7 +7056,7 @@ namespace TimeCardControlCenter
             else if (page == "Timing")
                 await RefreshTimingAsync();
             else if (page == "Sensors")
-                await RefreshSensorsAsync(false);
+                await RefreshSensorsAsync();
             else if (page == "I2c")
                 await RefreshI2cAsync(false);
             else if (page == "Subsystems")
@@ -6938,6 +7073,7 @@ namespace TimeCardControlCenter
             ClockPage.Visibility = name == "Clock" ? Visibility.Visible : Visibility.Collapsed;
             GnssPage.Visibility = name == "Gnss" ? Visibility.Visible : Visibility.Collapsed;
             AtomicPage.Visibility = name == "Atomic" ? Visibility.Visible : Visibility.Collapsed;
+            OscillatordPage.Visibility = name == "Oscillatord" ? Visibility.Visible : Visibility.Collapsed;
             UartPage.Visibility = name == "Uart" ? Visibility.Visible : Visibility.Collapsed;
             SmaPage.Visibility = name == "Sma" ? Visibility.Visible : Visibility.Collapsed;
             TimingPage.Visibility = name == "Timing" ? Visibility.Visible : Visibility.Collapsed;
@@ -6950,6 +7086,7 @@ namespace TimeCardControlCenter
             DiagnosticsPage.Visibility = name == "Diagnostics" ? Visibility.Visible : Visibility.Collapsed;
             string title = name == "Gnss" ? "GNSS & Time-of-Day" :
                 name == "Atomic" ? "Atomic Clock" :
+                name == "Oscillatord" ? "Oscillator Discipline" :
                 name == "Uart" ? "UART Console" :
                 name == "Sma" ? "SMA Connectors" :
                 name == "Timing" ? "Generators & Frequency" :

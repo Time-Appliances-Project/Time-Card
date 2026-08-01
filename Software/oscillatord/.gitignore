@@ -1,0 +1,6 @@
+.cproject
+.project
+.settings/
+build/
+build-timecard/
+build-timecard-system/

@@ -672,6 +672,248 @@ cmd_i2c_status(HANDLE handle)
     return 0;
 }
 
+static const char *
+board_profile_name(unsigned long profile)
+{
+    switch (profile) {
+    case TIMECARD_BOARD_PROFILE_FB: return "OCP/FPGA";
+    case TIMECARD_BOARD_PROFILE_ART: return "Orolia/Safran ART";
+    case TIMECARD_BOARD_PROFILE_CELESTICA: return "Celestica";
+    default: return "Unknown";
+    }
+}
+
+static const char *
+oscillator_name(unsigned long oscillator)
+{
+    switch (oscillator) {
+    case TIMECARD_OSCILLATOR_NONE: return "None detected";
+    case TIMECARD_OSCILLATOR_UART: return "UART/protocol probe required";
+    case TIMECARD_OSCILLATOR_MRO50: return "Microchip mRO-50";
+    case TIMECARD_OSCILLATOR_SA53: return "Microchip SA53";
+    default: return "Unknown";
+    }
+}
+
+static void
+print_capability(unsigned __int64 flags, unsigned __int64 flag,
+                 const char *name)
+{
+    printf("  %-31s %s\n", name, (flags & flag) != 0 ? "yes" : "no");
+}
+
+static int
+cmd_capabilities(HANDLE handle)
+{
+    TIMECARD_CAPABILITIES capabilities;
+
+    RtlZeroMemory(&capabilities, sizeof(capabilities));
+    capabilities.Size = sizeof(capabilities);
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_GET_CAPABILITIES,
+                       NULL, 0, &capabilities, sizeof(capabilities), NULL))
+        return 1;
+
+    printf("ABI:                   %lu\n",
+           (unsigned long)capabilities.AbiVersion);
+    printf("Board profile:         %s (%lu)\n",
+           board_profile_name(capabilities.BoardProfile),
+           (unsigned long)capabilities.BoardProfile);
+    printf("Oscillator:            %s (%lu)\n",
+           oscillator_name(capabilities.OscillatorType),
+           (unsigned long)capabilities.OscillatorType);
+    printf("Capability mask:       0x%016llx\n",
+           (unsigned long long)capabilities.Flags);
+    print_capability(capabilities.Flags, TIMECARD_CAP_PHC,
+                     "Precision hardware clock");
+    print_capability(capabilities.Flags, TIMECARD_CAP_GNSS_UART,
+                     "GNSS UART");
+    print_capability(capabilities.Flags, TIMECARD_CAP_ATOMIC_UART,
+                     "Atomic-clock UART");
+    print_capability(capabilities.Flags, TIMECARD_CAP_PAIRED_PHASE_METER,
+                     "Paired PPS phase meter");
+    print_capability(capabilities.Flags, TIMECARD_CAP_MRO50_DIRECT,
+                     "Direct mRO-50 control");
+    print_capability(capabilities.Flags, TIMECARD_CAP_PHC_PHASE_ADJUST,
+                     "Bounded PHC phase adjustment");
+    print_capability(capabilities.Flags, TIMECARD_CAP_DISCIPLINE_PARAMETERS,
+                     "Discipline EEPROM parameters");
+    print_capability(capabilities.Flags, TIMECARD_CAP_TEMPERATURE_TELEMETRY,
+                     "Oscillator temperature");
+    print_capability(capabilities.Flags, TIMECARD_CAP_HARDWARE_DISCIPLINE,
+                     "Hardware oscillator discipline");
+    if ((capabilities.Flags & TIMECARD_CAP_PAIRED_PHASE_METER) != 0) {
+        printf("Reference/oscillator:  PPS %lu / PPS %lu\n",
+               (unsigned long)capabilities.ReferencePpsIndex,
+               (unsigned long)capabilities.OscillatorPpsIndex);
+    }
+    if ((capabilities.Flags & TIMECARD_CAP_MRO50_DIRECT) != 0) {
+        printf("Fine range:            %lu..%lu\n",
+               (unsigned long)capabilities.FineMinimum,
+               (unsigned long)capabilities.FineMaximum);
+        printf("Coarse range:          %lu..%lu\n",
+               (unsigned long)capabilities.CoarseMinimum,
+               (unsigned long)capabilities.CoarseMaximum);
+    }
+    return 0;
+}
+
+static int
+cmd_phase_status(HANDLE handle)
+{
+    TIMECARD_PHASE_SAMPLE sample;
+
+    RtlZeroMemory(&sample, sizeof(sample));
+    sample.Size = sizeof(sample);
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_PHASE_QUERY,
+                       NULL, 0, &sample, sizeof(sample), NULL))
+        return 1;
+
+    printf("Present:               %s\n",
+           (sample.Flags & TIMECARD_PHASE_FLAG_PRESENT) != 0 ? "yes" : "no");
+    printf("Capture enabled:       %s\n",
+           (sample.Flags & TIMECARD_PHASE_FLAG_ENABLED) != 0 ? "yes" : "no");
+    printf("Reference PPS:         counter %lu, error 0x%08lx, %s\n",
+           (unsigned long)sample.ReferenceCounter,
+           (unsigned long)sample.ReferenceError,
+           (sample.Flags & TIMECARD_PHASE_FLAG_REFERENCE_VALID) != 0 ?
+               "valid" : "not valid");
+    printf("Oscillator PPS:        counter %lu, error 0x%08lx, %s\n",
+           (unsigned long)sample.OscillatorCounter,
+           (unsigned long)sample.OscillatorError,
+           (sample.Flags & TIMECARD_PHASE_FLAG_OSCILLATOR_VALID) != 0 ?
+               "valid" : "not valid");
+    if ((sample.Flags & TIMECARD_PHASE_FLAG_PHASE_VALID) != 0) {
+        printf("Phase (osc-ref):       %lld ns\n",
+               (long long)sample.PhaseNanoseconds);
+        printf("Reference time:        ");
+        print_card_time(&sample.ReferenceTime);
+        printf("\nOscillator time:       ");
+        print_card_time(&sample.OscillatorTime);
+        printf("\n");
+    } else {
+        printf("Phase (osc-ref):       not valid\n");
+    }
+    return 0;
+}
+
+static int
+cmd_phase_control(HANDLE handle, unsigned long action)
+{
+    TIMECARD_PHASE_CONTROL control;
+
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Action = (unsigned __int32)action;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_PHASE_CONTROL,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    printf("Phase capture %s.\n", control.Enabled ? "enabled" : "disabled");
+    return 0;
+}
+
+static int
+cmd_phc_adjust(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_PHC_ADJUST adjust;
+    char *end;
+    __int64 value;
+
+    if (argc != 3)
+        return 2;
+    value = _strtoi64(argv[2], &end, 0);
+    if (*argv[2] == '\0' || *end != '\0' ||
+        value < -499999999ll || value > 499999999ll) {
+        fprintf(stderr,
+                "timecardctl: PHC adjustment must be -499999999..499999999 ns\n");
+        return 2;
+    }
+    RtlZeroMemory(&adjust, sizeof(adjust));
+    adjust.Size = sizeof(adjust);
+    adjust.OffsetNanoseconds = value;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_PHC_ADJUST,
+                       &adjust, sizeof(adjust), &adjust,
+                       sizeof(adjust), NULL))
+        return 1;
+    printf("PHC adjusted by %lld ns; resulting time ", (long long)value);
+    print_card_time(&adjust.ResultingTime);
+    printf("\n");
+    return 0;
+}
+
+static int
+cmd_discipline_read(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_DISCIPLINE_BLOB blob;
+    FILE *file;
+
+    if (argc != 3)
+        return 2;
+    RtlZeroMemory(&blob, sizeof(blob));
+    blob.Size = sizeof(blob);
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_DISCIPLINE_READ,
+                       NULL, 0, &blob, sizeof(blob), NULL))
+        return 1;
+    if (blob.Length != TIMECARD_DISCIPLINE_EEPROM_SIZE) {
+        fprintf(stderr, "timecardctl: driver returned unexpected EEPROM length %lu\n",
+                (unsigned long)blob.Length);
+        return 1;
+    }
+    if (fopen_s(&file, argv[2], "wb") != 0 || file == NULL) {
+        fprintf(stderr, "timecardctl: cannot create %s\n", argv[2]);
+        return 1;
+    }
+    if (fwrite(blob.Data, 1, blob.Length, file) != blob.Length) {
+        fprintf(stderr, "timecardctl: failed writing %s\n", argv[2]);
+        fclose(file);
+        return 1;
+    }
+    fclose(file);
+    printf("Saved %lu-byte discipline image to %s (%s).\n",
+           (unsigned long)blob.Length, argv[2],
+           (blob.Flags & TIMECARD_DISCIPLINE_FLAG_VALID) != 0 ?
+               "valid version-1 headers" : "headers not initialized");
+    return 0;
+}
+
+static int
+cmd_discipline_write(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_DISCIPLINE_BLOB blob;
+    FILE *file;
+    size_t length;
+
+    if (argc != 3)
+        return 2;
+    if (fopen_s(&file, argv[2], "rb") != 0 || file == NULL) {
+        fprintf(stderr, "timecardctl: cannot open %s\n", argv[2]);
+        return 1;
+    }
+    RtlZeroMemory(&blob, sizeof(blob));
+    blob.Size = sizeof(blob);
+    blob.Length = TIMECARD_DISCIPLINE_EEPROM_SIZE;
+    length = fread(blob.Data, 1, sizeof(blob.Data), file);
+    if (length != sizeof(blob.Data) || fgetc(file) != EOF) {
+        fprintf(stderr, "timecardctl: image must be exactly %u bytes\n",
+                TIMECARD_DISCIPLINE_EEPROM_SIZE);
+        fclose(file);
+        return 1;
+    }
+    fclose(file);
+    if (blob.Data[0] != 'O' || blob.Data[1] != 1u ||
+        blob.Data[0x90] != 'O' || blob.Data[0x91] != 1u) {
+        fprintf(stderr,
+                "timecardctl: refusing image without version-1 config and temperature headers\n");
+        return 1;
+    }
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_DISCIPLINE_WRITE,
+                       &blob, sizeof(blob), &blob, sizeof(blob), NULL))
+        return 1;
+    printf("Restored and verified %u-byte discipline image from %s.\n",
+           TIMECARD_DISCIPLINE_EEPROM_SIZE, argv[2]);
+    return 0;
+}
+
 static int
 cmd_i2c_mux(HANDLE handle, int argc, char **argv)
 {
@@ -1179,8 +1421,15 @@ usage(void)
     fprintf(stderr,
             "usage:\n"
             "  timecardctl status\n"
+            "  timecardctl capabilities\n"
             "  timecardctl get\n"
             "  timecardctl set-system\n"
+            "  timecardctl phase-status\n"
+            "  timecardctl phase-enable\n"
+            "  timecardctl phase-disable\n"
+            "  timecardctl phc-adjust <signed-nanoseconds>\n"
+            "  timecardctl discipline-read <512-byte-image>\n"
+            "  timecardctl discipline-write <512-byte-image>\n"
             "  timecardctl clock-source <none|tod|irig|pps|ptp|rtc|dcf|regs|ext>\n"
             "  timecardctl serial\n"
             "  timecardctl nmea-status\n"
@@ -1227,10 +1476,24 @@ main(int argc, char **argv)
     handle = timecard_open();
     if (strcmp(argv[1], "status") == 0 && argc == 2)
         result = cmd_status(handle);
+    else if (strcmp(argv[1], "capabilities") == 0 && argc == 2)
+        result = cmd_capabilities(handle);
     else if (strcmp(argv[1], "get") == 0 && argc == 2)
         result = cmd_get(handle);
     else if (strcmp(argv[1], "set-system") == 0 && argc == 2)
         result = cmd_set_system(handle);
+    else if (strcmp(argv[1], "phase-status") == 0 && argc == 2)
+        result = cmd_phase_status(handle);
+    else if (strcmp(argv[1], "phase-enable") == 0 && argc == 2)
+        result = cmd_phase_control(handle, TIMECARD_PHASE_CONTROL_ENABLE);
+    else if (strcmp(argv[1], "phase-disable") == 0 && argc == 2)
+        result = cmd_phase_control(handle, TIMECARD_PHASE_CONTROL_DISABLE);
+    else if (strcmp(argv[1], "phc-adjust") == 0)
+        result = cmd_phc_adjust(handle, argc, argv);
+    else if (strcmp(argv[1], "discipline-read") == 0)
+        result = cmd_discipline_read(handle, argc, argv);
+    else if (strcmp(argv[1], "discipline-write") == 0)
+        result = cmd_discipline_write(handle, argc, argv);
     else if (strcmp(argv[1], "clock-source") == 0)
         result = cmd_clock_source(handle, argc, argv);
     else if (strcmp(argv[1], "serial") == 0 && argc == 2)

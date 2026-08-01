@@ -1,0 +1,26 @@
+[Unit]
+Description=Daemon responsible of disciplining an oscillator based on a 1pps phase error device.
+
+[Service]
+Type=simple
+ExecStart=@CMAKE_INSTALL_FULL_BINDIR@/oscillatord /etc/oscillatord.conf
+Restart=on-failure
+RestartSec=2s
+RuntimeDirectory=oscillatord
+StateDirectory=oscillatord
+UMask=0027
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -655,6 +655,81 @@ namespace TimeCardControlCenter
         public Icp10100SensorReading PressureSensor { get; private set; }
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardCapabilitiesRaw
+    {
+        public uint Size;
+        public uint AbiVersion;
+        public ulong Flags;
+        public uint BoardProfile;
+        public uint OscillatorType;
+        public uint ReferencePpsIndex;
+        public uint OscillatorPpsIndex;
+        public uint FineMinimum;
+        public uint FineMaximum;
+        public uint CoarseMinimum;
+        public uint CoarseMaximum;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardPhaseSampleRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint ReferenceCounter;
+        public uint OscillatorCounter;
+        public TimeCardTimeRaw ReferenceTime;
+        public TimeCardTimeRaw OscillatorTime;
+        public long PhaseNanoseconds;
+        public uint ReferenceError;
+        public uint OscillatorError;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardPhaseControlRaw
+    {
+        public uint Size;
+        public uint Action;
+        public uint ReferencePolarity;
+        public uint OscillatorPolarity;
+        public uint Enabled;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardPhcAdjustRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public long OffsetNanoseconds;
+        public TimeCardTimeRaw ResultingTime;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardDisciplineBlobRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Length;
+        public uint Reserved;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 512)]
+        public byte[] Data;
+    }
+
     public sealed class BoardTemperatureReading
     {
         internal BoardTemperatureReading(string name,
@@ -1173,6 +1248,110 @@ namespace TimeCardControlCenter
         public uint CoarseAdjustment { get; private set; }
         public uint TemperatureRaw { get; private set; }
         public uint BoardConfig { get; private set; }
+    }
+
+    public sealed class TimeCardCapabilities
+    {
+        internal TimeCardCapabilities(TimeCardCapabilitiesRaw value)
+        {
+            AbiVersion = value.AbiVersion;
+            Flags = value.Flags;
+            BoardProfile = value.BoardProfile;
+            OscillatorType = value.OscillatorType;
+            ReferencePpsIndex = value.ReferencePpsIndex;
+            OscillatorPpsIndex = value.OscillatorPpsIndex;
+            FineMinimum = value.FineMinimum;
+            FineMaximum = value.FineMaximum;
+            CoarseMinimum = value.CoarseMinimum;
+            CoarseMaximum = value.CoarseMaximum;
+        }
+
+        public uint AbiVersion { get; private set; }
+        public ulong Flags { get; private set; }
+        public uint BoardProfile { get; private set; }
+        public uint OscillatorType { get; private set; }
+        public uint ReferencePpsIndex { get; private set; }
+        public uint OscillatorPpsIndex { get; private set; }
+        public uint FineMinimum { get; private set; }
+        public uint FineMaximum { get; private set; }
+        public uint CoarseMinimum { get; private set; }
+        public uint CoarseMaximum { get; private set; }
+        public bool HasPhc { get { return Has(1ul << 0); } }
+        public bool HasGnssUart { get { return Has(1ul << 1); } }
+        public bool HasAtomicUart { get { return Has(1ul << 2); } }
+        public bool HasPairedPhaseMeter { get { return Has(1ul << 3); } }
+        public bool HasDirectMro50 { get { return Has(1ul << 4); } }
+        public bool CanAdjustPhcPhase { get { return Has(1ul << 5); } }
+        public bool HasDisciplineParameters { get { return Has(1ul << 6); } }
+        public bool HasTemperatureTelemetry { get { return Has(1ul << 7); } }
+        public bool HasHardwareDiscipline { get { return Has(1ul << 8); } }
+
+        private bool Has(ulong flag) { return (Flags & flag) != 0; }
+
+        public string BoardName
+        {
+            get
+            {
+                return BoardProfile == 2u ? "Orolia/Safran ART" :
+                    BoardProfile == 3u ? "Celestica Time Card" :
+                    BoardProfile == 1u ? "OCP Time Card" : "Unknown Time Card";
+            }
+        }
+
+        public string OscillatorName
+        {
+            get
+            {
+                return OscillatorType == 2u ? "Microchip mRO-50" :
+                    OscillatorType == 3u ? "Microchip SA53" :
+                    OscillatorType == 1u ? "UART oscillator (probe required)" :
+                    "No controllable oscillator";
+            }
+        }
+    }
+
+    public sealed class TimeCardPhaseSample
+    {
+        internal TimeCardPhaseSample(TimeCardPhaseSampleRaw value)
+        {
+            Flags = value.Flags;
+            ReferenceCounter = value.ReferenceCounter;
+            OscillatorCounter = value.OscillatorCounter;
+            ReferenceTime = value.ReferenceTime;
+            OscillatorTime = value.OscillatorTime;
+            PhaseNanoseconds = value.PhaseNanoseconds;
+            ReferenceError = value.ReferenceError;
+            OscillatorError = value.OscillatorError;
+        }
+
+        internal TimeCardTimeRaw ReferenceTime { get; private set; }
+        internal TimeCardTimeRaw OscillatorTime { get; private set; }
+        public uint Flags { get; private set; }
+        public uint ReferenceCounter { get; private set; }
+        public uint OscillatorCounter { get; private set; }
+        public long PhaseNanoseconds { get; private set; }
+        public uint ReferenceError { get; private set; }
+        public uint OscillatorError { get; private set; }
+        public bool IsPresent { get { return (Flags & 1u) != 0; } }
+        public bool IsEnabled { get { return (Flags & 2u) != 0; } }
+        public bool IsReferenceValid { get { return (Flags & 4u) != 0; } }
+        public bool IsOscillatorValid { get { return (Flags & 8u) != 0; } }
+        public bool IsPhaseValid { get { return (Flags & 16u) != 0; } }
+    }
+
+    public sealed class TimeCardDisciplineParameters
+    {
+        internal TimeCardDisciplineParameters(TimeCardDisciplineBlobRaw value)
+        {
+            IsPresent = (value.Flags & 1u) != 0;
+            IsValid = (value.Flags & 2u) != 0;
+            Data = value.Data == null ? new byte[0] :
+                (byte[])value.Data.Clone();
+        }
+
+        public bool IsPresent { get; private set; }
+        public bool IsValid { get; private set; }
+        public byte[] Data { get; private set; }
     }
 
     public sealed class TimeCardSnapshot

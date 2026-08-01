@@ -86,8 +86,20 @@
     TIMECARD_IOCTL(31, FILE_READ_ACCESS)
 #define IOCTL_TIMECARD_MRO50_CONTROL \
     TIMECARD_IOCTL(32, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_GET_CAPABILITIES \
+    TIMECARD_IOCTL(33, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_PHASE_QUERY \
+    TIMECARD_IOCTL(34, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_PHASE_CONTROL \
+    TIMECARD_IOCTL(35, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_PHC_ADJUST \
+    TIMECARD_IOCTL(36, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_DISCIPLINE_READ \
+    TIMECARD_IOCTL(37, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_DISCIPLINE_WRITE \
+    TIMECARD_IOCTL(38, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 
-#define TIMECARD_ABI_VERSION 10u
+#define TIMECARD_ABI_VERSION 11u
 #define TIMECARD_LAYOUT_MSI  1u
 #define TIMECARD_LAYOUT_MSIX 2u
 #define TIMECARD_LAYOUT_ART  3u
@@ -115,6 +127,39 @@
 #define TIMECARD_MRO50_ACTION_ADJUST_COARSE 2u
 #define TIMECARD_MRO50_ACTION_SAVE_COARSE   3u
 #define TIMECARD_MRO50_ACTION_SERIAL_ENABLE 4u
+#define TIMECARD_MRO50_FINE_MINIMUM          0u
+#define TIMECARD_MRO50_FINE_MAXIMUM          4800u
+#define TIMECARD_MRO50_COARSE_MINIMUM        0u
+#define TIMECARD_MRO50_COARSE_MAXIMUM        0x003fffffu
+
+/* Capability discovery keeps user mode away from variant-specific MMIO. */
+#define TIMECARD_CAP_PHC                    (1ull << 0)
+#define TIMECARD_CAP_GNSS_UART              (1ull << 1)
+#define TIMECARD_CAP_ATOMIC_UART            (1ull << 2)
+#define TIMECARD_CAP_PAIRED_PHASE_METER     (1ull << 3)
+#define TIMECARD_CAP_MRO50_DIRECT            (1ull << 4)
+#define TIMECARD_CAP_PHC_PHASE_ADJUST        (1ull << 5)
+#define TIMECARD_CAP_DISCIPLINE_PARAMETERS   (1ull << 6)
+#define TIMECARD_CAP_TEMPERATURE_TELEMETRY   (1ull << 7)
+#define TIMECARD_CAP_HARDWARE_DISCIPLINE     (1ull << 8)
+
+#define TIMECARD_OSCILLATOR_NONE       0u
+#define TIMECARD_OSCILLATOR_UART       1u
+#define TIMECARD_OSCILLATOR_MRO50      2u
+#define TIMECARD_OSCILLATOR_SA53       3u
+
+#define TIMECARD_PHASE_FLAG_PRESENT           (1u << 0)
+#define TIMECARD_PHASE_FLAG_ENABLED           (1u << 1)
+#define TIMECARD_PHASE_FLAG_REFERENCE_VALID   (1u << 2)
+#define TIMECARD_PHASE_FLAG_OSCILLATOR_VALID  (1u << 3)
+#define TIMECARD_PHASE_FLAG_PHASE_VALID       (1u << 4)
+
+#define TIMECARD_PHASE_CONTROL_DISABLE 0u
+#define TIMECARD_PHASE_CONTROL_ENABLE  1u
+
+#define TIMECARD_DISCIPLINE_EEPROM_SIZE 512u
+#define TIMECARD_DISCIPLINE_FLAG_PRESENT (1u << 0)
+#define TIMECARD_DISCIPLINE_FLAG_VALID   (1u << 1)
 
 #define TIMECARD_HIERARCHY_QUERY   0u
 #define TIMECARD_HIERARCHY_ENABLE  1u
@@ -581,6 +626,61 @@ typedef struct _TIMECARD_MRO50_CONTROL {
     unsigned __int32 Value;
     unsigned __int32 Reserved;
 } TIMECARD_MRO50_CONTROL;
+
+typedef struct _TIMECARD_CAPABILITIES {
+    unsigned __int32 Size;
+    unsigned __int32 AbiVersion;
+    unsigned __int64 Flags;
+    unsigned __int32 BoardProfile;
+    unsigned __int32 OscillatorType;
+    unsigned __int32 ReferencePpsIndex;
+    unsigned __int32 OscillatorPpsIndex;
+    unsigned __int32 FineMinimum;
+    unsigned __int32 FineMaximum;
+    unsigned __int32 CoarseMinimum;
+    unsigned __int32 CoarseMaximum;
+    unsigned __int32 Reserved[4];
+} TIMECARD_CAPABILITIES;
+
+/* Latest PPS timestamps latched by gateware. Phase is oscillator - reference. */
+typedef struct _TIMECARD_PHASE_SAMPLE {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 ReferenceCounter;
+    unsigned __int32 OscillatorCounter;
+    TIMECARD_TIME ReferenceTime;
+    TIMECARD_TIME OscillatorTime;
+    signed __int64 PhaseNanoseconds;
+    unsigned __int32 ReferenceError;
+    unsigned __int32 OscillatorError;
+    unsigned __int32 Reserved[4];
+} TIMECARD_PHASE_SAMPLE;
+
+typedef struct _TIMECARD_PHASE_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Action;
+    unsigned __int32 ReferencePolarity;
+    unsigned __int32 OscillatorPolarity;
+    unsigned __int32 Enabled;
+    unsigned __int32 Reserved[3];
+} TIMECARD_PHASE_CONTROL;
+
+typedef struct _TIMECARD_PHC_ADJUST {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    signed __int64 OffsetNanoseconds;
+    TIMECARD_TIME ResultingTime;
+    unsigned __int32 Reserved[4];
+} TIMECARD_PHC_ADJUST;
+
+/* Raw ART EEPROM map: config at 0x000, temperature table at 0x090. */
+typedef struct _TIMECARD_DISCIPLINE_BLOB {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Length;
+    unsigned __int32 Reserved;
+    unsigned char Data[TIMECARD_DISCIPLINE_EEPROM_SIZE];
+} TIMECARD_DISCIPLINE_BLOB;
 
 typedef struct _TIMECARD_CLOCK_SOURCE_CONTROL {
     unsigned __int32 Size;

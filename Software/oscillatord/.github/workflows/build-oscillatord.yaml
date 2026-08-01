@@ -1,0 +1,62 @@
+name: Oscillatord
+
+on:
+  pull_request:
+    branches: [ main, dev ]
+  push:
+    branches: [ main, dev ]
+
+jobs:
+  build-oscillatord:
+    name: Build Oscillator Daemon
+    runs-on: ubuntu-latest
+    steps:
+    - name: Clone Ublox configuration
+      uses: actions/checkout@v3
+      with:
+          repository: orolia2s/ubloxcfg
+          ref: main
+    - name: Install perl modules for ubloxcfg code-gen
+      run: sudo apt-get update && sudo apt-get install -y libpath-tiny-perl libdata-float-perl
+    - name: Compile Ublox configuration shared library
+      run: |
+        cmake -S . -B build
+        cmake --build build
+    - name: Install it
+      run: sudo cmake --install build
+
+    - name: Clone Discipline minipod
+      uses: actions/checkout@v3
+      with:
+        repository: orolia2s/disciplining-minipod
+        ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref }}
+
+    - name: Configure CMake
+      run: cmake -B ${{ github.workspace }}/build
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build
+
+    - name: Install
+      run: sudo make -C ${{github.workspace}}/build install
+
+
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    - name: Clone Oscillatord
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgps-dev libjson-c-dev pps-tools libsystemd-dev
+
+    - name: Configure CMake
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{ github.workspace }}/build -DBUILD_TESTS=1 -DBUILD_UTILS=1
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build

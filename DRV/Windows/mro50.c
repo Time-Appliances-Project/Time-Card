@@ -133,10 +133,18 @@ TimeCardMro50Control(PDEVICE_CONTEXT context,
     case TIMECARD_MRO50_ACTION_QUERY:
         break;
     case TIMECARD_MRO50_ACTION_ADJUST_FINE:
+        if (control->Value > TIMECARD_MRO50_FINE_MAXIMUM) {
+            operationStatus = STATUS_INVALID_PARAMETER;
+            break;
+        }
         operationStatus = TimeCardMro50AdjustLocked(
             context, MRO50_OP_ADJUST_FINE, control->Value);
         break;
     case TIMECARD_MRO50_ACTION_ADJUST_COARSE:
+        if (control->Value > TIMECARD_MRO50_COARSE_MAXIMUM) {
+            operationStatus = STATUS_INVALID_PARAMETER;
+            break;
+        }
         operationStatus = TimeCardMro50AdjustLocked(
             context, MRO50_OP_ADJUST_COARSE, control->Value);
         break;
