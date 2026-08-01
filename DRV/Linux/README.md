@@ -79,6 +79,15 @@ After the driver loads, the card exposes:
 Standard `linuxptp` tools such as `phc2sys`, `ptp4l`, and `ts2phc` can use the
 PHC.
 
+## Qt Control Center
+
+[`TimeCardControlCenter`](TimeCardControlCenter) provides a native Qt 6 Linux
+dashboard for PHC telemetry, TAI-aware system offset, GNSS and clock status,
+device endpoints, capability discovery, and read-only `oscillatord`
+monitoring. It includes a hardware simulation mode for development without a
+card. Build and safety details are in its
+[`README.md`](TimeCardControlCenter/README.md).
+
 ## Oscillator disciplining service
 
 The repository includes the complete Orolia/Safran

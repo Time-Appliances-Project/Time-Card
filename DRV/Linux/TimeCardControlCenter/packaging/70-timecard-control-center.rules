@@ -1,0 +1,2 @@
+# Grant read-only access to OCP Time Card PHCs through a dedicated group.
+SUBSYSTEM=="ptp", ATTR{clock_name}=="ptp_ocp", GROUP="timecard", MODE="0640"

@@ -166,7 +166,7 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
 
 * Bill of Materials (parts from Digikey)
 * Schematic and PCB of the time card
-* Linux Time Card driver in [`DRV/Linux`](DRV/Linux)
+* Linux Time Card driver and Qt Control Center in [`DRV/Linux`](DRV/Linux)
 * macOS DriverKit extension, activation app, and command-line tool in
   [`DRV/MacOS`](DRV/MacOS)
 * Windows KMDF driver, command-line tools, and Control Center in

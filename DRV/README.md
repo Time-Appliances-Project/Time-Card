@@ -3,8 +3,8 @@
 Platform-specific drivers and build instructions are kept in separate
 directories:
 
-- [Linux](Linux/README.md) - Linux PTP/PHC driver, kernel build files, and SPI
-  patches.
+- [Linux](Linux/README.md) - Linux PTP/PHC driver, Qt Control Center, kernel
+  build files, and SPI patches.
 - [MacOS](MacOS/README.md) - macOS DriverKit PCI extension, activation app,
   command-line control tool, shared ABI, and register-map tests.
 - [Windows](Windows/README.md) - Windows KMDF driver, control tool, installer,

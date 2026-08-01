@@ -1,0 +1,78 @@
+name: Linux Control Center
+
+on:
+  push:
+    paths:
+      - "DRV/Linux/TimeCardControlCenter/**"
+      - ".github/workflows/linux-control-center.yml"
+  pull_request:
+    paths:
+      - "DRV/Linux/TimeCardControlCenter/**"
+      - ".github/workflows/linux-control-center.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt and build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            linux-libc-dev \
+            ninja-build \
+            pkg-config \
+            qt6-base-dev \
+            qt6-declarative-dev \
+            qt6-declarative-dev-tools \
+            qml6-module-qtqml \
+            qml6-module-qtqml-models \
+            qml6-module-qtqml-workerscript \
+            qml6-module-qtquick \
+            qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts \
+            qml6-module-qtquick-templates \
+            qml6-module-qtquick-window
+
+      - name: Configure
+        run: >-
+          cmake
+          -S DRV/Linux/TimeCardControlCenter
+          -B build/linux-control-center
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build/linux-control-center --parallel
+
+      - name: QML lint
+        run: cmake --build build/linux-control-center --target timecard_control_center_qmllint
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QSG_RHI_BACKEND: software
+        run: ctest --test-dir build/linux-control-center --output-on-failure
+
+      - name: Stage install
+        run: >-
+          cmake --install build/linux-control-center
+          --prefix "${{ runner.temp }}/timecard-install"
+
+      - name: Mock dashboard smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QSG_RHI_BACKEND: software
+        run: >-
+          build/linux-control-center/timecard-control-center
+          --mock
+          --quit-after 1500

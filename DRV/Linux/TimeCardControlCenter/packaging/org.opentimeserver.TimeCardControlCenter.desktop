@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Time Card Control Center
+Comment=Monitor the OCP Time Card precision clock and timing subsystems
+Exec=timecard-control-center
+Icon=org.opentimeserver.TimeCardControlCenter
+Terminal=false
+Categories=System;Monitor;
+Keywords=PTP;PHC;GNSS;Timing;Time Card;
