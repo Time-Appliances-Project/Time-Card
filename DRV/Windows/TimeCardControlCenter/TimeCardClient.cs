@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -10,7 +11,7 @@ namespace TimeCardControlCenter
 {
     public sealed class TimeCardClient : IDisposable
     {
-        private const string DevicePath = @"\\.\TimeCard0";
+        private const string DevicePathPrefix = @"\\.\TimeCard";
         private const uint GenericRead = 0x80000000;
         private const uint GenericWrite = 0x40000000;
         private const uint FileShareRead = 0x00000001;
@@ -26,6 +27,11 @@ namespace TimeCardControlCenter
         private const int MaximumFlashTransfer = 256;
         private const int FlashTransferHeaderSize = 16;
         private const int FlashTransferBufferSize = 272;
+        private const uint DigcfPresent = 0x00000002;
+        private const uint DigcfDeviceInterface = 0x00000010;
+        private const int ErrorInsufficientBuffer = 122;
+        private static readonly Guid TimeCardDeviceInterface = new Guid(
+            "8315a67a-3d76-4f6c-b557-b5a65d55545c");
 
         private static readonly uint IoctlSetTime = ControlCode(1, FileWriteAccess);
         private static readonly uint IoctlGetInfo = ControlCode(2, FileReadAccess);
@@ -65,13 +71,66 @@ namespace TimeCardControlCenter
         private static readonly uint IoctlPhcAdjust = ControlCode(36, FileReadAccess | FileWriteAccess);
         private static readonly uint IoctlDisciplineRead = ControlCode(37, FileReadAccess);
         private static readonly uint IoctlDisciplineWrite = ControlCode(38, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlFpgaCapabilities = ControlCode(39, FileReadAccess);
+        private static readonly uint IoctlClockTelemetry = ControlCode(40, FileReadAccess);
+        private static readonly uint IoctlPpsQuery = ControlCode(41, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlPpsSet = ControlCode(42, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlTimecodeQuery = ControlCode(43, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlTimecodeSet = ControlCode(44, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlTodQuery = ControlCode(45, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlTodSet = ControlCode(46, FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlFpgaImageQuery = ControlCode(47, FileReadAccess);
+        private static readonly uint IoctlDisciplineLease = ControlCode(48,
+            FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlTimestampQuery = ControlCode(49,
+            FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlTimestampSet = ControlCode(50,
+            FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlTimestampRead = ControlCode(51,
+            FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlClockAdjustQuery = ControlCode(52,
+            FileReadAccess);
+        private static readonly uint IoctlClockAdjustSet = ControlCode(53,
+            FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlCoreInventoryQuery = ControlCode(54,
+            FileReadAccess);
+        private static readonly uint IoctlSignalEventRead = ControlCode(55,
+            FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlFpgaContractQuery = ControlCode(56,
+            FileReadAccess);
+        private static readonly uint IoctlFpgaContractSet = ControlCode(57,
+            FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlNmeaUtcQuery = ControlCode(58,
+            FileReadAccess);
+        private static readonly uint IoctlNmeaUtcSet = ControlCode(59,
+            FileReadAccess | FileWriteAccess);
+        private static readonly uint IoctlClockAdvancedQuery = ControlCode(60,
+            FileReadAccess);
+        private static readonly uint IoctlClockAdvancedSet = ControlCode(61,
+            FileReadAccess | FileWriteAccess);
 
         private readonly object gate = new object();
+        private readonly string devicePath;
         private SafeFileHandle handle;
 
         public TimeCardClient()
+            : this(0u)
         {
-            handle = CreateFile(DevicePath, GenericRead | GenericWrite,
+        }
+
+        public TimeCardClient(uint deviceIndex)
+            : this(ResolveDevicePath(deviceIndex))
+        {
+        }
+
+        public TimeCardClient(string selectedDevicePath)
+        {
+            if (string.IsNullOrWhiteSpace(selectedDevicePath))
+                throw new ArgumentException(
+                    "A Time Card device-interface path is required.",
+                    "selectedDevicePath");
+            devicePath = selectedDevicePath;
+            handle = CreateFile(devicePath, GenericRead | GenericWrite,
                 FileShareRead | FileShareWrite, IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
             if (handle.IsInvalid)
             {
@@ -79,17 +138,157 @@ namespace TimeCardControlCenter
                 handle.Dispose();
                 handle = null;
                 throw new Win32Exception(error,
-                    "Unable to open the OCP Time Card driver at " + DevicePath + ".");
+                    "Unable to open the OCP Time Card driver at " + devicePath + ".");
             }
+        }
+
+        public string DevicePath { get { return devicePath; } }
+
+        public static IList<string> EnumerateDevicePaths()
+        {
+            List<string> paths = new List<string>();
+            Guid interfaceClass = TimeCardDeviceInterface;
+            IntPtr set = SetupDiGetClassDevs(ref interfaceClass, IntPtr.Zero,
+                IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
+            if (set == new IntPtr(-1))
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Windows could not create the Time Card device inventory.");
+            try
+            {
+                for (uint index = 0; ; ++index)
+                {
+                    SpDeviceInterfaceData data = new SpDeviceInterfaceData
+                    {
+                        Size = (uint)Marshal.SizeOf(
+                            typeof(SpDeviceInterfaceData))
+                    };
+                    if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero,
+                        ref interfaceClass, index, ref data))
+                    {
+                        int error = Marshal.GetLastWin32Error();
+                        if (error == 259) // ERROR_NO_MORE_ITEMS
+                            break;
+                        throw new Win32Exception(error,
+                            "Windows could not enumerate Time Card interfaces.");
+                    }
+
+                    uint required = 0;
+                    SetupDiGetDeviceInterfaceDetail(set, ref data,
+                        IntPtr.Zero, 0, ref required, IntPtr.Zero);
+                    int detailError = Marshal.GetLastWin32Error();
+                    if (required == 0 || detailError != ErrorInsufficientBuffer)
+                        throw new Win32Exception(detailError,
+                            "Windows could not size a Time Card interface path.");
+                    IntPtr detail = Marshal.AllocHGlobal(checked((int)required));
+                    try
+                    {
+                        Marshal.WriteInt32(detail, IntPtr.Size == 8 ? 8 : 6);
+                        if (!SetupDiGetDeviceInterfaceDetail(set, ref data,
+                            detail, required, ref required, IntPtr.Zero))
+                            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                                "Windows could not read a Time Card interface path.");
+                        // cbSize is 8 on x64 (6 on x86), but DevicePath always
+                        // begins immediately after the 4-byte DWORD.
+                        string path = Marshal.PtrToStringUni(IntPtr.Add(detail,
+                            4));
+                        if (!string.IsNullOrWhiteSpace(path))
+                            paths.Add(path);
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(detail);
+                    }
+                }
+            }
+            finally
+            {
+                SetupDiDestroyDeviceInfoList(set);
+            }
+            return paths.OrderBy(value => value,
+                StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        public static IList<TimeCardDeviceDescriptor> EnumerateDevices()
+        {
+            List<TimeCardDeviceDescriptor> devices =
+                new List<TimeCardDeviceDescriptor>();
+            foreach (string path in EnumerateDevicePaths())
+            {
+                string serial = string.Empty;
+                string board = "Time Card";
+                string error = string.Empty;
+                uint abi = 0;
+                bool accessible = false;
+                try
+                {
+                    using (TimeCardClient probe = new TimeCardClient(path))
+                    {
+                        accessible = true;
+                        try
+                        {
+                            TimeCardCapabilities capabilities =
+                                probe.GetCapabilities();
+                            board = capabilities.BoardName;
+                            abi = capabilities.AbiVersion;
+                        }
+                        catch (Exception ex)
+                        {
+                            error = "Capability probe: " + ex.Message;
+                        }
+                        try
+                        {
+                            TimeCardIdentity identity = probe.GetIdentity();
+                            if (identity != null && identity.IsValid)
+                                serial = identity.SerialNumber;
+                        }
+                        catch (Exception ex)
+                        {
+                            error = AppendProbeError(error,
+                                "Identity probe: " + ex.Message);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    error = ex.Message;
+                }
+                devices.Add(new TimeCardDeviceDescriptor(path, serial, board,
+                    abi, accessible, error));
+            }
+            return devices;
+        }
+
+        private static string AppendProbeError(string current, string next)
+        {
+            return string.IsNullOrWhiteSpace(current) ? next :
+                current + " " + next;
+        }
+
+        private static string ResolveDevicePath(uint deviceIndex)
+        {
+            IList<string> interfaces = EnumerateDevicePaths();
+            if (deviceIndex < (uint)interfaces.Count)
+                return interfaces[(int)deviceIndex];
+            if (interfaces.Count == 0 && deviceIndex == 0u)
+                return DevicePathPrefix + "0"; // ABI 1-13 compatibility.
+            throw new Win32Exception(2, string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "Time Card index {0} is not present ({1} interface(s) found).",
+                deviceIndex, interfaces.Count));
         }
 
         public TimeCardSnapshot GetSnapshot()
         {
             TimeCardInfoRaw info = GetOutput<TimeCardInfoRaw>(IoctlGetInfo);
+            ulong tickBefore = GetTickCount64();
             TimeCardCrossTimestampRaw timestamp =
                 GetOutput<TimeCardCrossTimestampRaw>(IoctlGetCrossTimestamp);
+            ulong tickAfter = GetTickCount64();
+            ulong sampleTick = tickAfter >= tickBefore ?
+                tickBefore + ((tickAfter - tickBefore) / 2ul) : tickBefore;
             TimeCardHierarchyRaw hierarchy = SetHierarchyRaw(0, false);
-            return new TimeCardSnapshot(info, timestamp, hierarchy);
+            return new TimeCardSnapshot(info, timestamp, hierarchy,
+                sampleTick);
         }
 
         public void SetClockFromSystem()
@@ -97,10 +296,20 @@ namespace TimeCardControlCenter
             DateTime utc = DateTime.UtcNow;
             DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             long ticks = (utc - epoch).Ticks;
+            SetClockUtc(ticks / TimeSpan.TicksPerSecond,
+                checked((uint)((ticks % TimeSpan.TicksPerSecond) * 100L)));
+        }
+
+        public void SetClockUtc(long unixSeconds, uint nanoseconds)
+        {
+            if (unixSeconds < 0)
+                throw new ArgumentOutOfRangeException("unixSeconds");
+            if (nanoseconds >= 1000000000u)
+                throw new ArgumentOutOfRangeException("nanoseconds");
             TimeCardTimeRaw value = new TimeCardTimeRaw
             {
-                Seconds = (ulong)(ticks / TimeSpan.TicksPerSecond),
-                Nanoseconds = (uint)((ticks % TimeSpan.TicksPerSecond) * 100L),
+                Seconds = checked((ulong)unixSeconds),
+                Nanoseconds = nanoseconds,
                 Reserved = 0
             };
             SendInput(IoctlSetTime, value);
@@ -176,12 +385,51 @@ namespace TimeCardControlCenter
         public NmeaOutputState SetNmeaOutput(bool enabled, uint baud,
                                               bool inverted)
         {
+            return SetNmeaOutputCore(enabled, baud, inverted, false, false,
+                0, 0, 0, 0);
+        }
+
+        public NmeaOutputState SetNmeaOutput(bool enabled, uint baud,
+                                              bool inverted, bool clearError)
+        {
+            return SetNmeaOutputCore(enabled, baud, inverted, false,
+                clearError, 0, 0, 0, 0);
+        }
+
+        public NmeaOutputState SetNmeaOutput(bool enabled, uint baud,
+            bool inverted, int correctionSeconds, int localOffsetMinutes,
+            uint gnss, uint messageDisableMask)
+        {
+            return SetNmeaOutputCore(enabled, baud, inverted, true, false,
+                correctionSeconds, localOffsetMinutes, gnss,
+                messageDisableMask);
+        }
+
+        public NmeaOutputState SetNmeaOutput(bool enabled, uint baud,
+            bool inverted, int correctionSeconds, int localOffsetMinutes,
+            uint gnss, uint messageDisableMask, bool clearError)
+        {
+            return SetNmeaOutputCore(enabled, baud, inverted, true,
+                clearError, correctionSeconds, localOffsetMinutes, gnss,
+                messageDisableMask);
+        }
+
+        private NmeaOutputState SetNmeaOutputCore(bool enabled, uint baud,
+            bool inverted, bool advancedValid, bool clearError,
+            int correctionSeconds, int localOffsetMinutes, uint gnss,
+            uint messageDisableMask)
+        {
             TimeCardNmeaControlRaw request = new TimeCardNmeaControlRaw
             {
                 Size = (uint)Marshal.SizeOf(typeof(TimeCardNmeaControlRaw)),
-                Flags = enabled ? 2u : 0u,
+                Flags = (enabled ? 2u : 0u) | (advancedValid ? 4u : 0u) |
+                    (clearError ? 0x80000000u : 0u),
                 Baud = baud,
-                Polarity = inverted ? 1u : 0u
+                Polarity = inverted ? 1u : 0u,
+                CorrectionSeconds = correctionSeconds,
+                LocalOffsetMinutes = localOffsetMinutes,
+                Gnss = gnss,
+                MessageDisableMask = messageDisableMask
             };
             byte[] output = Call(IoctlNmeaSet, StructToBytes(request),
                 Marshal.SizeOf(typeof(TimeCardNmeaControlRaw)));
@@ -198,21 +446,44 @@ namespace TimeCardControlCenter
         public SignalGeneratorState GetSignalGenerator(uint generator)
         {
             return CallSignalGenerator(IoctlSignalQuery, generator, false,
-                0, 0, 0, false);
+                0, 0, 0, false, 0, 0, false, 0, 0);
         }
 
         public SignalGeneratorState SetSignalGenerator(uint generator,
             bool enabled, ulong periodNanoseconds, ulong pulseNanoseconds,
-            ulong phaseNanoseconds, bool inverted)
+            ulong phaseNanoseconds, bool activeHigh)
         {
             return CallSignalGenerator(IoctlSignalSet, generator, enabled,
                 periodNanoseconds, pulseNanoseconds, phaseNanoseconds,
-                inverted);
+                activeHigh, 0, 0, false, 0, 0);
         }
 
-        private SignalGeneratorState CallSignalGenerator(uint code,
-            uint generator, bool enabled, ulong periodNanoseconds,
-            ulong pulseNanoseconds, ulong phaseNanoseconds, bool inverted)
+        public SignalGeneratorState SetSignalGenerator(uint generator,
+            bool enabled, ulong periodNanoseconds, ulong pulseNanoseconds,
+            ulong phaseNanoseconds, bool activeHigh, uint repeatCount,
+            uint cableDelayNanoseconds)
+        {
+            return CallSignalGenerator(IoctlSignalSet, generator, enabled,
+                periodNanoseconds, pulseNanoseconds, phaseNanoseconds,
+                activeHigh, repeatCount, cableDelayNanoseconds, false, 0, 0);
+        }
+
+        public SignalGeneratorState SetSignalGeneratorAt(uint generator,
+            bool enabled, ulong periodNanoseconds, ulong pulseNanoseconds,
+            bool activeHigh, uint repeatCount, uint cableDelayNanoseconds,
+            ulong startSeconds, uint startNanoseconds)
+        {
+            if (startSeconds > uint.MaxValue)
+                throw new ArgumentOutOfRangeException("startSeconds");
+            if (startNanoseconds >= 1000000000u)
+                throw new ArgumentOutOfRangeException("startNanoseconds");
+            return CallSignalGenerator(IoctlSignalSet, generator, enabled,
+                periodNanoseconds, pulseNanoseconds, 0, activeHigh,
+                repeatCount, cableDelayNanoseconds, true, startSeconds,
+                startNanoseconds);
+        }
+
+        public SignalGeneratorState ClearSignalGeneratorStatus(uint generator)
         {
             if (generator == 0 || generator > 4)
                 throw new ArgumentOutOfRangeException("generator");
@@ -220,15 +491,466 @@ namespace TimeCardControlCenter
             {
                 Size = (uint)Marshal.SizeOf(typeof(TimeCardSignalControlRaw)),
                 Generator = generator,
-                Flags = (enabled ? 2u : 0u) | (inverted ? 4u : 0u),
+                Flags = 0x40u
+            };
+            byte[] output = Call(IoctlSignalSet, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardSignalControlRaw)));
+            return new SignalGeneratorState(
+                BytesToStruct<TimeCardSignalControlRaw>(output));
+        }
+
+        private SignalGeneratorState CallSignalGenerator(uint code,
+            uint generator, bool enabled, ulong periodNanoseconds,
+            ulong pulseNanoseconds, ulong phaseNanoseconds, bool activeHigh,
+            uint repeatCount, uint cableDelayNanoseconds, bool absoluteStart,
+            ulong startSeconds, uint startNanoseconds)
+        {
+            if (generator == 0 || generator > 4)
+                throw new ArgumentOutOfRangeException("generator");
+            TimeCardSignalControlRaw request = new TimeCardSignalControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardSignalControlRaw)),
+                Generator = generator,
+                Flags = (enabled ? 2u : 0u) | (activeHigh ? 4u : 0u) |
+                    (absoluteStart ? 0x20u : 0u),
+                RepeatCount = repeatCount,
+                CableDelayNanoseconds = cableDelayNanoseconds,
                 PeriodNanoseconds = periodNanoseconds,
                 PulseNanoseconds = pulseNanoseconds,
-                PhaseNanoseconds = phaseNanoseconds
+                PhaseNanoseconds = phaseNanoseconds,
+                StartSeconds = startSeconds,
+                StartNanoseconds = startNanoseconds
             };
             byte[] output = Call(code, StructToBytes(request),
                 Marshal.SizeOf(typeof(TimeCardSignalControlRaw)));
             return new SignalGeneratorState(
                 BytesToStruct<TimeCardSignalControlRaw>(output));
+        }
+
+        public FpgaCapabilities GetFpgaCapabilities()
+        {
+            return new FpgaCapabilities(
+                GetOutput<TimeCardFpgaCapabilitiesRaw>(IoctlFpgaCapabilities));
+        }
+
+        public FpgaImageInfo GetFpgaImageInfo()
+        {
+            return new FpgaImageInfo(
+                GetOutput<TimeCardFpgaImageInfoRaw>(IoctlFpgaImageQuery));
+        }
+
+        public ClockTelemetryState GetClockTelemetry()
+        {
+            return new ClockTelemetryState(
+                GetOutput<TimeCardClockTelemetryRaw>(IoctlClockTelemetry));
+        }
+
+        public TimestampChannelState GetTimestampChannel(uint channel)
+        {
+            return CallTimestampChannel(IoctlTimestampQuery, channel, false,
+                0u, 0u, false, false);
+        }
+
+        public TimestampChannelState SetTimestampChannel(uint channel,
+            bool enabled, uint polarity, uint cableDelayNanoseconds,
+            bool clearError, bool clearQueue)
+        {
+            return CallTimestampChannel(IoctlTimestampSet, channel, enabled,
+                polarity, cableDelayNanoseconds, clearError, clearQueue);
+        }
+
+        private TimestampChannelState CallTimestampChannel(uint ioctl,
+            uint channel, bool enabled, uint polarity,
+            uint cableDelayNanoseconds, bool clearError, bool clearQueue)
+        {
+            if (channel >= 6u)
+                throw new ArgumentOutOfRangeException("channel");
+            if (polarity > 1u)
+                throw new ArgumentOutOfRangeException("polarity");
+            if (cableDelayNanoseconds > 0x7fffffffu)
+                throw new ArgumentOutOfRangeException("cableDelayNanoseconds");
+            TimeCardTimestampControlRaw request =
+                new TimeCardTimestampControlRaw
+                {
+                    Size = (uint)Marshal.SizeOf(
+                        typeof(TimeCardTimestampControlRaw)),
+                    Channel = channel,
+                    Flags = (enabled ? 2u : 0u) |
+                        (clearError ? 0x40000000u : 0u) |
+                        (clearQueue ? 0x80000000u : 0u),
+                    Polarity = polarity,
+                    CableDelayNanoseconds = cableDelayNanoseconds
+                };
+            byte[] output = Call(ioctl, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardTimestampControlRaw)));
+            return new TimestampChannelState(
+                BytesToStruct<TimeCardTimestampControlRaw>(output));
+        }
+
+        public TimestampEventBatch ReadTimestampEvents(uint channel,
+                                                        uint maximumEvents)
+        {
+            if (channel >= 6u)
+                throw new ArgumentOutOfRangeException("channel");
+            if (maximumEvents == 0u || maximumEvents > 16u)
+                throw new ArgumentOutOfRangeException("maximumEvents");
+            int size = Marshal.SizeOf(typeof(TimeCardTimestampBatchRaw));
+            byte[] input = new byte[size];
+            Buffer.BlockCopy(BitConverter.GetBytes((uint)size), 0, input, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(channel), 0, input, 4, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(maximumEvents), 0, input, 8, 4);
+            byte[] output = Call(IoctlTimestampRead, input, size);
+            return new TimestampEventBatch(
+                BytesToStruct<TimeCardTimestampBatchRaw>(output));
+        }
+
+        public ClockAdjustmentState GetClockAdjustment()
+        {
+            return new ClockAdjustmentState(
+                GetOutput<TimeCardClockAdjustmentRaw>(IoctlClockAdjustQuery));
+        }
+
+        public ClockAdjustmentState SetClockAdjustment(int offsetNanoseconds,
+            uint offsetIntervalNanoseconds, long driftPpbQ16,
+            uint driftIntervalNanoseconds, uint inSyncThresholdNanoseconds,
+            uint applyFlags)
+        {
+            if ((applyFlags & ~0x00070000u) != 0u || applyFlags == 0u)
+                throw new ArgumentOutOfRangeException("applyFlags");
+            if (offsetNanoseconds < -1000000000 ||
+                offsetNanoseconds > 1000000000)
+                throw new ArgumentOutOfRangeException("offsetNanoseconds");
+            if (driftPpbQ16 < -(1000000L << 16) ||
+                driftPpbQ16 > (1000000L << 16))
+                throw new ArgumentOutOfRangeException("driftPpbQ16");
+            if ((applyFlags & 0x00010000u) != 0u &&
+                offsetIntervalNanoseconds == 0u)
+                throw new ArgumentOutOfRangeException(
+                    "offsetIntervalNanoseconds");
+            if ((applyFlags & 0x00020000u) != 0u &&
+                driftIntervalNanoseconds == 0u)
+                throw new ArgumentOutOfRangeException(
+                    "driftIntervalNanoseconds");
+            if (inSyncThresholdNanoseconds > 1000000000u)
+                throw new ArgumentOutOfRangeException(
+                    "inSyncThresholdNanoseconds");
+            TimeCardClockAdjustmentRaw request =
+                new TimeCardClockAdjustmentRaw
+                {
+                    Size = (uint)Marshal.SizeOf(
+                        typeof(TimeCardClockAdjustmentRaw)),
+                    Flags = applyFlags,
+                    OffsetNanoseconds = offsetNanoseconds,
+                    OffsetIntervalNanoseconds = offsetIntervalNanoseconds,
+                    DriftPpbQ16 = driftPpbQ16,
+                    DriftIntervalNanoseconds = driftIntervalNanoseconds,
+                    InSyncThresholdNanoseconds = inSyncThresholdNanoseconds,
+                    Reserved = new uint[7]
+                };
+            byte[] output = Call(IoctlClockAdjustSet,
+                StructToBytes(request), Marshal.SizeOf(
+                    typeof(TimeCardClockAdjustmentRaw)));
+            return new ClockAdjustmentState(
+                BytesToStruct<TimeCardClockAdjustmentRaw>(output));
+        }
+
+        public ClockAdvancedState GetClockAdvanced()
+        {
+            return new ClockAdvancedState(
+                GetOutput<TimeCardClockAdvancedControlRaw>(
+                    IoctlClockAdvancedQuery));
+        }
+
+        public ClockAdvancedState SetClockAdvanced(ClockAdvancedState value,
+                                                    uint applyFlags)
+        {
+            if (value == null)
+                throw new ArgumentNullException("value");
+            if ((applyFlags & ~0x3fu) != 0u || applyFlags == 0u)
+                throw new ArgumentOutOfRangeException("applyFlags");
+            TimeCardClockAdvancedControlRaw request =
+                new TimeCardClockAdvancedControlRaw
+                {
+                    Size = (uint)Marshal.SizeOf(
+                        typeof(TimeCardClockAdvancedControlRaw)),
+                    Control = value.Control,
+                    ApplyFlags = applyFlags,
+                    OffsetRateLimiter = value.OffsetRateLimiter,
+                    DriftRateLimiterQ16 = value.DriftRateLimiterQ16,
+                    AgingConfiguration = value.AgingConfiguration,
+                    HoldoverConfiguration = value.HoldoverConfiguration,
+                    OffsetOutlierFilter = value.OffsetOutlierFilter,
+                    DriftOutlierFilter = value.DriftOutlierFilter,
+                    ServoOffsetP = value.ServoOffsetP,
+                    ServoOffsetI = value.ServoOffsetI,
+                    ServoDriftP = value.ServoDriftP,
+                    ServoDriftI = value.ServoDriftI,
+                    Reserved = new uint[3]
+                };
+            byte[] output = Call(IoctlClockAdvancedSet,
+                StructToBytes(request), Marshal.SizeOf(
+                    typeof(TimeCardClockAdvancedControlRaw)));
+            return new ClockAdvancedState(
+                BytesToStruct<TimeCardClockAdvancedControlRaw>(output));
+        }
+
+        public ClockAdvancedState SetClockAdvanced(uint control,
+            uint applyFlags, uint offsetRateLimiter,
+            uint driftRateLimiterQ16, uint agingConfiguration,
+            uint holdoverConfiguration, uint offsetOutlierFilter,
+            uint driftOutlierFilter, uint servoOffsetP, uint servoOffsetI,
+            uint servoDriftP, uint servoDriftI)
+        {
+            if ((applyFlags & ~0x3fu) != 0u || applyFlags == 0u)
+                throw new ArgumentOutOfRangeException("applyFlags");
+            if (servoOffsetP > 0xffffu || servoOffsetI > 0xffffu ||
+                servoDriftP > 0xffffu || servoDriftI > 0xffffu)
+                throw new ArgumentOutOfRangeException("servoOffsetP");
+            TimeCardClockAdvancedControlRaw request =
+                new TimeCardClockAdvancedControlRaw
+                {
+                    Size = (uint)Marshal.SizeOf(
+                        typeof(TimeCardClockAdvancedControlRaw)),
+                    Control = control,
+                    ApplyFlags = applyFlags,
+                    OffsetRateLimiter = offsetRateLimiter,
+                    DriftRateLimiterQ16 = driftRateLimiterQ16,
+                    AgingConfiguration = agingConfiguration,
+                    HoldoverConfiguration = holdoverConfiguration,
+                    OffsetOutlierFilter = offsetOutlierFilter,
+                    DriftOutlierFilter = driftOutlierFilter,
+                    ServoOffsetP = servoOffsetP,
+                    ServoOffsetI = servoOffsetI,
+                    ServoDriftP = servoDriftP,
+                    ServoDriftI = servoDriftI,
+                    Reserved = new uint[3]
+                };
+            byte[] output = Call(IoctlClockAdvancedSet,
+                StructToBytes(request), Marshal.SizeOf(
+                    typeof(TimeCardClockAdvancedControlRaw)));
+            return new ClockAdvancedState(
+                BytesToStruct<TimeCardClockAdvancedControlRaw>(output));
+        }
+
+        public CoreInventory GetCoreInventory()
+        {
+            return new CoreInventory(
+                GetOutput<TimeCardCoreInventoryRaw>(IoctlCoreInventoryQuery));
+        }
+
+        public SignalCompletionBatch ReadSignalCompletionEvents(
+            uint generator, uint maximumEvents)
+        {
+            if (generator == 0u || generator > 4u)
+                throw new ArgumentOutOfRangeException("generator");
+            if (maximumEvents == 0u || maximumEvents > 16u)
+                throw new ArgumentOutOfRangeException("maximumEvents");
+            int size = Marshal.SizeOf(typeof(TimeCardSignalEventBatchRaw));
+            byte[] input = new byte[size];
+            Buffer.BlockCopy(BitConverter.GetBytes((uint)size), 0, input, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(generator), 0, input, 4, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(maximumEvents), 0, input, 8, 4);
+            byte[] output = Call(IoctlSignalEventRead, input, size);
+            return new SignalCompletionBatch(
+                BytesToStruct<TimeCardSignalEventBatchRaw>(output));
+        }
+
+        public FpgaImageContract GetFpgaImageContract()
+        {
+            return new FpgaImageContract(
+                GetOutput<TimeCardFpgaImageContractRaw>(
+                    IoctlFpgaContractQuery));
+        }
+
+        public FpgaImageContract SetFpgaImageContract(uint rawImageVersion,
+            uint capabilityFlags, uint boardProfile, uint layout)
+        {
+            if (rawImageVersion == 0u)
+                throw new ArgumentOutOfRangeException("rawImageVersion");
+            if ((capabilityFlags & ~0xfffu) != 0u)
+                throw new ArgumentOutOfRangeException("capabilityFlags");
+            if ((capabilityFlags & 0x10u) != 0u &&
+                (capabilityFlags & 0x08u) == 0u)
+                throw new ArgumentException(
+                    "UTC writes require UTC read capability.",
+                    "capabilityFlags");
+            TimeCardFpgaImageContractRaw request =
+                new TimeCardFpgaImageContractRaw
+                {
+                    Size = (uint)Marshal.SizeOf(
+                        typeof(TimeCardFpgaImageContractRaw)),
+                    AbiVersion = 15u,
+                    RawImageVersion = rawImageVersion,
+                    CapabilityFlags = capabilityFlags,
+                    BoardProfile = boardProfile,
+                    Layout = layout,
+                    Acknowledgement = 0x54434d46u,
+                    Reserved = new uint[7]
+                };
+            byte[] output = Call(IoctlFpgaContractSet,
+                StructToBytes(request), Marshal.SizeOf(
+                    typeof(TimeCardFpgaImageContractRaw)));
+            return new FpgaImageContract(
+                BytesToStruct<TimeCardFpgaImageContractRaw>(output));
+        }
+
+        public NmeaUtcState GetNmeaUtc()
+        {
+            return new NmeaUtcState(
+                GetOutput<TimeCardNmeaUtcControlRaw>(IoctlNmeaUtcQuery));
+        }
+
+        public NmeaUtcState SetNmeaUtc(uint utcOffsetSeconds, bool leap61,
+            bool leap59, bool offsetValid)
+        {
+            if (utcOffsetSeconds > 0xffffu)
+                throw new ArgumentOutOfRangeException("utcOffsetSeconds");
+            TimeCardNmeaUtcControlRaw request =
+                new TimeCardNmeaUtcControlRaw
+                {
+                    Size = (uint)Marshal.SizeOf(
+                        typeof(TimeCardNmeaUtcControlRaw)),
+                    Flags = (leap61 ? 8u : 0u) | (leap59 ? 0x10u : 0u) |
+                        (offsetValid ? 0x20u : 0u),
+                    UtcOffsetSeconds = utcOffsetSeconds,
+                    Reserved = new uint[10]
+                };
+            byte[] output = Call(IoctlNmeaUtcSet, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardNmeaUtcControlRaw)));
+            return new NmeaUtcState(
+                BytesToStruct<TimeCardNmeaUtcControlRaw>(output));
+        }
+
+        public PpsEngineState GetPpsEngine(uint core)
+        {
+            return CallPpsEngine(IoctlPpsQuery, core, false, false, 0, 0,
+                false);
+        }
+
+        public PpsEngineState SetPpsEngine(uint core, bool enabled,
+            bool activeHigh, uint pulseWidthMilliseconds,
+            int cableDelayNanoseconds, bool clearErrors)
+        {
+            return CallPpsEngine(IoctlPpsSet, core, enabled, activeHigh,
+                pulseWidthMilliseconds, cableDelayNanoseconds, clearErrors);
+        }
+
+        private PpsEngineState CallPpsEngine(uint code, uint core,
+            bool enabled, bool activeHigh, uint pulseWidthMilliseconds,
+            int cableDelayNanoseconds, bool clearErrors)
+        {
+            if (core < 1 || core > 2)
+                throw new ArgumentOutOfRangeException("core");
+            TimeCardPpsControlRaw request = new TimeCardPpsControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardPpsControlRaw)),
+                Core = core,
+                Flags = (enabled ? 2u : 0u) |
+                    (clearErrors ? 0x80000000u : 0u),
+                Polarity = activeHigh ? 1u : 0u,
+                PulseWidthMilliseconds = pulseWidthMilliseconds,
+                CableDelayNanoseconds = cableDelayNanoseconds
+            };
+            byte[] output = Call(code, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardPpsControlRaw)));
+            return new PpsEngineState(
+                BytesToStruct<TimeCardPpsControlRaw>(output));
+        }
+
+        public TimecodeEngineState GetTimecodeEngine(uint format, uint role)
+        {
+            return CallTimecodeEngine(IoctlTimecodeQuery, format, role,
+                false, 0, 0, 0, 0, 0, false, 0u, 0u);
+        }
+
+        public TimecodeEngineState SetTimecodeEngine(uint format, uint role,
+            bool enabled, uint mode, uint codeValue, int correctionSeconds,
+            int delayNanoseconds, uint controlBits, bool clearErrors)
+        {
+            return CallTimecodeEngine(IoctlTimecodeSet, format, role,
+                enabled, mode, codeValue, correctionSeconds,
+                delayNanoseconds, controlBits, clearErrors, 0u, 0u);
+        }
+
+        public TimecodeEngineState SetTimecodeEngine(uint format, uint role,
+            bool enabled, uint mode, uint codeValue, int correctionSeconds,
+            int delayNanoseconds, uint controlBits, bool clearErrors,
+            bool amplitudeModulation, uint manualYear)
+        {
+            if (manualYear != 0u &&
+                (manualYear < 1970u || manualYear > 2069u))
+                throw new ArgumentOutOfRangeException("manualYear");
+            return CallTimecodeEngine(IoctlTimecodeSet, format, role,
+                enabled, mode, codeValue, correctionSeconds,
+                delayNanoseconds, controlBits, clearErrors,
+                amplitudeModulation ? 1u : 0u, manualYear);
+        }
+
+        private TimecodeEngineState CallTimecodeEngine(uint ioctl,
+            uint format, uint role, bool enabled, uint mode, uint codeValue,
+            int correctionSeconds, int delayNanoseconds, uint controlBits,
+            bool clearErrors, uint amplitudeModulation, uint manualYear)
+        {
+            if (format < 1 || format > 2)
+                throw new ArgumentOutOfRangeException("format");
+            if (role < 1 || role > 2)
+                throw new ArgumentOutOfRangeException("role");
+            TimeCardTimecodeControlRaw request = new TimeCardTimecodeControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardTimecodeControlRaw)),
+                Format = format,
+                Role = role,
+                Flags = (enabled ? 2u : 0u) |
+                    (clearErrors ? 0x80000000u : 0u),
+                Mode = mode,
+                Code = codeValue,
+                CorrectionSeconds = correctionSeconds,
+                DelayNanoseconds = delayNanoseconds,
+                ControlBits = controlBits,
+                AmplitudeModulation = amplitudeModulation,
+                ManualYear = manualYear
+            };
+            byte[] output = Call(ioctl, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardTimecodeControlRaw)));
+            return new TimecodeEngineState(
+                BytesToStruct<TimeCardTimecodeControlRaw>(output));
+        }
+
+        public TodParserState GetTodParser()
+        {
+            return CallTodParser(IoctlTodQuery, false, 0, 0, 0, false, 0,
+                0, false);
+        }
+
+        public TodParserState SetTodParser(bool enabled, uint protocol,
+            uint gnss, uint baud, bool inverted, int correctionSeconds,
+            uint messageDisableMask, bool clearErrors)
+        {
+            return CallTodParser(IoctlTodSet, enabled, protocol, gnss, baud,
+                inverted, correctionSeconds, messageDisableMask,
+                clearErrors);
+        }
+
+        private TodParserState CallTodParser(uint ioctl, bool enabled,
+            uint protocol, uint gnss, uint baud, bool inverted,
+            int correctionSeconds, uint messageDisableMask, bool clearErrors)
+        {
+            TimeCardTodControlRaw request = new TimeCardTodControlRaw
+            {
+                Size = (uint)Marshal.SizeOf(typeof(TimeCardTodControlRaw)),
+                Flags = (enabled ? 2u : 0u) |
+                    (clearErrors ? 0x80000000u : 0u),
+                Protocol = protocol,
+                Gnss = gnss,
+                Baud = baud,
+                Polarity = inverted ? 1u : 0u,
+                CorrectionSeconds = correctionSeconds,
+                MessageDisableMask = messageDisableMask
+            };
+            byte[] output = Call(ioctl, StructToBytes(request),
+                Marshal.SizeOf(typeof(TimeCardTodControlRaw)));
+            return new TodParserState(
+                BytesToStruct<TimeCardTodControlRaw>(output));
         }
 
         public FrequencyCounterState GetFrequencyCounter(uint counter)
@@ -913,6 +1635,42 @@ namespace TimeCardControlCenter
                 GetOutput<TimeCardCapabilitiesRaw>(IoctlGetCapabilities));
         }
 
+        public DisciplineLeaseState GetDisciplineLease()
+        {
+            return ControlDisciplineLease(0u);
+        }
+
+        public DisciplineLeaseState AcquireDisciplineLease()
+        {
+            DisciplineLeaseState state = ControlDisciplineLease(1u);
+            if (!state.IsOwner)
+                throw new InvalidOperationException(
+                    "The driver did not grant oscillator discipline ownership.");
+            return state;
+        }
+
+        public DisciplineLeaseState ReleaseDisciplineLease()
+        {
+            return ControlDisciplineLease(2u);
+        }
+
+        private DisciplineLeaseState ControlDisciplineLease(uint action)
+        {
+            TimeCardDisciplineLeaseRaw request =
+                new TimeCardDisciplineLeaseRaw
+                {
+                    Size = (uint)Marshal.SizeOf(
+                        typeof(TimeCardDisciplineLeaseRaw)),
+                    Action = action,
+                    Reserved = new ulong[2]
+                };
+            byte[] output = Call(IoctlDisciplineLease,
+                StructToBytes(request), Marshal.SizeOf(
+                    typeof(TimeCardDisciplineLeaseRaw)));
+            return new DisciplineLeaseState(
+                BytesToStruct<TimeCardDisciplineLeaseRaw>(output));
+        }
+
         public TimeCardPhaseSample GetPhaseSample()
         {
             return new TimeCardPhaseSample(
@@ -1108,6 +1866,44 @@ namespace TimeCardControlCenter
             public ushort Milliseconds;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SpDeviceInterfaceData
+        {
+            public uint Size;
+            public Guid InterfaceClassGuid;
+            public uint Flags;
+            public UIntPtr Reserved;
+        }
+
+        [DllImport("setupapi.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        private static extern IntPtr SetupDiGetClassDevs(
+            ref Guid classGuid, IntPtr enumerator, IntPtr parentWindow,
+            uint flags);
+
+        [DllImport("setupapi.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiEnumDeviceInterfaces(
+            IntPtr deviceInfoSet, IntPtr deviceInfoData,
+            ref Guid interfaceClassGuid, uint memberIndex,
+            ref SpDeviceInterfaceData deviceInterfaceData);
+
+        [DllImport("setupapi.dll", CharSet = CharSet.Unicode,
+            SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiGetDeviceInterfaceDetail(
+            IntPtr deviceInfoSet,
+            ref SpDeviceInterfaceData deviceInterfaceData,
+            IntPtr deviceInterfaceDetailData,
+            uint deviceInterfaceDetailDataSize,
+            ref uint requiredSize,
+            IntPtr deviceInfoData);
+
+        [DllImport("setupapi.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetupDiDestroyDeviceInfoList(
+            IntPtr deviceInfoSet);
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess,
             uint shareMode, IntPtr securityAttributes, uint creationDisposition,
@@ -1122,5 +1918,8 @@ namespace TimeCardControlCenter
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SetSystemTime(ref NativeSystemTime systemTime);
+
+        [DllImport("kernel32.dll")]
+        private static extern ulong GetTickCount64();
     }
 }

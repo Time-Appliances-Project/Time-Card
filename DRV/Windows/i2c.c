@@ -2976,9 +2976,42 @@ TimeCardGetIdentity(PDEVICE_CONTEXT context, TIMECARD_IDENTITY *identity)
 static BOOLEAN
 TimeCardDisciplineBlobValid(const UCHAR *data)
 {
+    ULONG index;
+    ULONG bits;
+    LONG coarse;
+
     /* Version-1 config and temperature-table headers used by oscillatord. */
-    return data[0] == 'O' && data[1] == 1u &&
-           data[0x90] == 'O' && data[0x91] == 1u;
+    if (data[0] != 'O' || data[1] != 1u ||
+        data[0x90] != 'O' || data[0x91] != 1u ||
+        data[128] > 3u || data[129] > 10u) {
+        return FALSE;
+    }
+    /* Reject NaN/Inf coefficients and out-of-range [0,1] load nodes. */
+    for (index = 0; index < data[129]; ++index) {
+        RtlCopyMemory(&bits, data + 4u + index * sizeof(ULONG),
+                      sizeof(bits));
+        if ((bits & 0x80000000u) != 0u || bits > 0x3f800000u)
+            return FALSE;
+        RtlCopyMemory(&bits, data + 44u + index * sizeof(ULONG),
+                      sizeof(bits));
+        if ((bits & 0x7f800000u) == 0x7f800000u)
+            return FALSE;
+    }
+    for (index = 0; index < data[128]; ++index) {
+        RtlCopyMemory(&bits, data + 84u + index * sizeof(ULONG),
+                      sizeof(bits));
+        if ((bits & 0x80000000u) != 0u || bits > 0x3f800000u)
+            return FALSE;
+        RtlCopyMemory(&bits, data + 96u + index * sizeof(ULONG),
+                      sizeof(bits));
+        if ((bits & 0x7f800000u) == 0x7f800000u)
+            return FALSE;
+    }
+    RtlCopyMemory(&coarse, data + 108u, sizeof(coarse));
+    if (coarse < 0 || coarse > 0x003fffff)
+        return FALSE;
+    RtlCopyMemory(&coarse, data + 112u, sizeof(coarse));
+    return coarse >= -1 && coarse <= 0x003fffff;
 }
 
 static NTSTATUS

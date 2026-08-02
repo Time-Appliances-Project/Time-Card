@@ -116,6 +116,7 @@ $managedAbiSizes = @{
     TimeCardPhaseControlRaw = 32
     TimeCardPhcAdjustRaw = 48
     TimeCardDisciplineBlobRaw = 528
+    TimeCardDisciplineLeaseRaw = 32
 }
 $sizeOfType = [Runtime.InteropServices.Marshal].GetMethod(
     'SizeOf', [type[]]@([type]))
@@ -143,7 +144,9 @@ $timTp = [byte[]]::new(16)
 $navPvt = [byte[]]::new(24)
 $navPvt[20] = 3
 $navPvt[21] = 1
+$navPvt[23] = 12
 $timSvin = [byte[]]::new(26)
+[BitConverter]::GetBytes([uint32]1200).CopyTo($timSvin, 0)
 $timSvin[24] = 1
 $timSvin[25] = 0
 $messages.Add([uint16]0x0d01, $timTp)
@@ -168,7 +171,9 @@ if (-not (Epoch-Field 'HasTimePulse') -or
 $header = Get-Content -LiteralPath `
     (Join-Path $root 'include\timecard_ioctl.h') -Raw
 foreach ($required in @(
-    'TIMECARD_ABI_VERSION 11u',
+    'TIMECARD_ABI_VERSION 15u',
+    'IOCTL_TIMECARD_DISCIPLINE_LEASE',
+    'TIMECARD_DISCIPLINE_LEASE_ACQUIRE',
     'IOCTL_TIMECARD_GET_CAPABILITIES',
     'IOCTL_TIMECARD_PHASE_QUERY',
     'IOCTL_TIMECARD_PHASE_CONTROL',
@@ -181,6 +186,8 @@ foreach ($required in @(
 }
 
 $driver = Get-Content -LiteralPath (Join-Path $root 'discipline.c') -Raw
+$driverLifecycle = Get-Content -LiteralPath (Join-Path $root 'driver.c') -Raw
+$dispatcher = Get-Content -LiteralPath (Join-Path $root 'ioctl.c') -Raw
 $i2c = Get-Content -LiteralPath (Join-Path $root 'i2c.c') -Raw
 $engine = Get-Content -LiteralPath (Join-Path $root `
     'TimeCardControlCenter\NativeDiscipline.cs') -Raw
@@ -216,7 +223,13 @@ $invariants = @(
     @($engine, 'finally[\s\S]*SetMro50FineAdjustment\(originalFine\)',
         'calibration fine-control restoration'),
     @($engine, 'SetPhaseMeter\(false', 'phase capture cleanup'),
-    @($engine, 'QuantizationErrorPicoseconds\s*=\s*quantizationError',
+    @($engine, 'AcquireDisciplineLease\(',
+        'driver-enforced discipline ownership'),
+    @($engine, 'NativeGnssSessionManager',
+        'continuous associated-epoch GNSS parser'),
+    @($engine, 'Interlocked\.Exchange\(\s*ref calibrationRequested',
+        'lossless calibration command queue'),
+    @($engine, 'PreviousQuantizationErrorPicoseconds\s*\?\?\s*0',
         'previous-epoch u-blox quantization error'),
     @($engine, 'gnss\.HasTimePulse[\s\S]*gnss\.FixValid[\s\S]*surveyCompleted',
         'GNSS pulse, fix, and survey gating'),
@@ -228,6 +241,29 @@ $invariants = @(
 foreach ($invariant in $invariants) {
     if ($invariant[0] -notmatch $invariant[1]) {
         throw "Native discipline invariant missing: $($invariant[2])"
+    }
+}
+
+if ($driverLifecycle -notmatch `
+        'TimeCardDisciplineLeaseControl[\s\S]*TimeCardPhaseDisableLocked\(context\)[\s\S]*DisciplineOwner\s*=\s*NULL' -or
+    $driverLifecycle -notmatch `
+        'TimeCardEvtFileCleanup[\s\S]*WdfWaitLockAcquire[\s\S]*TimeCardPhaseDisableLocked\(context\)[\s\S]*DisciplineOwner\s*=\s*NULL[\s\S]*WdfWaitLockRelease') {
+    throw 'Driver lease crash cleanup is missing.'
+}
+foreach ($critical in @(
+    'IOCTL_TIMECARD_SET_TIME',
+    'IOCTL_TIMECARD_CLOCK_SOURCE_SET',
+    'IOCTL_TIMECARD_PPS_SET',
+    'IOCTL_TIMECARD_MRO50_CONTROL',
+    'IOCTL_TIMECARD_PHASE_CONTROL',
+    'IOCTL_TIMECARD_PHC_ADJUST',
+    'IOCTL_TIMECARD_DISCIPLINE_WRITE')) {
+    $case = [regex]::Match($dispatcher,
+        "case $critical\s*:(?<body>[\s\S]*?)(?=\s*case\s+IOCTL_|\s*default\s*:)")
+    if (-not $case.Success -or
+        $case.Groups['body'].Value -notmatch
+            'TimeCardDisciplineAccessAllowed') {
+        throw "Discipline lease does not guard $critical."
     }
 }
 

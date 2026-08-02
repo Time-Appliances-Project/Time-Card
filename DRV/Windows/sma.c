@@ -244,6 +244,145 @@ TimeCardSmaQueryLocked(PDEVICE_CONTEXT context, ULONG connector,
     return STATUS_SUCCESS;
 }
 
+static BOOLEAN
+TimeCardSetRoutedCoreLocked(volatile ULONG *controlRegister,
+                            volatile ULONG *versionRegister,
+                            BOOLEAN enable)
+{
+    ULONG control;
+    ULONG version;
+
+    if (controlRegister == NULL || versionRegister == NULL)
+        return FALSE;
+    version = READ_REGISTER_ULONG((PULONG)versionRegister);
+    if (version == 0u || version == MAXULONG)
+        return FALSE;
+    control = READ_REGISTER_ULONG((PULONG)controlRegister);
+    if (control == MAXULONG)
+        return FALSE;
+    if (enable)
+        control |= 1u;
+    else
+        control &= ~1u;
+    WRITE_REGISTER_ULONG((PULONG)controlRegister, control);
+    return TRUE;
+}
+
+VOID
+TimeCardRefreshRoutedCoresLocked(PDEVICE_CONTEXT context,
+                                 ULONG previousDirection,
+                                 ULONG previousFunction,
+                                 ULONG currentDirection,
+                                 ULONG currentFunction)
+{
+    BOOLEAN updateIrigInput = FALSE;
+    BOOLEAN updateIrigOutput = FALSE;
+    BOOLEAN updateDcfInput = FALSE;
+    BOOLEAN updateDcfOutput = FALSE;
+    BOOLEAN irigInput = FALSE;
+    BOOLEAN irigOutput = FALSE;
+    BOOLEAN dcfInput = FALSE;
+    BOOLEAN dcfOutput = FALSE;
+    ULONG connector;
+
+    if (context->BoardProfile == TIMECARD_BOARD_ART ||
+        context->SmaMap1 == NULL || context->SmaMap2 == NULL)
+        return;
+
+    updateIrigInput =
+        (previousDirection == TIMECARD_SMA_DIRECTION_INPUT &&
+         previousFunction == TIMECARD_SMA_INPUT_IRIG) ||
+        (currentDirection == TIMECARD_SMA_DIRECTION_INPUT &&
+         currentFunction == TIMECARD_SMA_INPUT_IRIG);
+    updateIrigOutput =
+        (previousDirection == TIMECARD_SMA_DIRECTION_OUTPUT &&
+         previousFunction == TIMECARD_SMA_OUTPUT_IRIG) ||
+        (currentDirection == TIMECARD_SMA_DIRECTION_OUTPUT &&
+         currentFunction == TIMECARD_SMA_OUTPUT_IRIG);
+    updateDcfInput =
+        (previousDirection == TIMECARD_SMA_DIRECTION_INPUT &&
+         previousFunction == TIMECARD_SMA_INPUT_DCF) ||
+        (currentDirection == TIMECARD_SMA_DIRECTION_INPUT &&
+         currentFunction == TIMECARD_SMA_INPUT_DCF);
+    updateDcfOutput =
+        (previousDirection == TIMECARD_SMA_DIRECTION_OUTPUT &&
+         previousFunction == TIMECARD_SMA_OUTPUT_DCF) ||
+        (currentDirection == TIMECARD_SMA_DIRECTION_OUTPUT &&
+         currentFunction == TIMECARD_SMA_OUTPUT_DCF);
+    if (!updateIrigInput && !updateIrigOutput &&
+        !updateDcfInput && !updateDcfOutput)
+        return;
+
+    for (connector = 1; connector <= TIMECARD_SMA_COUNT; ++connector) {
+        TIMECARD_SMA_CONTROL route;
+
+        if (!NT_SUCCESS(TimeCardSmaQueryLocked(
+                context, connector, &route)))
+            continue;
+        if (route.Direction == TIMECARD_SMA_DIRECTION_INPUT) {
+            if (route.Function == TIMECARD_SMA_INPUT_IRIG)
+                irigInput = TRUE;
+            else if (route.Function == TIMECARD_SMA_INPUT_DCF)
+                dcfInput = TRUE;
+        } else if (route.Direction == TIMECARD_SMA_DIRECTION_OUTPUT) {
+            if (route.Function == TIMECARD_SMA_OUTPUT_IRIG)
+                irigOutput = TRUE;
+            else if (route.Function == TIMECARD_SMA_OUTPUT_DCF)
+                dcfOutput = TRUE;
+        }
+    }
+
+    /* Aggregate all four routes before changing a shared core enable bit. */
+    if (updateIrigInput && context->IrigSlave != NULL) {
+        if (irigInput) {
+            context->IrigSlaveRouteManaged =
+                TimeCardSetRoutedCoreLocked(&context->IrigSlave->Control,
+                                            &context->IrigSlave->Version,
+                                            TRUE);
+        } else if (context->IrigSlaveRouteManaged) {
+            TimeCardSetRoutedCoreLocked(&context->IrigSlave->Control,
+                                        &context->IrigSlave->Version, FALSE);
+            context->IrigSlaveRouteManaged = FALSE;
+        }
+    }
+    if (updateIrigOutput && context->IrigMaster != NULL) {
+        if (irigOutput) {
+            context->IrigMasterRouteManaged =
+                TimeCardSetRoutedCoreLocked(&context->IrigMaster->Control,
+                                            &context->IrigMaster->Version,
+                                            TRUE);
+        } else if (context->IrigMasterRouteManaged) {
+            TimeCardSetRoutedCoreLocked(&context->IrigMaster->Control,
+                                        &context->IrigMaster->Version, FALSE);
+            context->IrigMasterRouteManaged = FALSE;
+        }
+    }
+    if (updateDcfInput && context->DcfSlave != NULL) {
+        if (dcfInput) {
+            context->DcfSlaveRouteManaged =
+                TimeCardSetRoutedCoreLocked(&context->DcfSlave->Control,
+                                            &context->DcfSlave->Version,
+                                            TRUE);
+        } else if (context->DcfSlaveRouteManaged) {
+            TimeCardSetRoutedCoreLocked(&context->DcfSlave->Control,
+                                        &context->DcfSlave->Version, FALSE);
+            context->DcfSlaveRouteManaged = FALSE;
+        }
+    }
+    if (updateDcfOutput && context->DcfMaster != NULL) {
+        if (dcfOutput) {
+            context->DcfMasterRouteManaged =
+                TimeCardSetRoutedCoreLocked(&context->DcfMaster->Control,
+                                            &context->DcfMaster->Version,
+                                            TRUE);
+        } else if (context->DcfMasterRouteManaged) {
+            TimeCardSetRoutedCoreLocked(&context->DcfMaster->Control,
+                                        &context->DcfMaster->Version, FALSE);
+            context->DcfMasterRouteManaged = FALSE;
+        }
+    }
+}
+
 NTSTATUS
 TimeCardSmaQuery(PDEVICE_CONTEXT context, ULONG connector,
                  TIMECARD_SMA_CONTROL *control)
@@ -281,6 +420,7 @@ TimeCardSmaSet(PDEVICE_CONTEXT context,
     BOOLEAN fixedDirection;
     ULONG fixedMode;
     ULONG previousDirection;
+    ULONG previousFunction;
     ULONG value;
     NTSTATUS status;
 
@@ -312,6 +452,7 @@ TimeCardSmaSet(PDEVICE_CONTEXT context,
     if (!NT_SUCCESS(status))
         goto done;
     previousDirection = response->Direction;
+    previousFunction = response->Function;
     fixedDirection = TimeCardSmaFixedDirection(context);
     fixedMode = request->Connector <= 2 ? TIMECARD_SMA_DIRECTION_INPUT :
                                           TIMECARD_SMA_DIRECTION_OUTPUT;
@@ -352,6 +493,11 @@ TimeCardSmaSet(PDEVICE_CONTEXT context,
          (request->Direction != TIMECARD_SMA_DIRECTION_DISABLED &&
           response->Function != request->Function))) {
         status = STATUS_DEVICE_DATA_ERROR;
+    }
+    if (NT_SUCCESS(status)) {
+        TimeCardRefreshRoutedCoresLocked(
+            context, previousDirection, previousFunction,
+            response->Direction, response->Function);
     }
 
 done:

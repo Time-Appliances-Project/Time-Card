@@ -81,6 +81,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="TitleBrandColumn" Width="240" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="330" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="142" />
                     </Grid.ColumnDefinitions>
@@ -96,7 +97,26 @@
                     </StackPanel>
                     <TextBlock x:Name="TopPageTitle" Grid.Column="1" Text="Overview" VerticalAlignment="Center"
                                Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="13" />
-                    <Button x:Name="ConnectionChip" Grid.Column="2" Style="{StaticResource SecondaryButton}"
+                    <Grid Grid.Column="2" Margin="8,0,14,0" VerticalAlignment="Center"
+                          shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="38" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="CardSelector" Height="34" Padding="10,4"
+                                  IsEditable="True" IsReadOnly="True"
+                                  DisplayMemberPath="DisplayName"
+                                  SelectionChanged="CardSelector_SelectionChanged"
+                                  ToolTip="Select the physical Time Card controlled by this window" />
+                        <Button x:Name="CardRescanButton" Grid.Column="1" Width="34" Height="34"
+                                Margin="4,0,0,0" Padding="0"
+                                Style="{StaticResource SecondaryButton}"
+                                Click="RescanCards_Click" ToolTip="Rescan Time Card hardware">
+                            <TextBlock Text="&#xE72C;" FontFamily="Segoe MDL2 Assets"
+                                       FontSize="14" HorizontalAlignment="Center" />
+                        </Button>
+                    </Grid>
+                    <Button x:Name="ConnectionChip" Grid.Column="3" Style="{StaticResource SecondaryButton}"
                             Background="#102233" Padding="12,6" Margin="0,0,14,0"
                             VerticalAlignment="Center" Click="ConnectionChip_Click"
                             ToolTip="Restart with administrator access"
@@ -108,7 +128,7 @@
                                        VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
-                    <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right"
+                    <StackPanel Grid.Column="4" Orientation="Horizontal" HorizontalAlignment="Right"
                                 shell:WindowChrome.IsHitTestVisibleInChrome="True">
                         <Button Style="{StaticResource CaptionButton}" Click="Minimize_Click" ToolTip="Minimize">
                             <Border Width="13" Height="2" Background="#EAF3FA" CornerRadius="1"
@@ -272,6 +292,8 @@
                                          Content="&#xE9CA;" ToolTip="SMA Connectors" Checked="Navigate_Checked" />
                             <RadioButton x:Name="TimingNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Timing"
                                          Content="&#xE9D2;" ToolTip="Generators &amp; Freq." Checked="Navigate_Checked" />
+                            <RadioButton x:Name="FpgaNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Fpga"
+                                         Content="&#xE950;" ToolTip="FPGA Engines" Checked="Navigate_Checked" />
                             <RadioButton x:Name="SensorsNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="Sensors"
                                          Content="&#xE95E;" ToolTip="Sensors &amp; IMU" Checked="Navigate_Checked" />
                             <RadioButton x:Name="I2cNav" GroupName="Navigation" Style="{StaticResource NavRadio}" Tag="I2c"
@@ -675,6 +697,9 @@
                                             <ComboBoxItem Tag="4">PTP</ComboBoxItem>
                                             <ComboBoxItem Tag="5">RTC</ComboBoxItem>
                                             <ComboBoxItem Tag="6">DCF77</ComboBoxItem>
+                                            <ComboBoxItem Tag="7" IsEnabled="False">NTP (exact image contract)</ComboBoxItem>
+                                            <ComboBoxItem Tag="8" IsEnabled="False">SyncE (exact image contract)</ComboBoxItem>
+                                            <ComboBoxItem Tag="253" IsEnabled="False">Dynamic source (exact image contract)</ComboBoxItem>
                                             <ComboBoxItem Tag="254">Register-controlled</ComboBoxItem>
                                             <ComboBoxItem Tag="255">External selector</ComboBoxItem>
                                         </ComboBox>
@@ -1295,7 +1320,7 @@
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
                                         <StackPanel Margin="0,0,18,0"><TextBlock Text="BOARD PROFILE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineBoardText" Text="—" FontFamily="Segoe UI Semibold" FontSize="16" Margin="0,6,0,0" /></StackPanel>
                                         <StackPanel Grid.Column="1" Margin="0,0,18,0"><TextBlock Text="OSCILLATOR BACKEND" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineOscillatorText" Text="—" FontFamily="Segoe UI Semibold" FontSize="16" Margin="0,6,0,0" /></StackPanel>
-                                        <StackPanel Grid.Column="2"><TextBlock Text="DRIVER CAPABILITY" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineCapabilityText" Text="Install driver 1.38 / ABI 11 to detect native support." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0" /></StackPanel>
+                                        <StackPanel Grid.Column="2"><TextBlock Text="DRIVER CAPABILITY" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineCapabilityText" Text="Install driver 1.39 / ABI 12 to detect native support." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0" /></StackPanel>
                                     </Grid>
                                     <UniformGrid Columns="5" Margin="0,20,0,18">
                                         <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="STATE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineStateText" Text="STOPPED" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock x:Name="NativeDisciplineClassText" Text="Clock class —" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
@@ -1328,9 +1353,9 @@
                             <Grid Grid.Row="2">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="LINUX OSCILLATOR DISCIPLINE" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock Text="WINDOWS SERVICE &amp; REMOTE COMPATIBILITY" Style="{StaticResource Eyebrow}" />
                                     <TextBlock Text="oscillatord control &amp; telemetry" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
-                                    <TextBlock Text="Observe an Orolia/Safran ART disciplining service and issue guarded operations through its versioned monitoring protocol."
+                                    <TextBlock Text="Use the local native Windows service without WSL, or connect to a remote Linux/Windows oscillatord through the compatible protocol."
                                                Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -1349,7 +1374,7 @@
                                         <ColumnDefinition Width="2*" /><ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Margin="0,0,12,0">
-                                        <TextBlock Text="LINUX HOST OR IP" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                        <TextBlock Text="SERVICE HOST OR IP" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                         <TextBox x:Name="OscillatordHostTextBox" Text="127.0.0.1" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Margin="0,0,12,0">
@@ -1542,8 +1567,9 @@
                         </Border>
                         <Border x:Name="NmeaConfigPanel" Grid.Row="3" Style="{StaticResource Panel}" Padding="14" Margin="0,0,0,14" Visibility="Collapsed">
                             <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.35*" /><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <StackPanel Margin="0,0,18,0">
+                                <StackPanel Grid.Row="0" Margin="0,0,18,0">
                                     <StackPanel Orientation="Horizontal">
                                         <Image Source="Assets/timecard-nmea.png" Width="30" Height="30" Margin="0,0,10,0" />
                                         <StackPanel><TextBlock Text="FPGA NMEA sentence generator" FontFamily="Segoe UI Semibold" />
@@ -1555,9 +1581,9 @@
                                                Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas"
                                                FontSize="10" Margin="0,4,0,0" />
                                 </StackPanel>
-                                <StackPanel Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                <StackPanel Grid.Row="0" Grid.Column="1" Margin="0,0,12,0"><TextBlock Text="OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                     <CheckBox x:Name="NmeaEnabledCheckBox" Content="Generate sentences" VerticalAlignment="Center" /></StackPanel>
-                                <StackPanel Grid.Column="2" Margin="0,0,12,0"><TextBlock Text="LINE FORMAT" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                <StackPanel Grid.Row="0" Grid.Column="2" Margin="0,0,12,0"><TextBlock Text="LINE FORMAT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                     <StackPanel Orientation="Horizontal">
                                         <ComboBox x:Name="NmeaBaudCombo" Width="112" SelectedIndex="3">
                                             <ComboBoxItem>1200</ComboBoxItem><ComboBoxItem>2400</ComboBoxItem><ComboBoxItem>4800</ComboBoxItem><ComboBoxItem>9600</ComboBoxItem>
@@ -1567,11 +1593,45 @@
                                         <CheckBox x:Name="NmeaPolarityCheckBox" Content="Invert" Margin="10,0,0,0" VerticalAlignment="Center" />
                                     </StackPanel>
                                 </StackPanel>
-                                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Bottom">
+                                <StackPanel Grid.Row="0" Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Bottom">
                                     <Button Content="Decoded view" Click="UseNmeaDecode_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" />
                                     <Button Content="Refresh" Click="RefreshNmea_Click" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0" />
                                     <Button x:Name="NmeaApplyButton" Content="Apply &amp; monitor" Click="ApplyNmea_Click" IsEnabled="False" />
                                 </StackPanel>
+                                <Grid x:Name="NmeaAdvancedPanel" Grid.Row="1" Grid.ColumnSpan="4" Margin="0,14,0,0" IsEnabled="False">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="0.75*" /><ColumnDefinition Width="0.85*" />
+                                        <ColumnDefinition Width="1.15*" /><ColumnDefinition Width="1.65*" />
+                                        <ColumnDefinition Width="1.35*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                        <TextBlock Text="UTC CORRECTION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                        <TextBox x:Name="NmeaCorrectionTextBox" Text="0" ToolTip="Signed seconds applied by the FPGA before creating UTC sentences." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                                        <TextBlock Text="LOCAL OFFSET (MIN)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                        <TextBox x:Name="NmeaLocalOffsetTextBox" Text="0" ToolTip="Signed local-zone offset from -839 through +839 minutes." />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Margin="0,0,12,0">
+                                        <TextBlock Text="NMEA TALKER" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                        <ComboBox x:Name="NmeaGnssCombo" SelectedIndex="0">
+                                            <ComboBoxItem Tag="0">Default (GP)</ComboBoxItem><ComboBoxItem Tag="1">Combined (GN)</ComboBoxItem>
+                                            <ComboBoxItem Tag="2">GPS (GP)</ComboBoxItem><ComboBoxItem Tag="3">GLONASS (GL)</ComboBoxItem>
+                                            <ComboBoxItem Tag="4">Galileo (GA)</ComboBoxItem><ComboBoxItem Tag="5">BeiDou (GB)</ComboBoxItem>
+                                            <ComboBoxItem Tag="15">Proprietary (TX)</ComboBoxItem>
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="3" Margin="0,0,12,0">
+                                        <TextBlock Text="MESSAGE GATES" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                        <WrapPanel>
+                                            <CheckBox x:Name="NmeaDisableZdaCheckBox" Content="Disable ZDA" Margin="0,0,12,5" />
+                                            <CheckBox x:Name="NmeaDisableRmcCheckBox" Content="Disable RMC" Margin="0,0,12,5" />
+                                            <CheckBox x:Name="NmeaDisableUtcCheckBox" Content="Disable UTC" Margin="0,0,0,5" />
+                                        </WrapPanel>
+                                    </StackPanel>
+                                    <TextBlock x:Name="NmeaAdvancedHintText" Grid.Column="4" Text="Driver ABI 13 reads and verifies the documented ToD Master settings without touching synthesis-optional UTC-info registers."
+                                               Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                </Grid>
                             </Grid>
                         </Border>
                         <Border Grid.Row="4" Style="{StaticResource Panel}" Padding="0" ClipToBounds="True">
@@ -1771,17 +1831,17 @@
                                                FontSize="18" VerticalAlignment="Center" Margin="0,0,12,0" />
                                     <TextBlock Grid.Column="1" Text="SMA output routing is immediate. Disconnect external sources before routing a generator to a connector. Counter integration time is 0 (off) or 1–255 seconds."
                                                Foreground="#F0D994" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="2" Text="ABI 5" Foreground="{DynamicResource GoldBrush}"
+                                    <TextBlock Grid.Column="2" Text="ABI 5 / 12 ADVANCED" Foreground="{DynamicResource GoldBrush}"
                                                FontFamily="Segoe UI Semibold" Margin="16,0,0,0" VerticalAlignment="Center" />
                                 </Grid>
                             </Border>
 
                             <StackPanel Grid.Row="2">
                                 <TextBlock Text="Signal generators" Style="{StaticResource SectionTitle}" />
-                                <TextBlock Text="Frequency is converted to the nearest whole-nanosecond period. Phase is relative to the PHC-aligned period boundary."
+                                <TextBlock Text="Frequency is converted to a whole-nanosecond period. Start at the next PHC-aligned boundary, or schedule an exact future PHC/TAI second."
                                            Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,14" />
                                 <UniformGrid Columns="2">
-                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="286">
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="420">
                                         <StackPanel>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <Image Source="Assets/timecard-timing.png" Width="42" Height="42" />
@@ -1795,17 +1855,19 @@
                                             </Grid>
                                             <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <StackPanel Margin="0,0,12,0"><TextBlock Text="PHASE (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator1PhaseTextBox" Text="0" IsEnabled="False" /></StackPanel>
-                                                <CheckBox x:Name="Generator1InvertCheckBox" Grid.Column="1" Content="Invert polarity" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
+                                                <CheckBox x:Name="Generator1ActiveHighCheckBox" Grid.Column="1" Content="Active high" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
                                             </Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="REPEAT (0 = CONTINUOUS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator1RepeatTextBox" Text="0" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="CABLE DELAY (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator1CableDelayTextBox" Text="0" IsEnabled="False" /></StackPanel></Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="0.9*" /><ColumnDefinition Width="1.1*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="START MODE" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Generator1StartModeCombo" Tag="1" SelectedIndex="0" IsEnabled="False" SelectionChanged="SignalScheduleMode_SelectionChanged"><ComboBoxItem Tag="Phase">Next PHC-aligned</ComboBoxItem><ComboBoxItem Tag="Absolute">Exact PHC time</ComboBoxItem></ComboBox></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="START (PHC SEC.NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator1StartTextBox" Text="" IsEnabled="False" ToolTip="Future PHC/TAI time as seconds.nanoseconds (up to 9 fractional digits)" /></StackPanel></Grid>
                                             <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                             <ComboBox x:Name="Generator1RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
                                             <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <TextBlock x:Name="Generator1DetailText" Text="Period — · Start —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                <Button x:Name="Generator1ApplyButton" Grid.Column="1" Tag="1" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" />
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Generator1ClearButton" Tag="1" Content="Clear status" Click="ClearSignalGeneratorStatus_Click" Padding="12,7" Margin="0,0,8,0" IsEnabled="False" /><Button x:Name="Generator1ApplyButton" Tag="1" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" /></StackPanel>
                                             </Grid>
                                         </StackPanel>
                                     </Border>
-                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="286">
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="420">
                                         <StackPanel>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <Image Source="Assets/timecard-timing.png" Width="42" Height="42" />
@@ -1818,17 +1880,19 @@
                                             </Grid>
                                             <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <StackPanel Margin="0,0,12,0"><TextBlock Text="PHASE (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator2PhaseTextBox" Text="0" IsEnabled="False" /></StackPanel>
-                                                <CheckBox x:Name="Generator2InvertCheckBox" Grid.Column="1" Content="Invert polarity" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
+                                                <CheckBox x:Name="Generator2ActiveHighCheckBox" Grid.Column="1" Content="Active high" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
                                             </Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="REPEAT (0 = CONTINUOUS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator2RepeatTextBox" Text="0" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="CABLE DELAY (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator2CableDelayTextBox" Text="0" IsEnabled="False" /></StackPanel></Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="0.9*" /><ColumnDefinition Width="1.1*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="START MODE" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Generator2StartModeCombo" Tag="2" SelectedIndex="0" IsEnabled="False" SelectionChanged="SignalScheduleMode_SelectionChanged"><ComboBoxItem Tag="Phase">Next PHC-aligned</ComboBoxItem><ComboBoxItem Tag="Absolute">Exact PHC time</ComboBoxItem></ComboBox></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="START (PHC SEC.NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator2StartTextBox" Text="" IsEnabled="False" ToolTip="Future PHC/TAI time as seconds.nanoseconds (up to 9 fractional digits)" /></StackPanel></Grid>
                                             <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                             <ComboBox x:Name="Generator2RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
                                             <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <TextBlock x:Name="Generator2DetailText" Text="Period — · Start —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                <Button x:Name="Generator2ApplyButton" Grid.Column="1" Tag="2" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" />
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Generator2ClearButton" Tag="2" Content="Clear status" Click="ClearSignalGeneratorStatus_Click" Padding="12,7" Margin="0,0,8,0" IsEnabled="False" /><Button x:Name="Generator2ApplyButton" Tag="2" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" /></StackPanel>
                                             </Grid>
                                         </StackPanel>
                                     </Border>
-                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="286">
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="420">
                                         <StackPanel>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <Image Source="Assets/timecard-timing.png" Width="42" Height="42" />
@@ -1841,17 +1905,19 @@
                                             </Grid>
                                             <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <StackPanel Margin="0,0,12,0"><TextBlock Text="PHASE (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator3PhaseTextBox" Text="0" IsEnabled="False" /></StackPanel>
-                                                <CheckBox x:Name="Generator3InvertCheckBox" Grid.Column="1" Content="Invert polarity" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
+                                                <CheckBox x:Name="Generator3ActiveHighCheckBox" Grid.Column="1" Content="Active high" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
                                             </Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="REPEAT (0 = CONTINUOUS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator3RepeatTextBox" Text="0" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="CABLE DELAY (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator3CableDelayTextBox" Text="0" IsEnabled="False" /></StackPanel></Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="0.9*" /><ColumnDefinition Width="1.1*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="START MODE" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Generator3StartModeCombo" Tag="3" SelectedIndex="0" IsEnabled="False" SelectionChanged="SignalScheduleMode_SelectionChanged"><ComboBoxItem Tag="Phase">Next PHC-aligned</ComboBoxItem><ComboBoxItem Tag="Absolute">Exact PHC time</ComboBoxItem></ComboBox></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="START (PHC SEC.NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator3StartTextBox" Text="" IsEnabled="False" ToolTip="Future PHC/TAI time as seconds.nanoseconds (up to 9 fractional digits)" /></StackPanel></Grid>
                                             <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                             <ComboBox x:Name="Generator3RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
                                             <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <TextBlock x:Name="Generator3DetailText" Text="Period — · Start —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                <Button x:Name="Generator3ApplyButton" Grid.Column="1" Tag="3" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" />
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Generator3ClearButton" Tag="3" Content="Clear status" Click="ClearSignalGeneratorStatus_Click" Padding="12,7" Margin="0,0,8,0" IsEnabled="False" /><Button x:Name="Generator3ApplyButton" Tag="3" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" /></StackPanel>
                                             </Grid>
                                         </StackPanel>
                                     </Border>
-                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="286">
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="420">
                                         <StackPanel>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <Image Source="Assets/timecard-timing.png" Width="42" Height="42" />
@@ -1864,13 +1930,15 @@
                                             </Grid>
                                             <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <StackPanel Margin="0,0,12,0"><TextBlock Text="PHASE (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator4PhaseTextBox" Text="0" IsEnabled="False" /></StackPanel>
-                                                <CheckBox x:Name="Generator4InvertCheckBox" Grid.Column="1" Content="Invert polarity" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
+                                                <CheckBox x:Name="Generator4ActiveHighCheckBox" Grid.Column="1" Content="Active high" VerticalAlignment="Bottom" Margin="0,0,0,9" IsEnabled="False" />
                                             </Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="REPEAT (0 = CONTINUOUS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator4RepeatTextBox" Text="0" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="CABLE DELAY (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator4CableDelayTextBox" Text="0" IsEnabled="False" /></StackPanel></Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="0.9*" /><ColumnDefinition Width="1.1*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="START MODE" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Generator4StartModeCombo" Tag="4" SelectedIndex="0" IsEnabled="False" SelectionChanged="SignalScheduleMode_SelectionChanged"><ComboBoxItem Tag="Phase">Next PHC-aligned</ComboBoxItem><ComboBoxItem Tag="Absolute">Exact PHC time</ComboBoxItem></ComboBox></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="START (PHC SEC.NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Generator4StartTextBox" Text="" IsEnabled="False" ToolTip="Future PHC/TAI time as seconds.nanoseconds (up to 9 fractional digits)" /></StackPanel></Grid>
                                             <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                             <ComboBox x:Name="Generator4RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
                                             <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                                 <TextBlock x:Name="Generator4DetailText" Text="Period — · Start —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
-                                                <Button x:Name="Generator4ApplyButton" Grid.Column="1" Tag="4" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" />
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Generator4ClearButton" Tag="4" Content="Clear status" Click="ClearSignalGeneratorStatus_Click" Padding="12,7" Margin="0,0,8,0" IsEnabled="False" /><Button x:Name="Generator4ApplyButton" Tag="4" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" /></StackPanel>
                                             </Grid>
                                         </StackPanel>
                                     </Border>
@@ -1912,6 +1980,328 @@
                                     </Border>
                                 </UniformGrid>
                             </StackPanel>
+                        </Grid>
+                    </ScrollViewer>
+
+                    <!-- FPGA ENGINES -->
+                    <ScrollViewer x:Name="FpgaPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                        <Grid Margin="32,28,32,34">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <StackPanel Margin="0,0,18,0">
+                                    <TextBlock Text="FPGA REFERENCE ENGINES" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock Text="PPS, timecode &amp; ToD cores" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
+                                    <TextBlock Text="Direct, versioned control of documented FPGA timing-engine registers, with safe board-profile gating and readback verification."
+                                               Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Style="{StaticResource StatusChip}" Margin="0,0,10,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Ellipse x:Name="FpgaCoreStatusDot" Width="8" Height="8" Fill="{DynamicResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                            <TextBlock x:Name="FpgaCoreStatusText" Text="WAITING" Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="11" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Button Content="Refresh engines" Click="RefreshFpgaCores_Click" Style="{StaticResource SecondaryButton}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <Border Grid.Row="1" Background="#10283A" BorderBrush="#24506A" BorderThickness="1"
+                                    CornerRadius="12" Padding="16,12" Margin="0,22,0,22">
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <TextBlock Text="&#xE946;" FontFamily="Segoe MDL2 Assets" Foreground="{DynamicResource CyanBrush}"
+                                               FontSize="18" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                    <TextBlock Grid.Column="1" Text="These registers affect the live timing path. Apply uses validated writes and readback, but readback does not prove that synthesis-optional protocol or feature logic is compiled into the loaded FPGA image; validate the resulting signal on hardware."
+                                               Foreground="#F0D994" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="ABI 12 base / ABI 15 extended" Foreground="{DynamicResource CyanBrush}"
+                                               FontFamily="Segoe UI Semibold" Margin="16,0,0,0" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+
+                            <StackPanel Grid.Row="2">
+                                <TextBlock Text="PPS engines" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="Configure the generated PPS and the supervised PPS input. Cable compensation uses signed nanoseconds; output width is 1-999 ms."
+                                           Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,14" TextWrapping="Wrap" />
+                                <UniformGrid Columns="2">
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="282">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <StackPanel><TextBlock Text="PPS master / output" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="PpsMasterStatusText" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></StackPanel>
+                                                <CheckBox x:Name="PpsMasterEnabledCheckBox" Grid.Column="1" Content="Enabled" IsEnabled="False" VerticalAlignment="Center" />
+                                            </Grid>
+                                            <Grid Margin="0,16,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0"><TextBlock Text="ACTIVE LEVEL" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="PpsMasterPolarityCombo" IsEnabled="False"><ComboBoxItem Tag="1">Active high</ComboBoxItem><ComboBoxItem Tag="0">Active low</ComboBoxItem></ComboBox></StackPanel>
+                                                <StackPanel Grid.Column="1"><TextBlock Text="WIDTH (MS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="PpsMasterWidthTextBox" Text="500" IsEnabled="False" /></StackPanel>
+                                            </Grid>
+                                            <TextBlock Text="CABLE COMPENSATION (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <TextBox x:Name="PpsMasterDelayTextBox" Text="0" IsEnabled="False" />
+                                            <Grid Margin="0,13,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="PpsMasterDetailText" Text="Version - | Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,6,0" />
+                                                <Button x:Name="PpsMasterClearButton" Grid.Column="1" Tag="1" Content="Clear error" Click="ClearPpsError_Click" Style="{StaticResource SecondaryButton}" Margin="8,0" IsEnabled="False" />
+                                                <Button x:Name="PpsMasterApplyButton" Grid.Column="2" Tag="1" Content="Apply" Click="ApplyPpsEngine_Click" IsEnabled="False" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="282">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <StackPanel><TextBlock Text="PPS slave / input" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="PpsSlaveStatusText" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></StackPanel>
+                                                <CheckBox x:Name="PpsSlaveEnabledCheckBox" Grid.Column="1" Content="Enabled" IsEnabled="False" VerticalAlignment="Center" />
+                                            </Grid>
+                                            <Grid Margin="0,16,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0"><TextBlock Text="ACTIVE LEVEL" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="PpsSlavePolarityCombo" IsEnabled="False"><ComboBoxItem Tag="1">Active high</ComboBoxItem><ComboBoxItem Tag="0">Active low</ComboBoxItem></ComboBox></StackPanel>
+                                                <StackPanel Grid.Column="1"><TextBlock Text="MEASURED WIDTH" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBlock x:Name="PpsSlaveWidthText" Text="- ms" FontFamily="Segoe UI Semibold" FontSize="18" Margin="0,5,0,0" /></StackPanel>
+                                            </Grid>
+                                            <TextBlock Text="CABLE COMPENSATION (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <TextBox x:Name="PpsSlaveDelayTextBox" Text="0" IsEnabled="False" />
+                                            <Grid Margin="0,13,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock x:Name="PpsSlaveDetailText" Text="Version - | Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,6,0" />
+                                                <Button x:Name="PpsSlaveClearButton" Grid.Column="1" Tag="2" Content="Clear errors" Click="ClearPpsError_Click" Style="{StaticResource SecondaryButton}" Margin="8,0" IsEnabled="False" />
+                                                <Button x:Name="PpsSlaveApplyButton" Grid.Column="2" Tag="2" Content="Apply" Click="ApplyPpsEngine_Click" IsEnabled="False" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </UniformGrid>
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="3" Margin="0,12,0,0">
+                                <TextBlock Text="IRIG and DCF timecode" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="IRIG is digital DCLS at the FPGA boundary. DCF output is wired DCF77 timecode, not a 77.5 kHz RF transmitter."
+                                           Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,14" TextWrapping="Wrap" />
+                                <UniformGrid Columns="2">
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="344">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="IRIG output" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="IrigMasterStatusText" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></StackPanel><CheckBox x:Name="IrigMasterEnabledCheckBox" Grid.Column="1" Content="Enabled" IsEnabled="False" /></Grid>
+                                            <Grid Margin="0,16,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="FORMAT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="IrigMasterModeCombo" IsEnabled="False"><ComboBoxItem Tag="1">IRIG-B</ComboBoxItem><ComboBoxItem Tag="2">IRIG-G</ComboBoxItem></ComboBox></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="CODE (0-7)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="IrigMasterCodeTextBox" Text="7" IsEnabled="False" /></StackPanel></Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="UTC CORRECTION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="IrigMasterCorrectionTextBox" Text="-37" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="CONTROL BITS (HEX)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="IrigMasterControlBitsTextBox" Text="0000000" IsEnabled="False" /></StackPanel></Grid>
+                                            <CheckBox x:Name="IrigMasterAmplitudeCheckBox" Content="Amplitude-modulated output" IsEnabled="False" Margin="0,0,0,8" />
+                                            <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="IrigMasterDetailText" Text="Version - | Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,6,0" /><Button x:Name="IrigMasterClearButton" Grid.Column="1" Tag="1" Content="Clear error" Click="ClearTimecodeError_Click" Style="{StaticResource SecondaryButton}" Margin="8,0" IsEnabled="False" /><Button x:Name="IrigMasterApplyButton" Grid.Column="2" Tag="1" Content="Apply" Click="ApplyTimecode_Click" IsEnabled="False" /></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="344">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="IRIG input" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="IrigSlaveStatusText" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></StackPanel><CheckBox x:Name="IrigSlaveEnabledCheckBox" Grid.Column="1" Content="Enabled" IsEnabled="False" /></Grid>
+                                            <Grid Margin="0,16,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="FORMAT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="IrigSlaveModeCombo" IsEnabled="False"><ComboBoxItem Tag="1">IRIG-B</ComboBoxItem><ComboBoxItem Tag="2">IRIG-G</ComboBoxItem></ComboBox></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="CABLE DELAY (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="IrigSlaveDelayTextBox" Text="0" IsEnabled="False" /></StackPanel></Grid>
+                                            <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="UTC CORRECTION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="IrigSlaveCorrectionTextBox" Text="37" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="RECEIVED CONTROL" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBlock x:Name="IrigSlaveControlBitsText" Text="0x0000000" FontFamily="Cascadia Mono, Consolas" Margin="0,6,0,0" /></StackPanel></Grid>
+                                            <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><CheckBox x:Name="IrigSlaveAmplitudeCheckBox" Content="Amplitude-modulated input" IsEnabled="False" VerticalAlignment="Center" /><StackPanel Grid.Column="1"><TextBlock Text="MANUAL YEAR (1970-2069)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="IrigSlaveYearTextBox" Text="2026" IsEnabled="False" /></StackPanel></Grid>
+                                            <Grid Margin="0,7,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="IrigSlaveDetailText" Text="Version - | Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,6,0" /><Button x:Name="IrigSlaveClearButton" Grid.Column="1" Tag="2" Content="Clear error" Click="ClearTimecodeError_Click" Style="{StaticResource SecondaryButton}" Margin="8,0" IsEnabled="False" /><Button x:Name="IrigSlaveApplyButton" Grid.Column="2" Tag="2" Content="Apply" Click="ApplyTimecode_Click" IsEnabled="False" /></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="240">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="DCF77 wired output" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="DcfMasterStatusText" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></StackPanel><CheckBox x:Name="DcfMasterEnabledCheckBox" Grid.Column="1" Content="Enabled" IsEnabled="False" /></Grid>
+                                            <TextBlock Text="UTC CORRECTION (S)" Style="{StaticResource Label}" Margin="0,16,0,5" /><TextBox x:Name="DcfMasterCorrectionTextBox" Text="-37" IsEnabled="False" />
+                                            <Grid Margin="0,15,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DcfMasterDetailText" Text="Version - | Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,6,0" /><Button x:Name="DcfMasterClearButton" Grid.Column="1" Tag="3" Content="Clear error" Click="ClearTimecodeError_Click" Style="{StaticResource SecondaryButton}" Margin="8,0" IsEnabled="False" /><Button x:Name="DcfMasterApplyButton" Grid.Column="2" Tag="3" Content="Apply" Click="ApplyTimecode_Click" IsEnabled="False" /></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="240">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="DCF77 wired input" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="DcfSlaveStatusText" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></StackPanel><CheckBox x:Name="DcfSlaveEnabledCheckBox" Grid.Column="1" Content="Enabled" IsEnabled="False" /></Grid>
+                                            <Grid Margin="0,16,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="UTC CORRECTION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="DcfSlaveCorrectionTextBox" Text="37" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="AIR DELAY (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="DcfSlaveDelayTextBox" Text="0" IsEnabled="False" /></StackPanel></Grid>
+                                            <TextBlock x:Name="DcfSlavePositionText" Text="Decoder position - / 59" Foreground="{DynamicResource CyanBrush}" FontSize="11" /><ProgressBar x:Name="DcfSlavePositionProgress" Minimum="0" Maximum="59" Height="5" Margin="0,5,0,0" />
+                                            <Grid Margin="0,13,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="DcfSlaveDetailText" Text="Version - | Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,6,0" /><Button x:Name="DcfSlaveClearButton" Grid.Column="1" Tag="4" Content="Clear error" Click="ClearTimecodeError_Click" Style="{StaticResource SecondaryButton}" Margin="8,0" IsEnabled="False" /><Button x:Name="DcfSlaveApplyButton" Grid.Column="2" Tag="4" Content="Apply" Click="ApplyTimecode_Click" IsEnabled="False" /></Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </UniformGrid>
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="4" Margin="0,12,0,0">
+                                <TextBlock Text="Time-of-Day input parser" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="Select how the FPGA consumes receiver data. Message gates change meaning with NMEA, UBX, TSIP, or ESIP and are applied atomically while the parser is disabled."
+                                           Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,14" TextWrapping="Wrap" />
+                                <Border Style="{StaticResource Panel}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="1.15*" /><ColumnDefinition Width="1.25*" /><ColumnDefinition Width="1.6*" /></Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,18,0">
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Parser configuration" Style="{StaticResource SectionTitle}" /><CheckBox x:Name="TodParserEnabledCheckBox" Grid.Column="1" Content="Enabled" IsEnabled="False" /></Grid>
+                                            <TextBlock Text="PROTOCOL" Style="{StaticResource Label}" Margin="0,16,0,5" /><ComboBox x:Name="TodParserProtocolCombo" IsEnabled="False" SelectionChanged="TodParserProtocolCombo_SelectionChanged"><ComboBoxItem Tag="0">NMEA</ComboBoxItem><ComboBoxItem Tag="1">UBX</ComboBoxItem><ComboBoxItem Tag="2">TSIP</ComboBoxItem><ComboBoxItem Tag="3">ESIP</ComboBoxItem><ComboBoxItem Tag="4">PFEC</ComboBoxItem></ComboBox>
+                                            <TextBlock Text="GNSS TALKER / SYSTEM" Style="{StaticResource Label}" Margin="0,10,0,5" /><ComboBox x:Name="TodParserGnssCombo" IsEnabled="False"><ComboBoxItem Tag="0">All / automatic</ComboBoxItem><ComboBoxItem Tag="1">Combined</ComboBoxItem><ComboBoxItem Tag="2">GPS</ComboBoxItem><ComboBoxItem Tag="3">GLONASS</ComboBoxItem><ComboBoxItem Tag="4">Galileo</ComboBoxItem><ComboBoxItem Tag="5">BeiDou</ComboBoxItem></ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="0,0,18,0">
+                                            <TextBlock Text="UART and UTC" Style="{StaticResource SectionTitle}" />
+                                            <TextBlock Text="BAUD" Style="{StaticResource Label}" Margin="0,16,0,5" /><ComboBox x:Name="TodParserBaudCombo" IsEnabled="False"><ComboBoxItem Tag="1200">1,200</ComboBoxItem><ComboBoxItem Tag="2400">2,400</ComboBoxItem><ComboBoxItem Tag="4800">4,800</ComboBoxItem><ComboBoxItem Tag="9600">9,600</ComboBoxItem><ComboBoxItem Tag="19200">19,200</ComboBoxItem><ComboBoxItem Tag="38400">38,400</ComboBoxItem><ComboBoxItem Tag="57600">57,600</ComboBoxItem><ComboBoxItem Tag="115200">115,200</ComboBoxItem><ComboBoxItem Tag="230400">230,400</ComboBoxItem><ComboBoxItem Tag="460800">460,800</ComboBoxItem><ComboBoxItem Tag="921600">921,600</ComboBoxItem><ComboBoxItem Tag="1000000">1,000,000</ComboBoxItem><ComboBoxItem Tag="2000000">2,000,000</ComboBoxItem></ComboBox>
+                                            <TextBlock Text="CORRECTION (S)" Style="{StaticResource Label}" Margin="0,10,0,5" /><TextBox x:Name="TodParserCorrectionTextBox" Text="0" IsEnabled="False" />
+                                            <CheckBox x:Name="TodParserInvertCheckBox" Content="Inverted UART polarity" IsEnabled="False" Margin="0,12,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="Accepted messages" Style="{StaticResource SectionTitle}" />
+                                            <CheckBox x:Name="TodParserTimeLsCheckBox" Content="RMC / UBX NAV-TIMELS / TSIP alarms" IsEnabled="False" Margin="0,14,0,0" />
+                                            <CheckBox x:Name="TodParserTimeUtcCheckBox" Content="ZDA / UBX NAV-TIMEUTC / TSIP timing" IsEnabled="False" Margin="0,7,0,0" />
+                                            <CheckBox x:Name="TodParserStatusCheckBox" Content="UTC / UBX NAV-STATUS / TSIP receiver" IsEnabled="False" Margin="0,7,0,0" />
+                                            <CheckBox x:Name="TodParserMonitorCheckBox" Content="GSA / UBX MON-HW / TSIP position" IsEnabled="False" Margin="0,7,0,0" />
+                                            <CheckBox x:Name="TodParserSatelliteCheckBox" Content="GNS/GSV / UBX NAV-SAT / TSIP satellites" IsEnabled="False" Margin="0,7,0,0" />
+                                            <CheckBox x:Name="TodParserEsipCrwCheckBox" Content="ESIP CRW message" IsEnabled="False" Margin="0,7,0,0" />
+                                            <CheckBox x:Name="TodParserEsipCryCheckBox" Content="ESIP CRY message" IsEnabled="False" Margin="0,7,0,0" />
+                                            <CheckBox x:Name="TodParserEsipCrjCheckBox" Content="ESIP CRJ message" IsEnabled="False" Margin="0,7,0,0" />
+                                            <Grid Margin="0,16,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="TodParserDetailText" Text="Version - | Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" /><Button x:Name="TodParserClearButton" Grid.Column="1" Content="Clear errors" Click="ClearTodParserError_Click" Style="{StaticResource SecondaryButton}" Margin="8,0" IsEnabled="False" /><Button x:Name="TodParserApplyButton" Grid.Column="2" Content="Apply parser" Click="ApplyTodParser_Click" IsEnabled="False" /></Grid>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="5" Margin="0,22,0,0">
+                                <TextBlock Text="Trusted image capabilities" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="Optional register banks remain inaccessible until an operator confirms the exact loaded image and its synthesized features. The contract is session-scoped and automatically fails closed if the image changes."
+                                           Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,14" />
+                                <UniformGrid Columns="3">
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="430">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="Exact image contract" Style="{StaticResource SectionTitle}" />
+                                                <TextBlock x:Name="FpgaContractStatusText" Grid.Column="1" Text="LOCKED" Foreground="{DynamicResource GoldBrush}" FontFamily="Segoe UI Semibold" FontSize="10" />
+                                            </Grid>
+                                            <TextBlock x:Name="FpgaContractIdentityText" Text="Refresh to read the trusted image identity." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,10" />
+                                            <UniformGrid Columns="2">
+                                                <CheckBox x:Name="ContractClockServoCheckBox" Content="Clock servo/log" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractClockAdvancedCheckBox" Content="Advanced clock" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractTodTelemetryCheckBox" Content="ToD telemetry" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractUtcReadCheckBox" Content="UTC metadata read" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractUtcWriteCheckBox" Content="UTC metadata write" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractIrigMasterAmCheckBox" Content="IRIG output AM" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractIrigSlaveAmCheckBox" Content="IRIG input AM" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractIrigYearCheckBox" Content="IRIG manual year" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractNtpSourceCheckBox" Content="NTP clock source" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractSynceSourceCheckBox" Content="SyncE clock source" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractDynamicSourceCheckBox" Content="Dynamic source" IsEnabled="False" Margin="0,4" />
+                                                <CheckBox x:Name="ContractArtTimestampCheckBox" Content="ART extended timestamp" IsEnabled="False" Margin="0,4" />
+                                            </UniformGrid>
+                                            <CheckBox x:Name="ContractAcknowledgeCheckBox" IsEnabled="False" Margin="0,12,0,8"><TextBlock Text="I verified these capabilities against this exact bitstream" TextWrapping="Wrap" /></CheckBox>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button x:Name="ContractActivateButton" Content="Activate contract" Click="ActivateFpgaContract_Click" IsEnabled="False" />
+                                                <Button x:Name="ContractClearButton" Content="Lock optional registers" Click="ClearFpgaContract_Click" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" IsEnabled="False" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="430">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="Static core inventory" Style="{StaticResource SectionTitle}" />
+                                                <TextBlock x:Name="CoreInventoryStatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" />
+                                            </Grid>
+                                            <TextBlock Text="A trusted profile map; no undocumented BAR scan is performed." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,10" />
+                                            <ScrollViewer Height="330" VerticalScrollBarVisibility="Auto">
+                                                <TextBlock x:Name="CoreInventoryText" Text="Refresh to enumerate the published map." FontFamily="Cascadia Mono, Consolas" FontSize="11" TextWrapping="Wrap" />
+                                            </ScrollViewer>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource SubsystemCard}" MinHeight="430">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="ToD output UTC metadata" Style="{StaticResource SectionTitle}" />
+                                                <TextBlock x:Name="NmeaUtcStatusText" Grid.Column="1" Text="LOCKED" Foreground="{DynamicResource GoldBrush}" FontSize="10" />
+                                            </Grid>
+                                            <TextBlock Text="Programs GxUTC metadata through the documented ToD Master request/done handshake. UTC write requires an exact-image contract." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,14" />
+                                            <TextBlock Text="UTC OFFSET (S)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <TextBox x:Name="NmeaUtcOffsetTextBox" Text="37" IsEnabled="False" />
+                                            <CheckBox x:Name="NmeaUtcValidCheckBox" Content="UTC offset is valid" IsEnabled="False" Margin="0,12,0,0" />
+                                            <CheckBox x:Name="NmeaUtcLeap61CheckBox" Content="Positive leap second (61)" IsEnabled="False" Margin="0,7,0,0" />
+                                            <CheckBox x:Name="NmeaUtcLeap59CheckBox" Content="Negative leap second (59)" IsEnabled="False" Margin="0,7,0,0" />
+                                            <TextBlock x:Name="NmeaUtcDetailText" Text="Optional UTC registers have not been accessed." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,14,0,10" />
+                                            <Button x:Name="NmeaUtcApplyButton" Content="Apply UTC metadata" Click="ApplyNmeaUtc_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                        </StackPanel>
+                                    </Border>
+                                </UniformGrid>
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="6" Margin="0,22,0,0">
+                                <TextBlock Text="Interrupt-backed event capture" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="Configure the six Signal Timestamper inputs and drain bounded driver queues. Signal-generator completion reads are explicit so refreshing the page never consumes events."
+                                           Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,14" />
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="1.35*" /><ColumnDefinition Width="0.65*" /></Grid.ColumnDefinitions>
+                                    <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                                <TextBlock Text="Signal Timestamper" Style="{StaticResource SectionTitle}" />
+                                                <TextBlock x:Name="TimestampStatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" />
+                                            </Grid>
+                                            <Grid Margin="0,14,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="1.25*" /><ColumnDefinition Width="1*" /><ColumnDefinition Width="1*" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0"><TextBlock Text="CHANNEL" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="TimestampChannelCombo" SelectedIndex="0" SelectionChanged="TimestampChannelCombo_SelectionChanged" IsEnabled="False"><ComboBoxItem Tag="0">GNSS 1 / EXTTS 0</ComboBoxItem><ComboBoxItem Tag="1">Timestamp 1 / EXTTS 1</ComboBoxItem><ComboBoxItem Tag="2">Timestamp 2 / EXTTS 2</ComboBoxItem><ComboBoxItem Tag="3">Timestamp 3 / EXTTS 3</ComboBoxItem><ComboBoxItem Tag="4">Timestamp 4 / EXTTS 4</ComboBoxItem><ComboBoxItem Tag="5">PHC / PPS / EXTTS 5</ComboBoxItem></ComboBox></StackPanel>
+                                                <StackPanel Grid.Column="1" Margin="0,0,10,0"><TextBlock Text="EDGE" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="TimestampPolarityCombo" IsEnabled="False"><ComboBoxItem Tag="0">Rising</ComboBoxItem><ComboBoxItem Tag="1">Falling</ComboBoxItem></ComboBox></StackPanel>
+                                                <StackPanel Grid.Column="2"><TextBlock Text="CABLE DELAY (NS)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="TimestampCableDelayTextBox" Text="0" IsEnabled="False" /></StackPanel>
+                                            </Grid>
+                                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                <CheckBox x:Name="TimestampEnabledCheckBox" Content="Capture enabled" IsEnabled="False" VerticalAlignment="Center" />
+                                                <Button x:Name="TimestampApplyButton" Content="Apply channel" Click="ApplyTimestampChannel_Click" Margin="14,0,0,0" IsEnabled="False" />
+                                                <Button x:Name="TimestampClearButton" Content="Clear error + queue" Click="ClearTimestampChannel_Click" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" IsEnabled="False" />
+                                                <Button x:Name="TimestampReadButton" Content="Read queued events" Click="ReadTimestampEvents_Click" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0" IsEnabled="False" />
+                                            </StackPanel>
+                                            <TextBlock x:Name="TimestampDetailText" Text="No timestamp channel selected." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+                                            <TextBox x:Name="TimestampEventsTextBox" Height="148" Margin="0,10,0,0" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="11" Text="No queued events read." />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Style="{StaticResource Panel}">
+                                        <StackPanel>
+                                            <TextBlock Text="Generator completion" Style="{StaticResource SectionTitle}" />
+                                            <TextBlock Text="Read completion IRQ snapshots without polling undocumented registers." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,12" />
+                                            <TextBlock Text="GENERATOR" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <ComboBox x:Name="SignalEventGeneratorCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="1">Generator 1</ComboBoxItem><ComboBoxItem Tag="2">Generator 2</ComboBoxItem><ComboBoxItem Tag="3">Generator 3</ComboBoxItem><ComboBoxItem Tag="4">Generator 4</ComboBoxItem></ComboBox>
+                                            <Button x:Name="SignalEventReadButton" Content="Read completion events" Click="ReadSignalEvents_Click" HorizontalAlignment="Left" Margin="0,12,0,0" IsEnabled="False" />
+                                            <TextBox x:Name="SignalEventsTextBox" Height="190" Margin="0,10,0,0" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas" FontSize="11" Text="No completion events read." />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+
+                            <StackPanel Grid.Row="7" Margin="0,22,0,0">
+                                <TextBlock Text="Adjustable clock control" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="Smooth offset/drift correction is part of the documented base clock surface. Advanced servo, holdover, aging, and filtering registers stay locked behind the exact-image contract."
+                                           Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,14" />
+                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions>
+                                    <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Smooth correction" Style="{StaticResource SectionTitle}" />
+                                            <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0"><CheckBox x:Name="ClockApplyOffsetCheckBox" Content="Apply offset" IsEnabled="False" /><TextBlock Text="OFFSET (NS)" Style="{StaticResource Label}" Margin="0,9,0,5" /><TextBox x:Name="ClockOffsetTextBox" Text="0" IsEnabled="False" /></StackPanel>
+                                                <StackPanel Grid.Column="1"><TextBlock Text="OFFSET WINDOW (NS)" Style="{StaticResource Label}" Margin="0,25,0,5" /><TextBox x:Name="ClockOffsetWindowTextBox" Text="1000000000" IsEnabled="False" /></StackPanel>
+                                            </Grid>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                                <StackPanel Margin="0,0,10,0"><CheckBox x:Name="ClockApplyDriftCheckBox" Content="Apply drift" IsEnabled="False" /><TextBlock Text="DRIFT (PPB)" Style="{StaticResource Label}" Margin="0,9,0,5" /><TextBox x:Name="ClockDriftTextBox" Text="0" IsEnabled="False" /></StackPanel>
+                                                <StackPanel Grid.Column="1"><TextBlock Text="DRIFT WINDOW (NS)" Style="{StaticResource Label}" Margin="0,25,0,5" /><TextBox x:Name="ClockDriftWindowTextBox" Text="1000000000" IsEnabled="False" /></StackPanel>
+                                            </Grid>
+                                            <CheckBox x:Name="ClockApplyThresholdCheckBox" Content="Apply in-sync threshold" IsEnabled="False" Margin="0,12,0,0" />
+                                            <TextBlock Text="IN-SYNC THRESHOLD (NS)" Style="{StaticResource Label}" Margin="0,8,0,5" /><TextBox x:Name="ClockThresholdTextBox" Text="1000" IsEnabled="False" />
+                                            <TextBlock x:Name="ClockAdjustmentDetailText" Text="Not queried." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,12,0,10" />
+                                            <Button x:Name="ClockAdjustmentApplyButton" Content="Apply smooth correction" Click="ApplyClockAdjustment_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Style="{StaticResource Panel}">
+                                        <StackPanel>
+                                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Advanced servo and holdover" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="ClockAdvancedStatusText" Grid.Column="1" Text="LOCKED" Foreground="{DynamicResource GoldBrush}" FontSize="10" /></Grid>
+                                            <TextBlock Text="Values below are exact register encodings. Each group is applied transactionally only when selected." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,12" />
+                                            <UniformGrid Columns="3">
+                                                <StackPanel Margin="0,0,10,10"><CheckBox x:Name="ClockAdvancedRateCheckBox" Content="Rate limiters" IsEnabled="False" /><TextBlock Text="OFFSET RAW (HEX)" Style="{StaticResource Label}" Margin="0,7,0,5" /><TextBox x:Name="ClockOffsetLimiterTextBox" Text="00000000" IsEnabled="False" /><TextBlock Text="DRIFT Q16 RAW (HEX)" Style="{StaticResource Label}" Margin="0,7,0,5" /><TextBox x:Name="ClockDriftLimiterTextBox" Text="00000000" IsEnabled="False" /></StackPanel>
+                                                <StackPanel Margin="0,0,10,10"><CheckBox x:Name="ClockAdvancedOutlierCheckBox" Content="Outlier filters" IsEnabled="False" /><TextBlock Text="OFFSET RAW (HEX)" Style="{StaticResource Label}" Margin="0,7,0,5" /><TextBox x:Name="ClockOffsetOutlierTextBox" Text="00000000" IsEnabled="False" /><TextBlock Text="DRIFT RAW (HEX)" Style="{StaticResource Label}" Margin="0,7,0,5" /><TextBox x:Name="ClockDriftOutlierTextBox" Text="00000000" IsEnabled="False" /></StackPanel>
+                                                <StackPanel Margin="0,0,0,10"><CheckBox x:Name="ClockAdvancedServoCheckBox" Content="Servo factors" IsEnabled="False" /><TextBlock Text="OFFSET P / I" Style="{StaticResource Label}" Margin="0,7,0,5" /><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBox x:Name="ClockServoOffsetPTextBox" Text="0" IsEnabled="False" Margin="0,0,5,0" /><TextBox x:Name="ClockServoOffsetITextBox" Grid.Column="1" Text="0" IsEnabled="False" Margin="5,0,0,0" /></Grid><TextBlock Text="DRIFT P / I" Style="{StaticResource Label}" Margin="0,7,0,5" /><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBox x:Name="ClockServoDriftPTextBox" Text="0" IsEnabled="False" Margin="0,0,5,0" /><TextBox x:Name="ClockServoDriftITextBox" Grid.Column="1" Text="0" IsEnabled="False" Margin="5,0,0,0" /></Grid></StackPanel>
+                                                <StackPanel Margin="0,0,10,0"><CheckBox x:Name="ClockAdvancedHoldoverCheckBox" Content="Holdover config" IsEnabled="False" /><TextBlock Text="CONFIG RAW (HEX)" Style="{StaticResource Label}" Margin="0,7,0,5" /><TextBox x:Name="ClockHoldoverTextBox" Text="00000000" IsEnabled="False" /></StackPanel>
+                                                <StackPanel Margin="0,0,10,0"><CheckBox x:Name="ClockAdvancedAgingCheckBox" Content="Aging config" IsEnabled="False" /><TextBlock Text="CONFIG RAW (HEX)" Style="{StaticResource Label}" Margin="0,7,0,5" /><TextBox x:Name="ClockAgingTextBox" Text="01000000" IsEnabled="False" /></StackPanel>
+                                                <StackPanel><CheckBox x:Name="ClockAdvancedControlCheckBox" Content="Control modes" IsEnabled="False" /><CheckBox x:Name="ClockHoldoverEnabledCheckBox" Content="Holdover" IsEnabled="False" Margin="0,7,0,0" /><CheckBox x:Name="ClockAgingEnabledCheckBox" Content="Aging" IsEnabled="False" Margin="0,5,0,0" /><CheckBox x:Name="ClockRevertEnabledCheckBox" Content="Revert" IsEnabled="False" Margin="0,5,0,0" /></StackPanel>
+                                            </UniformGrid>
+                                            <TextBlock x:Name="ClockAdvancedDetailText" Text="Optional register banks have not been accessed." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,12,0,10" />
+                                            <Button x:Name="ClockAdvancedApplyButton" Content="Apply selected groups" Click="ApplyClockAdvanced_Click" HorizontalAlignment="Left" IsEnabled="False" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </StackPanel>
+
+                            <Grid Grid.Row="8" Margin="0,26,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="0.8*" /></Grid.ColumnDefinitions>
+                                <Border Style="{StaticResource Panel}" Margin="0,0,18,0">
+                                    <StackPanel><TextBlock Text="Adjustable clock telemetry" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="FpgaClockTelemetryText" Text="Clock telemetry has not been queried." FontFamily="Cascadia Mono, Consolas" FontSize="12" TextWrapping="Wrap" LineHeight="20" Margin="0,12,0,0" /></StackPanel>
+                                </Border>
+                                <Border Grid.Column="1" Style="{StaticResource Panel}">
+                                    <StackPanel><TextBlock Text="Core discovery and timestamping" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="FpgaDiscoveryText" Text="The current bitstream does not publish a Configuration Slave ROM. Static board-profile maps remain authoritative; arbitrary BAR probing is intentionally blocked." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,10,0,0" /><TextBlock x:Name="FpgaTimestampText" Text="Six general event timestamp channels are available through Linux PTP EXTTS. Windows interrupt-backed capture remains disabled until its vector dispatcher is installed and validated." Foreground="{DynamicResource GoldBrush}" TextWrapping="Wrap" Margin="0,12,0,0" /></StackPanel>
+                                </Border>
+                            </Grid>
                         </Grid>
                     </ScrollViewer>
 
@@ -2702,15 +3092,166 @@
                                     <TextBlock Text="• PTM counters and advanced clock-source selection" Margin="0,4" />
                                 </StackPanel></Border>
                             </Grid>
-                            <Border Grid.Row="2" Style="{StaticResource Panel}" Padding="0" MinHeight="260">
-                                <Grid><Grid.RowDefinitions><RowDefinition Height="48" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                                    <Border Background="#102233" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" CornerRadius="16,16,0,0">
-                                        <Grid Margin="16,0"><TextBlock Text="Session activity" Style="{StaticResource SectionTitle}" VerticalAlignment="Center" />
-                                            <Button Content="Clear log" Click="ClearLog_Click" Style="{StaticResource SecondaryButton}" Padding="12,6" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
+                            <Border Grid.Row="2" Style="{StaticResource Panel}" Padding="0" MinHeight="360">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="50" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="30" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <Border Background="#102233" BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="0,0,0,1" CornerRadius="16,16,0,0">
+                                        <Grid Margin="16,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="Session activity" Style="{StaticResource SectionTitle}"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock x:Name="SessionLogCountText" Grid.Column="1" Text="0 retained"
+                                                       Foreground="{DynamicResource MutedBrush}" FontSize="11"
+                                                       Margin="12,2,0,0" VerticalAlignment="Center" />
+                                            <Button Grid.Column="3" Content="Export view" Click="SessionLogExport_Click"
+                                                    Style="{StaticResource SecondaryButton}" Padding="12,6"
+                                                    Margin="0,0,8,0" VerticalAlignment="Center"
+                                                    ToolTip="Export the currently filtered records as TXT or JSON" />
+                                            <Button Grid.Column="4" Content="Clear log" Click="ClearLog_Click"
+                                                    Style="{StaticResource SecondaryButton}" Padding="12,6"
+                                                    VerticalAlignment="Center" />
+                                        </Grid>
                                     </Border>
-                                    <TextBox x:Name="LogTextBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True"
-                                             VerticalScrollBarVisibility="Auto" FontFamily="Cascadia Mono, Consolas"
-                                             FontSize="12" Background="#050C14" BorderThickness="0" Padding="16" />
+                                    <WrapPanel Grid.Row="1" Margin="14,10,14,10" VerticalAlignment="Center">
+                                        <TextBlock Text="Severity" Style="{StaticResource Label}"
+                                                   VerticalAlignment="Center" Margin="0,0,7,0" />
+                                        <ComboBox x:Name="SessionLogSeverityCombo" Width="122" Height="32"
+                                                  SelectionChanged="SessionLogFilter_Changed"
+                                                  ToolTip="Show one severity or all records">
+                                            <ComboBoxItem Content="All severities" Tag="All" IsSelected="True" />
+                                            <ComboBoxItem Content="Trace" Tag="Trace" />
+                                            <ComboBoxItem Content="Information" Tag="Information" />
+                                            <ComboBoxItem Content="Warning" Tag="Warning" />
+                                            <ComboBoxItem Content="Error" Tag="Error" />
+                                        </ComboBox>
+                                        <TextBlock Text="Category" Style="{StaticResource Label}"
+                                                   VerticalAlignment="Center" Margin="14,0,7,0" />
+                                        <ComboBox x:Name="SessionLogCategoryCombo" Width="152" Height="32"
+                                                  SelectionChanged="SessionLogFilter_Changed"
+                                                  ToolTip="Show one subsystem category or all records">
+                                            <ComboBoxItem Content="All categories" Tag="All" IsSelected="True" />
+                                            <ComboBoxItem Content="Application" Tag="Application" />
+                                            <ComboBoxItem Content="Connection" Tag="Connection" />
+                                            <ComboBoxItem Content="Clock" Tag="Clock" />
+                                            <ComboBoxItem Content="Serial &amp; GNSS" Tag="Serial &amp; GNSS" />
+                                            <ComboBoxItem Content="FPGA" Tag="FPGA" />
+                                            <ComboBoxItem Content="I2C &amp; Sensors" Tag="I2C &amp; Sensors" />
+                                            <ComboBoxItem Content="Timing I/O" Tag="Timing I/O" />
+                                            <ComboBoxItem Content="Atomic clock" Tag="Atomic clock" />
+                                            <ComboBoxItem Content="Configuration" Tag="Configuration" />
+                                            <ComboBoxItem Content="Diagnostics" Tag="Diagnostics" />
+                                        </ComboBox>
+                                        <TextBlock Text="Search" Style="{StaticResource Label}"
+                                                   VerticalAlignment="Center" Margin="14,0,7,0" />
+                                        <TextBox x:Name="SessionLogSearchTextBox" Width="210" Height="32"
+                                                 VerticalContentAlignment="Center" Padding="8,0"
+                                                 TextChanged="SessionLogFilter_Changed"
+                                                 ToolTip="Search timestamp, severity, category, card, or message" />
+                                        <Button Content="Reset" Click="SessionLogClearFilter_Click"
+                                                Style="{StaticResource SecondaryButton}" Padding="10,6"
+                                                Margin="8,0,0,0" ToolTip="Clear session-log filters" />
+                                        <TextBlock Text="UTC - newest 2,000 records retained" Style="{StaticResource Label}"
+                                                   VerticalAlignment="Center" Margin="14,0,0,0" />
+                                    </WrapPanel>
+                                    <Border Grid.Row="2" Background="#0A1725" BorderBrush="{DynamicResource BorderBrush}"
+                                            BorderThickness="0,1,0,1">
+                                        <Grid Margin="14,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="92" />
+                                                <ColumnDefinition Width="68" />
+                                                <ColumnDefinition Width="140" />
+                                                <ColumnDefinition Width="155" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="UTC" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1" Text="LEVEL" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="CATEGORY" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="3" Text="CARD" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="4" Text="MESSAGE" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </Border>
+                                    <ListBox x:Name="SessionLogListBox" Grid.Row="3" Background="#050C14"
+                                             BorderThickness="0" ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                             VirtualizingPanel.IsVirtualizing="True"
+                                             VirtualizingPanel.VirtualizationMode="Recycling">
+                                        <ListBox.ItemContainerStyle>
+                                            <Style TargetType="ListBoxItem">
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                <Setter Property="Padding" Value="0" />
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+                                                <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                                <Style.Triggers>
+                                                    <Trigger Property="IsSelected" Value="True">
+                                                        <Setter Property="Background" Value="#173149" />
+                                                    </Trigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ListBox.ItemContainerStyle>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="14,7">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="92" />
+                                                        <ColumnDefinition Width="68" />
+                                                        <ColumnDefinition Width="140" />
+                                                        <ColumnDefinition Width="155" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding TimestampUtc, StringFormat={}{0:HH:mm:ss.fff}}"
+                                                               FontFamily="Cascadia Mono, Consolas" FontSize="11"
+                                                               Foreground="{DynamicResource MutedBrush}" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding SeverityLabel}"
+                                                               FontFamily="Segoe UI Semibold" FontSize="10">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{DynamicResource CyanBrush}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Severity}"
+                                                                                 Value="{x:Static local:SessionLogSeverity.Trace}">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource MutedBrush}" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Severity}"
+                                                                                 Value="{x:Static local:SessionLogSeverity.Warning}">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource GoldBrush}" />
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding Severity}"
+                                                                                 Value="{x:Static local:SessionLogSeverity.Error}">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <TextBlock Grid.Column="2" Text="{Binding Category}"
+                                                               Foreground="{DynamicResource TextBrush}" FontSize="11"
+                                                               TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                                                    <TextBlock Grid.Column="3" Text="{Binding CardContext}"
+                                                               FontFamily="Cascadia Mono, Consolas" FontSize="10"
+                                                               Foreground="{DynamicResource MutedBrush}"
+                                                               TextTrimming="CharacterEllipsis" Margin="0,0,10,0" />
+                                                    <TextBlock Grid.Column="4" Text="{Binding Message}"
+                                                               Foreground="{DynamicResource TextBrush}" FontSize="11"
+                                                               TextWrapping="Wrap" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <!-- Kept as the complete bounded text view for support bundles and diagnostic copy. -->
+                                    <TextBox x:Name="LogTextBox" Visibility="Collapsed" IsReadOnly="True" />
                                 </Grid>
                             </Border>
                         </Grid>

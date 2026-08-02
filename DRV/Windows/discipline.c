@@ -190,18 +190,33 @@ TimeCardPhaseControl(PDEVICE_CONTEXT context,
 
     enabled = request->Action == TIMECARD_PHASE_CONTROL_ENABLE ? 1u : 0u;
     WdfWaitLockAcquire(context->RegisterLock, NULL);
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask, 0u);
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask, 0u);
     if (enabled != 0u) {
+        if ((context->TimestampRequestedMask &
+             ((1u << TIMECARD_TIMESTAMP_GNSS1) |
+              (1u << TIMECARD_TIMESTAMP_PHC))) != 0u) {
+            WdfWaitLockRelease(context->RegisterLock);
+            return STATUS_DEVICE_BUSY;
+        }
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask,
+                             0u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask,
+                             0u);
         WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Polarity,
                              request->ReferencePolarity);
         WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Polarity,
                              request->OscillatorPolarity);
         WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Interrupt, 1u);
         WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Interrupt, 1u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Enable, 1u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, 1u);
+        context->PhaseCaptureEnabled = TRUE;
+        context->PhaseReferencePolarity =
+            (UCHAR)request->ReferencePolarity;
+        context->PhaseOscillatorPolarity =
+            (UCHAR)request->OscillatorPolarity;
+    } else {
+        TimeCardPhaseDisableLocked(context);
     }
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Enable, enabled);
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, enabled);
     WdfWaitLockRelease(context->RegisterLock);
 
     RtlZeroMemory(response, sizeof(*response));
@@ -210,10 +225,26 @@ TimeCardPhaseControl(PDEVICE_CONTEXT context,
     response->ReferencePolarity = request->ReferencePolarity;
     response->OscillatorPolarity = request->OscillatorPolarity;
     response->Enabled = enabled;
-    context->PhaseCaptureEnabled = enabled != 0u;
-    context->PhaseReferencePolarity = (UCHAR)request->ReferencePolarity;
-    context->PhaseOscillatorPolarity = (UCHAR)request->OscillatorPolarity;
     return STATUS_SUCCESS;
+}
+
+VOID
+TimeCardPhaseDisableLocked(PDEVICE_CONTEXT context)
+{
+    /*
+     * This helper deliberately does not acquire RegisterLock.  Lease release
+     * and file cleanup must disarm capture and clear ownership as one atomic
+     * transition so a replacement owner cannot be disabled by stale cleanup.
+     */
+    if (TimeCardPhaseAvailable(context)) {
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask,
+                             0u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask,
+                             0u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Enable, 0u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, 0u);
+    }
+    context->PhaseCaptureEnabled = FALSE;
 }
 
 VOID

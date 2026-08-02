@@ -87,8 +87,8 @@ try {
     $statusExitCode = $LASTEXITCODE
     $statusOutput | Out-Host
     if ($statusExitCode -ne 0) { throw 'timecardctl status failed.' }
-    if (($statusOutput -join "`n") -notmatch 'ABI:\s+11\b') {
-        throw 'Native oscillator discipline requires the running ABI 11 driver. Reboot or restart the controller to finish the driver replacement.'
+    if (($statusOutput -join "`n") -notmatch 'ABI:\s+(1[5-9]|[2-9][0-9]+)\b') {
+        throw 'The complete Windows feature set requires ABI 15 or newer. Reboot or restart the controller to finish the driver replacement.'
     }
     $capabilityOutput = & $tool capabilities 2>&1
     $capabilityExitCode = $LASTEXITCODE

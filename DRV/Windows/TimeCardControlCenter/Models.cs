@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.InteropServices;
 
 namespace TimeCardControlCenter
@@ -313,6 +315,60 @@ namespace TimeCardControlCenter
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardClockAdjustmentRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Version;
+        public uint Control;
+        public uint Select;
+        public int OffsetNanoseconds;
+        public uint OffsetIntervalNanoseconds;
+        public long DriftPpbQ16;
+        public uint DriftIntervalNanoseconds;
+        public uint InSyncThresholdNanoseconds;
+        public uint AppliedFlags;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 7)]
+        public uint[] Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardClockAdvancedControlRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Version;
+        public uint Control;
+        public uint Status;
+        public uint ApplyFlags;
+        public uint OffsetRateLimiter;
+        public uint DriftRateLimiterQ16;
+        public uint AgingConfiguration;
+        public uint HoldoverConfiguration;
+        public uint OffsetOutlierFilter;
+        public uint DriftOutlierFilter;
+        public uint DynamicControl;
+        public uint ServoOffsetP;
+        public uint ServoOffsetI;
+        public uint ServoDriftP;
+        public uint ServoDriftI;
+        public uint StatusOffset;
+        public uint StatusDrift;
+        public uint StatusOffsetFraction;
+        public uint StatusDriftFraction;
+        public uint StatusHoldover;
+        public uint StatusHoldoverFraction;
+        public uint StatusHoldoverSamples;
+        public uint StatusOffsetOutliers;
+        public uint StatusDriftOutliers;
+        public uint StatusAgingLow;
+        public uint StatusAgingHigh;
+        public uint StatusAgingSamples;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)]
+        public uint[] Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct TimeCardNmeaControlRaw
     {
         public uint Size;
@@ -323,10 +379,23 @@ namespace TimeCardControlCenter
         public uint Control;
         public uint Status;
         public uint Version;
-        public uint Reserved0;
-        public uint Reserved1;
-        public uint Reserved2;
-        public uint Reserved3;
+        public int CorrectionSeconds;
+        public int LocalOffsetMinutes;
+        public uint Gnss;
+        public uint MessageDisableMask;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardNmeaUtcControlRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Version;
+        public uint RawUtcInfo;
+        public uint UtcOffsetSeconds;
+        public uint HandshakeControl;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
+        public uint[] Reserved;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -354,11 +423,272 @@ namespace TimeCardControlCenter
         public uint Version;
         public uint RepeatCount;
         public uint StartNanoseconds;
-        public uint Reserved;
+        public uint CableDelayNanoseconds;
         public ulong PeriodNanoseconds;
         public ulong PulseNanoseconds;
         public ulong PhaseNanoseconds;
         public ulong StartSeconds;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardSignalEventRaw
+    {
+        public ulong SystemInterruptTime100ns;
+        public ulong Sequence;
+        public uint Generator;
+        public uint Flags;
+        public uint Status;
+        public uint Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardSignalEventBatchRaw
+    {
+        public uint Size;
+        public uint Generator;
+        public uint MaximumEvents;
+        public uint Count;
+        public uint DroppedEvents;
+        public uint Flags;
+        public uint Reserved0;
+        public uint Reserved1;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+        public TimeCardSignalEventRaw[] Events;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardTimestampEventRaw
+    {
+        public TimeCardTimeRaw Time;
+        public uint TimestampCount;
+        public uint EventCount;
+        public uint Error;
+        public uint DataWidth;
+        public uint Flags;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 8)]
+        public uint[] Data;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardTimestampControlRaw
+    {
+        public uint Size;
+        public uint Channel;
+        public uint Flags;
+        public uint Status;
+        public uint Version;
+        public uint Polarity;
+        public uint CableDelayNanoseconds;
+        public uint Interrupt;
+        public uint InterruptMask;
+        public uint EventCount;
+        public uint TimestampCount;
+        public uint QueueDepth;
+        public uint DroppedEvents;
+        public uint DataWidth;
+        public TimeCardTimeRaw Time;
+        public uint Data;
+        public uint Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardTimestampBatchRaw
+    {
+        public uint Size;
+        public uint Channel;
+        public uint MaximumEvents;
+        public uint Count;
+        public uint DroppedEvents;
+        public uint Flags;
+        public uint Reserved0;
+        public uint Reserved1;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)]
+        public TimeCardTimestampEventRaw[] Events;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardFpgaCapabilitiesRaw
+    {
+        public uint Size;
+        public uint AbiVersion;
+        public uint CoreMask;
+        public uint FeatureFlags;
+        public uint KnownGaps;
+        public uint Layout;
+        public uint BoardProfile;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
+        public uint Reserved4;
+        public uint Reserved5;
+        public uint Reserved6;
+        public uint Reserved7;
+        public uint Reserved8;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardCoreDescriptorRaw
+    {
+        public uint Type;
+        public uint Instance;
+        public uint RegisterOffset;
+        public uint RegisterSpan;
+        public uint InterruptMessage;
+        public uint Version;
+        public uint Flags;
+        public uint Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardCoreInventoryRaw
+    {
+        public uint Size;
+        public uint AbiVersion;
+        public uint Count;
+        public uint Flags;
+        public uint BoardProfile;
+        public uint Layout;
+        public uint RawImageVersion;
+        public uint Reserved;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+        public TimeCardCoreDescriptorRaw[] Cores;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardFpgaImageContractRaw
+    {
+        public uint Size;
+        public uint AbiVersion;
+        public uint RawImageVersion;
+        public uint CapabilityFlags;
+        public uint EffectiveFlags;
+        public uint StatusFlags;
+        public uint BoardProfile;
+        public uint Layout;
+        public uint Acknowledgement;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 7)]
+        public uint[] Reserved;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardFpgaImageInfoRaw
+    {
+        public uint Size;
+        public uint AbiVersion;
+        public uint Flags;
+        public uint RawVersion;
+        public uint ImageTag;
+        public uint ImageVersion;
+        public uint Layout;
+        public uint BoardProfile;
+        public uint RegisterOffset;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
+        public uint Reserved4;
+        public uint Reserved5;
+        public uint Reserved6;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardClockTelemetryRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Version;
+        public uint Control;
+        public uint Status;
+        public uint Select;
+        public uint CoreMask;
+        public uint KnownGaps;
+        public uint InSyncThreshold;
+        public uint ServoOffsetP;
+        public uint ServoOffsetI;
+        public uint ServoDriftP;
+        public uint ServoDriftI;
+        public int StatusOffsetNanoseconds;
+        public int StatusDriftPpb;
+        public uint StatusOffsetFraction;
+        public uint StatusDriftFraction;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardPpsControlRaw
+    {
+        public uint Size;
+        public uint Core;
+        public uint Flags;
+        public uint Control;
+        public uint Status;
+        public uint Version;
+        public uint Polarity;
+        public uint PulseWidthMilliseconds;
+        public int CableDelayNanoseconds;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
+        public uint Reserved4;
+        public uint Reserved5;
+        public uint Reserved6;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardTimecodeControlRaw
+    {
+        public uint Size;
+        public uint Format;
+        public uint Role;
+        public uint Flags;
+        public uint Control;
+        public uint Status;
+        public uint Version;
+        public uint Mode;
+        public uint Code;
+        public int CorrectionSeconds;
+        public int DelayNanoseconds;
+        public uint ControlBits;
+        public uint BitPosition;
+        public uint AmplitudeModulation;
+        public uint ManualYear;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
+        public uint Reserved4;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardTodControlRaw
+    {
+        public uint Size;
+        public uint Flags;
+        public uint Control;
+        public uint Status;
+        public uint Version;
+        public uint Protocol;
+        public uint Gnss;
+        public uint Baud;
+        public uint BaudSelector;
+        public uint Polarity;
+        public int CorrectionSeconds;
+        public uint MessageDisableMask;
+        public uint UtcStatus;
+        public int TimeToLeapSeconds;
+        public uint GnssStatus;
+        public uint Satellites;
+        public uint Reserved0;
+        public uint Reserved1;
+        public uint Reserved2;
+        public uint Reserved3;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1067,22 +1397,58 @@ namespace TimeCardControlCenter
         {
             IsPresent = (value.Flags & 1u) != 0;
             IsEnabled = (value.Flags & 2u) != 0;
+            HasError = (value.Flags & 8u) != 0;
             Baud = value.Baud;
             BaudSelector = value.BaudSelector;
             IsInverted = value.Polarity != 0;
             Control = value.Control;
             Status = value.Status;
             Version = value.Version;
+            HasAdvancedConfiguration = (value.Flags & 4u) != 0;
+            CorrectionSeconds = value.CorrectionSeconds;
+            LocalOffsetMinutes = value.LocalOffsetMinutes;
+            Gnss = value.Gnss;
+            MessageDisableMask = value.MessageDisableMask;
         }
 
         public bool IsPresent { get; private set; }
         public bool IsEnabled { get; private set; }
+        public bool HasError { get; private set; }
         public uint Baud { get; private set; }
         public uint BaudSelector { get; private set; }
         public bool IsInverted { get; private set; }
         public uint Control { get; private set; }
         public uint Status { get; private set; }
         public uint Version { get; private set; }
+        public bool HasAdvancedConfiguration { get; private set; }
+        public int CorrectionSeconds { get; private set; }
+        public int LocalOffsetMinutes { get; private set; }
+        public uint Gnss { get; private set; }
+        public uint MessageDisableMask { get; private set; }
+        public bool SupportsPolarity { get { return VersionAtLeast(1u, 2u); } }
+        public bool SupportsGnss { get { return VersionAtLeast(1u, 3u); } }
+        public bool SupportsRmc { get { return VersionAtLeast(1u, 4u); } }
+        public bool SupportsUtc { get { return VersionAtLeast(1u, 6u); } }
+
+        private bool VersionAtLeast(uint major, uint minor)
+        {
+            uint actualMajor = Version >> 24;
+            uint actualMinor = (Version >> 16) & 0xffu;
+            return Version != 0u && Version != uint.MaxValue &&
+                (actualMajor > major ||
+                 (actualMajor == major && actualMinor >= minor));
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TimeCardDisciplineLeaseRaw
+    {
+        public uint Size;
+        public uint Action;
+        public uint Flags;
+        public uint Reserved0;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 2)]
+        public ulong[] Reserved;
     }
 
     public sealed class TimeCardIdentity
@@ -1109,7 +1475,12 @@ namespace TimeCardControlCenter
             Generator = value.Generator;
             IsPresent = (value.Flags & 1u) != 0;
             IsEnabled = (value.Flags & 2u) != 0;
-            IsInverted = (value.Flags & 4u) != 0;
+            IsActiveHigh = (value.Flags & 4u) != 0;
+            HasError = (value.Flags & 8u) != 0;
+            HasTimeJump = (value.Flags & 16u) != 0;
+            HasCompletionInterrupt = (value.Flags & 0x80u) != 0;
+            HasCompletionPending = (value.Flags & 0x100u) != 0;
+            HasCompletionOverflow = (value.Flags & 0x200u) != 0;
             Status = value.Status;
             Version = value.Version;
             RepeatCount = value.RepeatCount;
@@ -1118,12 +1489,22 @@ namespace TimeCardControlCenter
             PhaseNanoseconds = value.PhaseNanoseconds;
             StartSeconds = value.StartSeconds;
             StartNanoseconds = value.StartNanoseconds;
+            CableDelayNanoseconds = value.CableDelayNanoseconds;
         }
 
         public uint Generator { get; private set; }
         public bool IsPresent { get; private set; }
         public bool IsEnabled { get; private set; }
-        public bool IsInverted { get; private set; }
+        public bool IsActiveHigh { get; private set; }
+        public bool IsInverted
+        {
+            get { return IsActiveHigh; }
+        }
+        public bool HasError { get; private set; }
+        public bool HasTimeJump { get; private set; }
+        public bool HasCompletionInterrupt { get; private set; }
+        public bool HasCompletionPending { get; private set; }
+        public bool HasCompletionOverflow { get; private set; }
         public uint Status { get; private set; }
         public uint Version { get; private set; }
         public uint RepeatCount { get; private set; }
@@ -1132,6 +1513,7 @@ namespace TimeCardControlCenter
         public ulong PhaseNanoseconds { get; private set; }
         public ulong StartSeconds { get; private set; }
         public uint StartNanoseconds { get; private set; }
+        public uint CableDelayNanoseconds { get; private set; }
         public double FrequencyHz
         {
             get { return PeriodNanoseconds == 0 ? 0 : 1000000000.0 / PeriodNanoseconds; }
@@ -1140,6 +1522,598 @@ namespace TimeCardControlCenter
         {
             get { return PeriodNanoseconds == 0 ? 0 : PulseNanoseconds * 100.0 / PeriodNanoseconds; }
         }
+    }
+
+    public sealed class SignalCompletionEvent
+    {
+        internal SignalCompletionEvent(TimeCardSignalEventRaw value)
+        {
+            SystemInterruptTime100ns = value.SystemInterruptTime100ns;
+            Sequence = value.Sequence;
+            Generator = value.Generator;
+            Flags = value.Flags;
+            Status = value.Status;
+        }
+
+        public ulong SystemInterruptTime100ns { get; private set; }
+        public ulong Sequence { get; private set; }
+        public uint Generator { get; private set; }
+        public uint Flags { get; private set; }
+        public uint Status { get; private set; }
+        public bool IsCompleted { get { return (Flags & 1u) != 0; } }
+        public bool HasError { get { return (Flags & 2u) != 0; } }
+        public bool HasTimeJump { get { return (Flags & 4u) != 0; } }
+    }
+
+    public sealed class SignalCompletionBatch
+    {
+        internal SignalCompletionBatch(TimeCardSignalEventBatchRaw value)
+        {
+            Generator = value.Generator;
+            DroppedEvents = value.DroppedEvents;
+            HasOverflow = (value.Flags & 8u) != 0;
+            List<SignalCompletionEvent> events =
+                new List<SignalCompletionEvent>();
+            uint count = Math.Min(value.Count, 16u);
+            if (value.Events != null)
+            {
+                count = Math.Min(count, (uint)value.Events.Length);
+                for (uint index = 0; index < count; ++index)
+                    events.Add(new SignalCompletionEvent(value.Events[index]));
+            }
+            Events = events.AsReadOnly();
+        }
+
+        public uint Generator { get; private set; }
+        public uint DroppedEvents { get; private set; }
+        public bool HasOverflow { get; private set; }
+        public IList<SignalCompletionEvent> Events { get; private set; }
+    }
+
+    public sealed class TimestampEvent
+    {
+        internal TimestampEvent(TimeCardTimestampEventRaw value)
+        {
+            Seconds = value.Time.Seconds;
+            Nanoseconds = value.Time.Nanoseconds;
+            TimestampCount = value.TimestampCount;
+            EventCount = value.EventCount;
+            Error = value.Error;
+            DataWidth = value.DataWidth;
+            Flags = value.Flags;
+            Data = value.Data == null ? new uint[0] :
+                (uint[])value.Data.Clone();
+        }
+
+        public ulong Seconds { get; private set; }
+        public uint Nanoseconds { get; private set; }
+        public uint TimestampCount { get; private set; }
+        public uint EventCount { get; private set; }
+        public uint Error { get; private set; }
+        public uint DataWidth { get; private set; }
+        public uint Flags { get; private set; }
+        public uint[] Data { get; private set; }
+        public bool IsValid { get { return (Flags & 8u) != 0; } }
+        public bool HasDropError { get { return (Flags & 4u) != 0; } }
+        public bool IsDataValid { get { return (Flags & 16u) != 0; } }
+    }
+
+    public sealed class TimestampChannelState
+    {
+        internal TimestampChannelState(TimeCardTimestampControlRaw value)
+        {
+            Channel = value.Channel;
+            Flags = value.Flags;
+            Status = value.Status;
+            Version = value.Version;
+            Polarity = value.Polarity;
+            CableDelayNanoseconds = value.CableDelayNanoseconds;
+            Interrupt = value.Interrupt;
+            InterruptMask = value.InterruptMask;
+            EventCount = value.EventCount;
+            TimestampCount = value.TimestampCount;
+            QueueDepth = value.QueueDepth;
+            DroppedEvents = value.DroppedEvents;
+            DataWidth = value.DataWidth;
+            Seconds = value.Time.Seconds;
+            Nanoseconds = value.Time.Nanoseconds;
+            Data = value.Data;
+        }
+
+        public uint Channel { get; private set; }
+        public uint Flags { get; private set; }
+        public uint Status { get; private set; }
+        public uint Version { get; private set; }
+        public uint Polarity { get; private set; }
+        public uint CableDelayNanoseconds { get; private set; }
+        public uint Interrupt { get; private set; }
+        public uint InterruptMask { get; private set; }
+        public uint EventCount { get; private set; }
+        public uint TimestampCount { get; private set; }
+        public uint QueueDepth { get; private set; }
+        public uint DroppedEvents { get; private set; }
+        public uint DataWidth { get; private set; }
+        public ulong Seconds { get; private set; }
+        public uint Nanoseconds { get; private set; }
+        public uint Data { get; private set; }
+        public bool IsPresent { get { return (Flags & 1u) != 0; } }
+        public bool IsEnabled { get { return (Flags & 2u) != 0; } }
+        public bool HasDropError { get { return (Flags & 4u) != 0; } }
+        public bool HasValidEvent { get { return (Flags & 8u) != 0; } }
+        public bool HasInterrupt { get { return (Flags & 0x20u) != 0; } }
+        public bool HasQueueOverflow { get { return (Flags & 0x40u) != 0; } }
+        public bool IsCableDelayWritable { get { return (Flags & 0x100u) != 0; } }
+        public bool HasCounters { get { return (Flags & 0x200u) != 0; } }
+        public bool HasDataSurface { get { return (Flags & 0x400u) != 0; } }
+    }
+
+    public sealed class TimestampEventBatch
+    {
+        internal TimestampEventBatch(TimeCardTimestampBatchRaw value)
+        {
+            Channel = value.Channel;
+            DroppedEvents = value.DroppedEvents;
+            HasOverflow = (value.Flags & 0x40u) != 0;
+            List<TimestampEvent> events = new List<TimestampEvent>();
+            uint count = Math.Min(value.Count, 16u);
+            if (value.Events != null)
+            {
+                count = Math.Min(count, (uint)value.Events.Length);
+                for (uint index = 0; index < count; ++index)
+                    events.Add(new TimestampEvent(value.Events[index]));
+            }
+            Events = events.AsReadOnly();
+        }
+
+        public uint Channel { get; private set; }
+        public uint DroppedEvents { get; private set; }
+        public bool HasOverflow { get; private set; }
+        public IList<TimestampEvent> Events { get; private set; }
+    }
+
+    public sealed class ClockAdjustmentState
+    {
+        internal ClockAdjustmentState(TimeCardClockAdjustmentRaw value)
+        {
+            Flags = value.Flags;
+            Version = value.Version;
+            Control = value.Control;
+            Select = value.Select;
+            OffsetNanoseconds = value.OffsetNanoseconds;
+            OffsetIntervalNanoseconds = value.OffsetIntervalNanoseconds;
+            DriftPpbQ16 = value.DriftPpbQ16;
+            DriftIntervalNanoseconds = value.DriftIntervalNanoseconds;
+            InSyncThresholdNanoseconds = value.InSyncThresholdNanoseconds;
+            AppliedFlags = value.AppliedFlags;
+        }
+
+        public uint Flags { get; private set; }
+        public uint Version { get; private set; }
+        public uint Control { get; private set; }
+        public uint Select { get; private set; }
+        public int OffsetNanoseconds { get; private set; }
+        public uint OffsetIntervalNanoseconds { get; private set; }
+        public long DriftPpbQ16 { get; private set; }
+        public double DriftPpb { get { return DriftPpbQ16 / 65536.0; } }
+        public uint DriftIntervalNanoseconds { get; private set; }
+        public uint InSyncThresholdNanoseconds { get; private set; }
+        public uint AppliedFlags { get; private set; }
+        public bool IsPresent { get { return (Flags & 1u) != 0; } }
+        public bool HasFractionalDrift { get { return (Flags & 2u) != 0; } }
+    }
+
+    public sealed class ClockAdvancedState
+    {
+        internal ClockAdvancedState(TimeCardClockAdvancedControlRaw value)
+        {
+            Flags = value.Flags; Version = value.Version;
+            Control = value.Control; Status = value.Status;
+            ApplyFlags = value.ApplyFlags;
+            OffsetRateLimiter = value.OffsetRateLimiter;
+            DriftRateLimiterQ16 = value.DriftRateLimiterQ16;
+            AgingConfiguration = value.AgingConfiguration;
+            HoldoverConfiguration = value.HoldoverConfiguration;
+            OffsetOutlierFilter = value.OffsetOutlierFilter;
+            DriftOutlierFilter = value.DriftOutlierFilter;
+            DynamicControl = value.DynamicControl;
+            ServoOffsetP = value.ServoOffsetP; ServoOffsetI = value.ServoOffsetI;
+            ServoDriftP = value.ServoDriftP; ServoDriftI = value.ServoDriftI;
+            StatusOffset = value.StatusOffset; StatusDrift = value.StatusDrift;
+            StatusOffsetFraction = value.StatusOffsetFraction;
+            StatusDriftFraction = value.StatusDriftFraction;
+            StatusHoldover = value.StatusHoldover;
+            StatusHoldoverFraction = value.StatusHoldoverFraction;
+            StatusHoldoverSamples = value.StatusHoldoverSamples;
+            StatusOffsetOutliers = value.StatusOffsetOutliers;
+            StatusDriftOutliers = value.StatusDriftOutliers;
+            StatusAgingLow = value.StatusAgingLow;
+            StatusAgingHigh = value.StatusAgingHigh;
+            StatusAgingSamples = value.StatusAgingSamples;
+        }
+
+        public uint Flags { get; private set; }
+        public uint Version { get; private set; }
+        public uint Control { get; private set; }
+        public uint Status { get; private set; }
+        public uint ApplyFlags { get; private set; }
+        public uint OffsetRateLimiter { get; private set; }
+        public uint DriftRateLimiterQ16 { get; private set; }
+        public uint AgingConfiguration { get; private set; }
+        public uint HoldoverConfiguration { get; private set; }
+        public uint OffsetOutlierFilter { get; private set; }
+        public uint DriftOutlierFilter { get; private set; }
+        public uint DynamicControl { get; private set; }
+        public uint ServoOffsetP { get; private set; }
+        public uint ServoOffsetI { get; private set; }
+        public uint ServoDriftP { get; private set; }
+        public uint ServoDriftI { get; private set; }
+        public uint StatusOffset { get; private set; }
+        public uint StatusDrift { get; private set; }
+        public uint StatusOffsetFraction { get; private set; }
+        public uint StatusDriftFraction { get; private set; }
+        public uint StatusHoldover { get; private set; }
+        public uint StatusHoldoverFraction { get; private set; }
+        public uint StatusHoldoverSamples { get; private set; }
+        public uint StatusOffsetOutliers { get; private set; }
+        public uint StatusDriftOutliers { get; private set; }
+        public uint StatusAgingLow { get; private set; }
+        public uint StatusAgingHigh { get; private set; }
+        public uint StatusAgingSamples { get; private set; }
+        public bool HasRateLimiters { get { return (Flags & 2u) != 0; } }
+        public bool HasHoldover { get { return (Flags & 4u) != 0; } }
+        public bool HasOutlierFilters { get { return (Flags & 8u) != 0; } }
+        public bool HasServoFactors { get { return (Flags & 0x10u) != 0; } }
+        public bool HasServoLog { get { return (Flags & 0x20u) != 0; } }
+        public bool HasAging { get { return (Flags & 0x40u) != 0; } }
+        public bool HasDynamicControl { get { return (Flags & 0x80u) != 0; } }
+        public bool HasRevert { get { return (Flags & 0x100u) != 0; } }
+        public bool IsHoldoverReady { get { return (Flags & 0x200u) != 0; } }
+        public bool IsAgingReady { get { return (Flags & 0x400u) != 0; } }
+    }
+
+    public sealed class CoreDescriptor
+    {
+        internal CoreDescriptor(TimeCardCoreDescriptorRaw value)
+        {
+            Type = value.Type; Instance = value.Instance;
+            RegisterOffset = value.RegisterOffset;
+            RegisterSpan = value.RegisterSpan;
+            InterruptMessage = value.InterruptMessage;
+            Version = value.Version; Flags = value.Flags;
+        }
+
+        public uint Type { get; private set; }
+        public uint Instance { get; private set; }
+        public uint RegisterOffset { get; private set; }
+        public uint RegisterSpan { get; private set; }
+        public uint InterruptMessage { get; private set; }
+        public uint Version { get; private set; }
+        public uint Flags { get; private set; }
+        public string Name
+        {
+            get
+            {
+                string[] names = { "Unknown", "Adjustable Clock", "Image Identity",
+                    "Signal Timestamper", "PPS Master", "PPS Slave", "ToD Slave",
+                    "ToD Master", "IRIG Master", "IRIG Slave", "DCF Master",
+                    "DCF Slave", "Signal Generator", "Frequency Input" };
+                return Type < names.Length ? names[Type] : "Core " + Type.ToString(
+                    CultureInfo.InvariantCulture);
+            }
+        }
+        public bool HasInterrupt { get { return InterruptMessage != uint.MaxValue; } }
+    }
+
+    public sealed class CoreInventory
+    {
+        internal CoreInventory(TimeCardCoreInventoryRaw value)
+        {
+            AbiVersion = value.AbiVersion; Flags = value.Flags;
+            BoardProfile = value.BoardProfile; Layout = value.Layout;
+            RawImageVersion = value.RawImageVersion;
+            List<CoreDescriptor> cores = new List<CoreDescriptor>();
+            uint count = Math.Min(value.Count, 32u);
+            if (value.Cores != null)
+            {
+                count = Math.Min(count, (uint)value.Cores.Length);
+                for (uint index = 0; index < count; ++index)
+                    cores.Add(new CoreDescriptor(value.Cores[index]));
+            }
+            Cores = cores.AsReadOnly();
+        }
+
+        public uint AbiVersion { get; private set; }
+        public uint Flags { get; private set; }
+        public uint BoardProfile { get; private set; }
+        public uint Layout { get; private set; }
+        public uint RawImageVersion { get; private set; }
+        public IList<CoreDescriptor> Cores { get; private set; }
+        public bool IsStaticProfile { get { return (Flags & 1u) != 0; } }
+        public bool HasConfigurationSlave { get { return (Flags & 2u) == 0; } }
+    }
+
+    public sealed class FpgaImageContract
+    {
+        internal FpgaImageContract(TimeCardFpgaImageContractRaw value)
+        {
+            AbiVersion = value.AbiVersion;
+            RawImageVersion = value.RawImageVersion;
+            CapabilityFlags = value.CapabilityFlags;
+            EffectiveFlags = value.EffectiveFlags;
+            StatusFlags = value.StatusFlags;
+            BoardProfile = value.BoardProfile;
+            Layout = value.Layout;
+        }
+
+        public uint AbiVersion { get; private set; }
+        public uint RawImageVersion { get; private set; }
+        public uint CapabilityFlags { get; private set; }
+        public uint EffectiveFlags { get; private set; }
+        public uint StatusFlags { get; private set; }
+        public uint BoardProfile { get; private set; }
+        public uint Layout { get; private set; }
+        public bool HasImage { get { return (StatusFlags & 1u) != 0; } }
+        public bool IsExactMatch { get { return (StatusFlags & 2u) != 0; } }
+        public bool IsActive { get { return (StatusFlags & 4u) != 0; } }
+        public bool Allows(uint flag) { return (EffectiveFlags & flag) == flag; }
+    }
+
+    public sealed class NmeaUtcState
+    {
+        internal NmeaUtcState(TimeCardNmeaUtcControlRaw value)
+        {
+            Flags = value.Flags; Version = value.Version;
+            RawUtcInfo = value.RawUtcInfo;
+            UtcOffsetSeconds = value.UtcOffsetSeconds;
+            HandshakeControl = value.HandshakeControl;
+        }
+
+        public uint Flags { get; private set; }
+        public uint Version { get; private set; }
+        public uint RawUtcInfo { get; private set; }
+        public uint UtcOffsetSeconds { get; private set; }
+        public uint HandshakeControl { get; private set; }
+        public bool IsPresent { get { return (Flags & 1u) != 0; } }
+        public bool CanRead { get { return (Flags & 2u) != 0; } }
+        public bool CanWrite { get { return (Flags & 4u) != 0; } }
+        public bool Leap61 { get { return (Flags & 8u) != 0; } }
+        public bool Leap59 { get { return (Flags & 0x10u) != 0; } }
+        public bool IsOffsetValid { get { return (Flags & 0x20u) != 0; } }
+    }
+
+    public sealed class FpgaCapabilities
+    {
+        internal FpgaCapabilities(TimeCardFpgaCapabilitiesRaw value)
+        {
+            AbiVersion = value.AbiVersion;
+            CoreMask = value.CoreMask;
+            FeatureFlags = value.FeatureFlags;
+            KnownGaps = value.KnownGaps;
+            Layout = value.Layout;
+            BoardProfile = value.BoardProfile;
+        }
+
+        public uint AbiVersion { get; private set; }
+        public uint CoreMask { get; private set; }
+        public uint FeatureFlags { get; private set; }
+        public uint KnownGaps { get; private set; }
+        public uint Layout { get; private set; }
+        public uint BoardProfile { get; private set; }
+    }
+
+    public sealed class FpgaImageInfo
+    {
+        internal FpgaImageInfo(TimeCardFpgaImageInfoRaw value)
+        {
+            AbiVersion = value.AbiVersion;
+            Flags = value.Flags;
+            RawVersion = value.RawVersion;
+            ImageTag = value.ImageTag;
+            ImageVersion = value.ImageVersion;
+            Layout = value.Layout;
+            BoardProfile = value.BoardProfile;
+            RegisterOffset = value.RegisterOffset;
+        }
+
+        public uint AbiVersion { get; private set; }
+        public uint Flags { get; private set; }
+        public uint RawVersion { get; private set; }
+        public uint ImageTag { get; private set; }
+        public uint ImageVersion { get; private set; }
+        public uint Layout { get; private set; }
+        public uint BoardProfile { get; private set; }
+        public uint RegisterOffset { get; private set; }
+        public bool IsPresent { get { return (Flags & 1u) != 0; } }
+        public bool IsLoader { get { return (Flags & 2u) != 0; } }
+        public bool IsFpgaFirmware { get { return (Flags & 4u) != 0; } }
+        public string ImageKind
+        {
+            get
+            {
+                string kind = IsFpgaFirmware ? "FPGA" : "SOM";
+                return IsLoader ? kind + " loader" : kind + " firmware";
+            }
+        }
+        public string VersionText
+        {
+            get
+            {
+                return string.Format(CultureInfo.InvariantCulture, "{0}.{1}",
+                    ImageVersion >> 8, ImageVersion & 0xffu);
+            }
+        }
+    }
+
+    public sealed class ClockTelemetryState
+    {
+        internal ClockTelemetryState(TimeCardClockTelemetryRaw value)
+        {
+            Flags = value.Flags;
+            Version = value.Version;
+            Control = value.Control;
+            Status = value.Status;
+            Select = value.Select;
+            CoreMask = value.CoreMask;
+            KnownGaps = value.KnownGaps;
+            InSyncThreshold = value.InSyncThreshold;
+            ServoOffsetP = value.ServoOffsetP;
+            ServoOffsetI = value.ServoOffsetI;
+            ServoDriftP = value.ServoDriftP;
+            ServoDriftI = value.ServoDriftI;
+            StatusOffsetNanoseconds = value.StatusOffsetNanoseconds;
+            StatusDriftPpb = value.StatusDriftPpb;
+            StatusOffsetFraction = value.StatusOffsetFraction;
+            StatusDriftFraction = value.StatusDriftFraction;
+        }
+
+        public uint Flags { get; private set; }
+        public uint Version { get; private set; }
+        public uint Control { get; private set; }
+        public uint Status { get; private set; }
+        public uint Select { get; private set; }
+        public uint CoreMask { get; private set; }
+        public uint KnownGaps { get; private set; }
+        public uint InSyncThreshold { get; private set; }
+        public uint ServoOffsetP { get; private set; }
+        public uint ServoOffsetI { get; private set; }
+        public uint ServoDriftP { get; private set; }
+        public uint ServoDriftI { get; private set; }
+        public int StatusOffsetNanoseconds { get; private set; }
+        public int StatusDriftPpb { get; private set; }
+        public uint StatusOffsetFraction { get; private set; }
+        public uint StatusDriftFraction { get; private set; }
+    }
+
+    public sealed class PpsEngineState
+    {
+        internal PpsEngineState(TimeCardPpsControlRaw value)
+        {
+            Core = value.Core;
+            IsPresent = (value.Flags & 1u) != 0;
+            IsEnabled = (value.Flags & 2u) != 0;
+            HasError = (value.Flags & 4u) != 0;
+            HasFilterError = (value.Flags & 8u) != 0;
+            HasSupervisionError = (value.Flags & 16u) != 0;
+            IsPulseWidthWritable = (value.Flags & 32u) != 0;
+            Control = value.Control;
+            Status = value.Status;
+            Version = value.Version;
+            IsActiveHigh = value.Polarity != 0;
+            PulseWidthMilliseconds = value.PulseWidthMilliseconds;
+            CableDelayNanoseconds = value.CableDelayNanoseconds;
+        }
+
+        public uint Core { get; private set; }
+        public bool IsPresent { get; private set; }
+        public bool IsEnabled { get; private set; }
+        public bool HasError { get; private set; }
+        public bool HasFilterError { get; private set; }
+        public bool HasSupervisionError { get; private set; }
+        public bool IsPulseWidthWritable { get; private set; }
+        public uint Control { get; private set; }
+        public uint Status { get; private set; }
+        public uint Version { get; private set; }
+        public bool IsActiveHigh { get; private set; }
+        public uint PulseWidthMilliseconds { get; private set; }
+        public int CableDelayNanoseconds { get; private set; }
+    }
+
+    public sealed class TimecodeEngineState
+    {
+        internal TimecodeEngineState(TimeCardTimecodeControlRaw value)
+        {
+            Format = value.Format;
+            Role = value.Role;
+            IsPresent = (value.Flags & 1u) != 0;
+            IsEnabled = (value.Flags & 2u) != 0;
+            HasError = (value.Flags & 4u) != 0;
+            IsDelayWritable = (value.Flags & 8u) != 0;
+            IsControlBitsWritable = (value.Flags & 16u) != 0;
+            IsAmplitudeModulationWritable = (value.Flags & 32u) != 0;
+            IsManualYearWritable = (value.Flags & 64u) != 0;
+            Control = value.Control;
+            Status = value.Status;
+            Version = value.Version;
+            Mode = value.Mode;
+            Code = value.Code;
+            CorrectionSeconds = value.CorrectionSeconds;
+            DelayNanoseconds = value.DelayNanoseconds;
+            ControlBits = value.ControlBits;
+            BitPosition = value.BitPosition;
+            AmplitudeModulation = value.AmplitudeModulation;
+            ManualYear = value.ManualYear;
+        }
+
+        public uint Format { get; private set; }
+        public uint Role { get; private set; }
+        public bool IsPresent { get; private set; }
+        public bool IsEnabled { get; private set; }
+        public bool HasError { get; private set; }
+        public bool IsDelayWritable { get; private set; }
+        public bool IsControlBitsWritable { get; private set; }
+        public bool IsAmplitudeModulationWritable { get; private set; }
+        public bool IsManualYearWritable { get; private set; }
+        public uint Control { get; private set; }
+        public uint Status { get; private set; }
+        public uint Version { get; private set; }
+        public uint Mode { get; private set; }
+        public uint Code { get; private set; }
+        public int CorrectionSeconds { get; private set; }
+        public int DelayNanoseconds { get; private set; }
+        public uint ControlBits { get; private set; }
+        public uint BitPosition { get; private set; }
+        public uint AmplitudeModulation { get; private set; }
+        public uint ManualYear { get; private set; }
+    }
+
+    public sealed class TodParserState
+    {
+        internal TodParserState(TimeCardTodControlRaw value)
+        {
+            IsPresent = (value.Flags & 1u) != 0;
+            IsEnabled = (value.Flags & 2u) != 0;
+            HasParseError = (value.Flags & 4u) != 0;
+            HasChecksumError = (value.Flags & 8u) != 0;
+            HasUartError = (value.Flags & 16u) != 0;
+            HasUtcTelemetry = (value.Flags & 32u) != 0;
+            HasGnssTelemetry = (value.Flags & 64u) != 0;
+            Control = value.Control;
+            Status = value.Status;
+            Version = value.Version;
+            Protocol = value.Protocol;
+            Gnss = value.Gnss;
+            Baud = value.Baud;
+            BaudSelector = value.BaudSelector;
+            IsInverted = value.Polarity != 0;
+            CorrectionSeconds = value.CorrectionSeconds;
+            MessageDisableMask = value.MessageDisableMask;
+            UtcStatus = value.UtcStatus;
+            TimeToLeapSeconds = value.TimeToLeapSeconds;
+            GnssStatus = value.GnssStatus;
+            Satellites = value.Satellites;
+        }
+
+        public bool IsPresent { get; private set; }
+        public bool IsEnabled { get; private set; }
+        public bool HasParseError { get; private set; }
+        public bool HasChecksumError { get; private set; }
+        public bool HasUartError { get; private set; }
+        public bool HasUtcTelemetry { get; private set; }
+        public bool HasGnssTelemetry { get; private set; }
+        public uint Control { get; private set; }
+        public uint Status { get; private set; }
+        public uint Version { get; private set; }
+        public uint Protocol { get; private set; }
+        public uint Gnss { get; private set; }
+        public uint Baud { get; private set; }
+        public uint BaudSelector { get; private set; }
+        public bool IsInverted { get; private set; }
+        public int CorrectionSeconds { get; private set; }
+        public uint MessageDisableMask { get; private set; }
+        public uint UtcStatus { get; private set; }
+        public int TimeToLeapSeconds { get; private set; }
+        public uint GnssStatus { get; private set; }
+        public uint Satellites { get; private set; }
     }
 
     public sealed class FrequencyCounterState
@@ -1354,10 +2328,24 @@ namespace TimeCardControlCenter
         public byte[] Data { get; private set; }
     }
 
+    public sealed class DisciplineLeaseState
+    {
+        internal DisciplineLeaseState(TimeCardDisciplineLeaseRaw value)
+        {
+            IsActive = (value.Flags & 1u) != 0u;
+            IsOwner = (value.Flags & 2u) != 0u;
+        }
+
+        public bool IsActive { get; private set; }
+        public bool IsOwner { get; private set; }
+    }
+
     public sealed class TimeCardSnapshot
     {
-        internal TimeCardSnapshot(TimeCardInfoRaw info, TimeCardCrossTimestampRaw timestamp,
-                                  TimeCardHierarchyRaw hierarchy)
+        internal TimeCardSnapshot(TimeCardInfoRaw info,
+                                  TimeCardCrossTimestampRaw timestamp,
+                                  TimeCardHierarchyRaw hierarchy,
+                                  ulong sampleTickMilliseconds)
         {
             AbiVersion = info.AbiVersion;
             DriverVersion = string.Format("{0}.{1}", info.DriverVersion >> 16, info.DriverVersion & 0xffff);
@@ -1378,8 +2366,11 @@ namespace TimeCardControlCenter
             Leap = info.Leap;
             GnssStatus = info.GnssStatus;
             Satellites = info.Satellites;
-            TodTelemetryAvailable = info.TodVersion != uint.MaxValue;
-            GnssTelemetryAvailable = TodTelemetryAvailable &&
+            TodCoreAvailable = info.TodVersion != uint.MaxValue;
+            TodTelemetryAvailable = TodCoreAvailable &&
+                info.UtcStatus != uint.MaxValue &&
+                info.Leap != uint.MaxValue;
+            GnssTelemetryAvailable = TodCoreAvailable &&
                 info.GnssStatus != uint.MaxValue &&
                 info.Satellites != uint.MaxValue;
             SeenSatellites = GnssTelemetryAvailable ?
@@ -1410,6 +2401,7 @@ namespace TimeCardControlCenter
             OffsetNanoseconds = (CardTimeUtc.Ticks - SystemTimeUtc.Ticks) * 100L;
             SamplingWindowNanoseconds =
                 (long)(timestamp.SystemTimeAfter100ns - timestamp.SystemTimeBefore100ns) * 100L;
+            SampleTickMilliseconds = sampleTickMilliseconds;
         }
 
         public uint AbiVersion { get; private set; }
@@ -1421,12 +2413,16 @@ namespace TimeCardControlCenter
         public string ClockVersion { get; private set; }
         public uint ClockVersionRaw { get; private set; }
         public uint ClockStatus { get; private set; }
-        public bool IsClockSynchronized { get { return (ClockStatus & 1) != 0; } }
+        public bool IsClockSynchronized
+        {
+            get { return ClockStatus != uint.MaxValue && (ClockStatus & 1) != 0; }
+        }
         public uint ClockSource { get; private set; }
         public uint TodVersion { get; private set; }
         public uint TodStatus { get; private set; }
         public uint UtcStatus { get; private set; }
         public uint Leap { get; private set; }
+        public bool TodCoreAvailable { get; private set; }
         public bool TodTelemetryAvailable { get; private set; }
         public uint GnssStatus { get; private set; }
         public uint Satellites { get; private set; }
@@ -1445,6 +2441,7 @@ namespace TimeCardControlCenter
         public DateTime SystemTimeUtc { get; private set; }
         public long OffsetNanoseconds { get; private set; }
         public long SamplingWindowNanoseconds { get; private set; }
+        public ulong SampleTickMilliseconds { get; private set; }
     }
 
     public sealed class UartReadResult

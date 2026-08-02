@@ -26,6 +26,8 @@ namespace TimeCardControlCenter
     public partial class MainWindow : Window
     {
         private readonly DispatcherTimer refreshTimer;
+        private readonly SessionLogStore sessionLogStore =
+            new SessionLogStore(2000);
         private const string GenericComTagPrefix = "COM:";
         private readonly string[] startupArguments;
         private TimeCardClient client;
@@ -101,9 +103,14 @@ namespace TimeCardControlCenter
             public TextBox Frequency { get; set; }
             public TextBox Duty { get; set; }
             public TextBox Phase { get; set; }
-            public CheckBox Invert { get; set; }
+            public CheckBox ActiveHigh { get; set; }
+            public TextBox Repeat { get; set; }
+            public TextBox CableDelay { get; set; }
+            public ComboBox StartMode { get; set; }
+            public TextBox Start { get; set; }
             public ComboBox Route { get; set; }
             public TextBlock Detail { get; set; }
+            public Button Clear { get; set; }
             public Button Apply { get; set; }
         }
 
@@ -266,10 +273,10 @@ namespace TimeCardControlCenter
             imuCubeShowcaseTimer.Tick += ImuCubeShowcaseTimer_Tick;
             signalGeneratorControls = new[]
             {
-                new SignalGeneratorControls { Status = Generator1StatusText, Enabled = Generator1EnabledCheckBox, Frequency = Generator1FrequencyTextBox, Duty = Generator1DutyTextBox, Phase = Generator1PhaseTextBox, Invert = Generator1InvertCheckBox, Route = Generator1RouteCombo, Detail = Generator1DetailText, Apply = Generator1ApplyButton },
-                new SignalGeneratorControls { Status = Generator2StatusText, Enabled = Generator2EnabledCheckBox, Frequency = Generator2FrequencyTextBox, Duty = Generator2DutyTextBox, Phase = Generator2PhaseTextBox, Invert = Generator2InvertCheckBox, Route = Generator2RouteCombo, Detail = Generator2DetailText, Apply = Generator2ApplyButton },
-                new SignalGeneratorControls { Status = Generator3StatusText, Enabled = Generator3EnabledCheckBox, Frequency = Generator3FrequencyTextBox, Duty = Generator3DutyTextBox, Phase = Generator3PhaseTextBox, Invert = Generator3InvertCheckBox, Route = Generator3RouteCombo, Detail = Generator3DetailText, Apply = Generator3ApplyButton },
-                new SignalGeneratorControls { Status = Generator4StatusText, Enabled = Generator4EnabledCheckBox, Frequency = Generator4FrequencyTextBox, Duty = Generator4DutyTextBox, Phase = Generator4PhaseTextBox, Invert = Generator4InvertCheckBox, Route = Generator4RouteCombo, Detail = Generator4DetailText, Apply = Generator4ApplyButton }
+                new SignalGeneratorControls { Status = Generator1StatusText, Enabled = Generator1EnabledCheckBox, Frequency = Generator1FrequencyTextBox, Duty = Generator1DutyTextBox, Phase = Generator1PhaseTextBox, ActiveHigh = Generator1ActiveHighCheckBox, Repeat = Generator1RepeatTextBox, CableDelay = Generator1CableDelayTextBox, StartMode = Generator1StartModeCombo, Start = Generator1StartTextBox, Route = Generator1RouteCombo, Detail = Generator1DetailText, Clear = Generator1ClearButton, Apply = Generator1ApplyButton },
+                new SignalGeneratorControls { Status = Generator2StatusText, Enabled = Generator2EnabledCheckBox, Frequency = Generator2FrequencyTextBox, Duty = Generator2DutyTextBox, Phase = Generator2PhaseTextBox, ActiveHigh = Generator2ActiveHighCheckBox, Repeat = Generator2RepeatTextBox, CableDelay = Generator2CableDelayTextBox, StartMode = Generator2StartModeCombo, Start = Generator2StartTextBox, Route = Generator2RouteCombo, Detail = Generator2DetailText, Clear = Generator2ClearButton, Apply = Generator2ApplyButton },
+                new SignalGeneratorControls { Status = Generator3StatusText, Enabled = Generator3EnabledCheckBox, Frequency = Generator3FrequencyTextBox, Duty = Generator3DutyTextBox, Phase = Generator3PhaseTextBox, ActiveHigh = Generator3ActiveHighCheckBox, Repeat = Generator3RepeatTextBox, CableDelay = Generator3CableDelayTextBox, StartMode = Generator3StartModeCombo, Start = Generator3StartTextBox, Route = Generator3RouteCombo, Detail = Generator3DetailText, Clear = Generator3ClearButton, Apply = Generator3ApplyButton },
+                new SignalGeneratorControls { Status = Generator4StatusText, Enabled = Generator4EnabledCheckBox, Frequency = Generator4FrequencyTextBox, Duty = Generator4DutyTextBox, Phase = Generator4PhaseTextBox, ActiveHigh = Generator4ActiveHighCheckBox, Repeat = Generator4RepeatTextBox, CableDelay = Generator4CableDelayTextBox, StartMode = Generator4StartModeCombo, Start = Generator4StartTextBox, Route = Generator4RouteCombo, Detail = Generator4DetailText, Clear = Generator4ClearButton, Apply = Generator4ApplyButton }
             };
             frequencyCounterControls = new[]
             {
@@ -284,6 +291,7 @@ namespace TimeCardControlCenter
             RefreshGenericComPorts(false);
             InitializeProductFeatures();
             SetGenericSerialControlsEnabled(false);
+            RefreshSessionLogView(false);
         }
 
         private void ApplyStartupView(string[] arguments)
@@ -342,6 +350,7 @@ namespace TimeCardControlCenter
                 page.Equals("Uart", StringComparison.OrdinalIgnoreCase) ? UartNav :
                 page.Equals("Sma", StringComparison.OrdinalIgnoreCase) ? SmaNav :
                 page.Equals("Timing", StringComparison.OrdinalIgnoreCase) ? TimingNav :
+                page.Equals("Fpga", StringComparison.OrdinalIgnoreCase) ? FpgaNav :
                 page.Equals("Sensors", StringComparison.OrdinalIgnoreCase) ? SensorsNav :
                 page.Equals("I2c", StringComparison.OrdinalIgnoreCase) ? I2cNav :
                 page.Equals("Telemetry", StringComparison.OrdinalIgnoreCase) ? TelemetryNav :
@@ -371,6 +380,8 @@ namespace TimeCardControlCenter
             refreshTimer.Start();
             if (productSettings.DemoMode)
             {
+                CardSelector.Text = "Demo telemetry (no hardware)";
+                UpdateDeviceSelectionControls();
                 SetConnectionState(true, "Demo telemetry", false);
                 UpdateDemoProduct();
             }
@@ -432,6 +443,7 @@ namespace TimeCardControlCenter
 
         private void Window_Closed(object sender, EventArgs e)
         {
+            CloseDeviceSelection();
             refreshTimer.Stop();
             imuCubeShowcaseTimer.Stop();
             StopUartMonitor();
@@ -469,48 +481,23 @@ namespace TimeCardControlCenter
 
         private async Task ConnectAsync()
         {
-            if (connecting || client != null)
-                return;
-            connecting = true;
-            lastConnectionAttemptUtc = DateTime.UtcNow;
-            SetConnectionState(false, "Connecting…", false);
-            try
-            {
-                client = await Task.Run(() => new TimeCardClient());
-                SetConnectionState(true, "Time Card Connected", false);
-                Log("Connected to \\.\\TimeCard0.");
-                await RefreshSnapshotAsync(true);
-                await RefreshIdentityAsync();
-                if (lastSnapshot != null && lastSnapshot.AbiVersion >= 10 &&
-                    lastSnapshot.Layout != "Orolia ART")
-                    await RefreshSensorsAsync();
-            }
-            catch (Win32Exception ex)
-            {
-                bool accessDenied = ex.NativeErrorCode == 5;
-                SetConnectionState(false, accessDenied ? "Administrator required" : "Driver unavailable", accessDenied);
-                SidebarDriverText.Text = accessDenied ? "Elevate to access hardware" : "Time Card not available";
-                Log(string.Format("Connection failed: {0} (Windows error {1}).", ex.Message, ex.NativeErrorCode));
-            }
-            catch (Exception ex)
-            {
-                SetConnectionState(false, "Connection failed", false);
-                Log("Connection failed: " + ex.Message);
-            }
-            finally
-            {
-                connecting = false;
-            }
+            await ConnectSelectedDeviceAsync();
         }
 
         private async Task RefreshSnapshotAsync(bool logSuccess)
         {
-            if (refreshing || client == null)
+            TimeCardClient activeClient;
+            int generation;
+            if (refreshing || !TryCaptureDeviceSession(out activeClient,
+                out generation))
                 return;
             refreshing = true;
             try
             {
-                TimeCardSnapshot snapshot = await Task.Run(() => client.GetSnapshot());
+                TimeCardSnapshot snapshot = await Task.Run(() =>
+                    activeClient.GetSnapshot());
+                if (!IsDeviceSessionCurrent(activeClient, generation))
+                    return;
                 lastSnapshot = snapshot;
                 ApplySnapshot(snapshot);
                 if (logSuccess)
@@ -519,13 +506,10 @@ namespace TimeCardControlCenter
             }
             catch (Exception ex)
             {
+                if (!IsDeviceSessionCurrent(activeClient, generation))
+                    return;
                 Log("Telemetry refresh failed: " + ex.Message);
-                if (client != null)
-                {
-                    client.Dispose();
-                    client = null;
-                }
-                SetConnectionState(false, "Connection lost", false);
+                await RetireFailedDeviceSessionAsync(activeClient, generation);
             }
             finally
             {
@@ -541,6 +525,7 @@ namespace TimeCardControlCenter
             string sampleWindow = FormatNanoseconds(snapshot.SamplingWindowNanoseconds);
             Brush healthyBrush = (Brush)FindResource("AccentBrush");
             Brush warningBrush = (Brush)FindResource("GoldBrush");
+            bool clockStatusAvailable = snapshot.ClockStatus != uint.MaxValue;
 
             SidebarDriverText.Text = "Driver " + snapshot.DriverVersion + " · ABI " + snapshot.AbiVersion;
             LastRefreshText.Text = "Sampled " + DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
@@ -551,9 +536,12 @@ namespace TimeCardControlCenter
             ConfigureUartWorkspaceForProfile(
                 snapshot.Layout == "Orolia ART");
 
-            SyncStatusText.Text = snapshot.IsClockSynchronized ? "IN SYNC" : "NOT LOCKED";
+            SyncStatusText.Text = !clockStatusAvailable ? "NOT EXPOSED" :
+                snapshot.IsClockSynchronized ? "IN SYNC" : "NOT LOCKED";
             SyncStatusText.Foreground = snapshot.IsClockSynchronized ? healthyBrush : warningBrush;
-            SyncDetailText.Text = string.Format("Status 0x{0:X8}", snapshot.ClockStatus);
+            SyncDetailText.Text = clockStatusAvailable ?
+                string.Format("Status 0x{0:X8}", snapshot.ClockStatus) :
+                "Clock status requires core version 1.2 or newer";
             GnssFixMetricText.Text = snapshot.GnssFix;
             GnssFixMetricText.Foreground = snapshot.GnssFixOk ? healthyBrush : warningBrush;
             SatelliteText.Text = !snapshot.GnssTelemetryAvailable
@@ -571,16 +559,20 @@ namespace TimeCardControlCenter
             OffsetText.Text = offset;
             SamplingWindowText.Text = sampleWindow;
             UpdateClockHistory(snapshot, offset, sampleWindow);
-            ClockChipText.Text = snapshot.IsClockSynchronized ? "SYNCHRONIZED" : "LIVE · UNLOCKED";
+            ClockChipText.Text = !clockStatusAvailable ? "STATUS UNAVAILABLE" :
+                snapshot.IsClockSynchronized ? "SYNCHRONIZED" : "LIVE · UNLOCKED";
             ClockChipText.Foreground = snapshot.IsClockSynchronized ? healthyBrush : warningBrush;
             HierarchyOverviewText.Text = snapshot.HierarchyRuntimeEnabled ? "ENABLED" : "DISABLED";
 
             ClockCardTimeText.Text = cardTime;
             ClockSystemTimeText.Text = systemTime;
             ClockOffsetText.Text = offset;
-            ClockSyncText.Text = snapshot.IsClockSynchronized ? "IN SYNC" : "NOT IN SYNC";
+            ClockSyncText.Text = !clockStatusAvailable ? "NOT EXPOSED" :
+                snapshot.IsClockSynchronized ? "IN SYNC" : "NOT IN SYNC";
             ClockSyncText.Foreground = snapshot.IsClockSynchronized ? healthyBrush : warningBrush;
-            ClockStatusRawText.Text = string.Format("Status register 0x{0:X8}", snapshot.ClockStatus);
+            ClockStatusRawText.Text = clockStatusAvailable ?
+                string.Format("Status register 0x{0:X8}", snapshot.ClockStatus) :
+                "Status register not available before Clock core v1.2";
             ClockSamplingText.Text = sampleWindow;
             ClockVersionDetailText.Text = "v" + snapshot.ClockVersion;
             ClockSourceDetailText.Text = ClockSourceName(snapshot.ClockSource);
@@ -612,15 +604,20 @@ namespace TimeCardControlCenter
                 "NOT AVAILABLE" :
                 utcValid ? "UTC +" + utcOffset : "NOT VALID";
             LeapMetricText.Text = !snapshot.TodTelemetryAvailable ?
-                "ToD engine not implemented by this card profile" :
+                "UTC/leap summary is not exposed by this FPGA image" :
                 (snapshot.UtcStatus & (1u << 16)) != 0
                 ? string.Format("Leap info valid · next {0} s", unchecked((int)snapshot.Leap))
                 : "Leap information not valid";
-            GnssRawText.Text = string.Format("0x{0:X8}", snapshot.GnssStatus);
-            SatelliteRawText.Text = string.Format("0x{0:X8}", snapshot.Satellites);
-            TodRawText.Text = string.Format("0x{0:X8}", snapshot.TodStatus);
-            UtcRawText.Text = string.Format("0x{0:X8}", snapshot.UtcStatus);
-            LeapRawText.Text = string.Format("0x{0:X8}", snapshot.Leap);
+            GnssRawText.Text = snapshot.GnssTelemetryAvailable ?
+                string.Format("0x{0:X8}", snapshot.GnssStatus) : "Not exposed";
+            SatelliteRawText.Text = snapshot.GnssTelemetryAvailable ?
+                string.Format("0x{0:X8}", snapshot.Satellites) : "Not exposed";
+            TodRawText.Text = snapshot.TodStatus != uint.MaxValue ?
+                string.Format("0x{0:X8}", snapshot.TodStatus) : "Not exposed";
+            UtcRawText.Text = snapshot.TodTelemetryAvailable ?
+                string.Format("0x{0:X8}", snapshot.UtcStatus) : "Not exposed";
+            LeapRawText.Text = snapshot.TodTelemetryAvailable ?
+                string.Format("0x{0:X8}", snapshot.Leap) : "Not exposed";
 
             HierarchyRuntimeText.Text = snapshot.HierarchyRuntimeEnabled ? "enabled" : "disabled";
             HierarchyRuntimeText.Foreground = snapshot.HierarchyRuntimeEnabled ? healthyBrush : warningBrush;
@@ -808,6 +805,20 @@ namespace TimeCardControlCenter
             uint source = uint.Parse(Convert.ToString(item.Tag, CultureInfo.InvariantCulture),
                 CultureInfo.InvariantCulture);
             string name = Convert.ToString(item.Content, CultureInfo.InvariantCulture);
+            uint requiredContract = source == 7u ? 0x100u :
+                source == 8u ? 0x400u : source == 253u ? 0x800u : 0u;
+            if (requiredContract != 0u &&
+                (lastFpgaContract == null ||
+                 !lastFpgaContract.Allows(requiredContract)))
+            {
+                MessageBox.Show(this,
+                    "This synthesis-optional clock source is locked. " +
+                    "Activate the matching exact-image capability in the " +
+                    "FPGA Engines workspace first.",
+                    "Exact image contract required", MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
             if (MessageBox.Show(this,
                 "Set the PHC clock source to " + name + "? The clock can lose synchronization until that source is valid.",
                 "Confirm clock source", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
@@ -1076,16 +1087,22 @@ namespace TimeCardControlCenter
             string genericPort = SelectedGenericComPort();
             if (genericPort == null && !EnsureConnected())
                 return;
-            uartMonitorCancellation = new CancellationTokenSource();
+            CancellationTokenSource monitorCancellation =
+                new CancellationTokenSource();
+            uartMonitorCancellation = monitorCancellation;
             MonitorButton.Content = "Stop monitor";
             UartStatusText.Text = genericPort == null ?
                 "Monitoring UART " + SelectedUartPort() :
                 "Monitoring " + genericPort;
-            MonitorUartAsync(uartMonitorCancellation.Token);
+            uartMonitorTask = MonitorUartAsync(monitorCancellation);
         }
 
-        private async void MonitorUartAsync(CancellationToken cancellationToken)
+        private async Task MonitorUartAsync(
+            CancellationTokenSource monitorCancellation)
         {
+            await Task.Yield();
+            CancellationToken cancellationToken =
+                monitorCancellation.Token;
             try
             {
                 uint bytes = ParseUnsigned(UartBytesTextBox.Text, "byte count", 1, 256);
@@ -1101,9 +1118,17 @@ namespace TimeCardControlCenter
                     return;
                 }
                 uint port = SelectedUartPort();
+                TimeCardClient activeClient;
+                int generation;
+                if (!TryCaptureDeviceSession(out activeClient, out generation))
+                    throw new InvalidOperationException(
+                        "The selected Time Card is no longer connected.");
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    UartReadResult result = await Task.Run(() => client.ReadUart(port, bytes, 250));
+                    UartReadResult result = await Task.Run(() =>
+                        activeClient.ReadUart(port, bytes, 250));
+                    if (!IsDeviceSessionCurrent(activeClient, generation))
+                        return;
                     if (result.Data.Length != 0)
                     {
                         AppendUart(port, "RX", result.Data, result.LineStatus);
@@ -1122,10 +1147,12 @@ namespace TimeCardControlCenter
             }
             finally
             {
-                if (uartMonitorCancellation != null)
+                if (ReferenceEquals(uartMonitorCancellation,
+                    monitorCancellation))
                 {
                     uartMonitorCancellation.Dispose();
                     uartMonitorCancellation = null;
+                    uartMonitorTask = null;
                 }
                 MonitorButton.Content = "Start monitor";
                 UartStatusText.Text = "UART idle";
@@ -1512,13 +1539,39 @@ namespace TimeCardControlCenter
                     "NMEA baud rate", 1200, 2000000);
                 bool enabled = NmeaEnabledCheckBox.IsChecked == true;
                 bool inverted = NmeaPolarityCheckBox.IsChecked == true;
+                bool advanced = lastSnapshot != null &&
+                    lastSnapshot.AbiVersion >= 13;
+                int correctionSeconds = 0;
+                int localOffsetMinutes = 0;
+                uint gnss = 0;
+                uint messageDisableMask = 0;
+                if (advanced)
+                {
+                    correctionSeconds = (int)ParseSigned(
+                        NmeaCorrectionTextBox.Text, "NMEA UTC correction",
+                        -2147483647L, 2147483647L);
+                    localOffsetMinutes = (int)ParseSigned(
+                        NmeaLocalOffsetTextBox.Text, "NMEA local offset",
+                        -839, 839);
+                    gnss = (uint)SelectedComboTag(NmeaGnssCombo,
+                        "NMEA talker");
+                    if (NmeaDisableRmcCheckBox.IsChecked == true)
+                        messageDisableMask |= 1u;
+                    if (NmeaDisableZdaCheckBox.IsChecked == true)
+                        messageDisableMask |= 2u;
+                    if (NmeaDisableUtcCheckBox.IsChecked == true)
+                        messageDisableMask |= 4u;
+                }
                 NmeaApplyButton.IsEnabled = false;
                 bool monitorWasRunning = uartMonitorCancellation != null;
                 StopUartMonitor();
                 for (int attempt = 0; monitorWasRunning &&
                      uartMonitorCancellation != null && attempt < 20; attempt++)
                     await Task.Delay(50);
-                NmeaOutputState state = await Task.Run(() =>
+                NmeaOutputState state = await Task.Run(() => advanced ?
+                    client.SetNmeaOutput(enabled, baud, inverted,
+                        correctionSeconds, localOffsetMinutes, gnss,
+                        messageDisableMask) :
                     client.SetNmeaOutput(enabled, baud, inverted));
                 ApplyNmeaState(state);
                 UartPortCombo.SelectedIndex = 3;
@@ -1526,9 +1579,12 @@ namespace TimeCardControlCenter
                 ResetUartDecoder(3);
                 UartBaudCombo.Text = state.Baud.ToString(CultureInfo.InvariantCulture);
                 Log(string.Format(CultureInfo.InvariantCulture,
-                    "NMEA generator {0} at {1} baud{2}.",
+                    "NMEA generator {0} at {1} baud{2}; correction {3} s, " +
+                    "local {4} min, GNSS {5}, disable mask 0x{6:X2}.",
                     state.IsEnabled ? "enabled" : "disabled", state.Baud,
-                    state.IsInverted ? " with inverted polarity" : string.Empty));
+                    state.IsInverted ? " with inverted polarity" : string.Empty,
+                    state.CorrectionSeconds, state.LocalOffsetMinutes,
+                    state.Gnss, state.MessageDisableMask));
                 if (state.IsEnabled && uartMonitorCancellation == null)
                     MonitorUart_Click(MonitorButton, new RoutedEventArgs());
             }
@@ -1549,19 +1605,57 @@ namespace TimeCardControlCenter
         private void ApplyNmeaState(NmeaOutputState state)
         {
             Brush stateBrush = (Brush)FindResource(
-                state.IsEnabled ? "AccentBrush" : "GoldBrush");
+                state.HasError ? "DangerBrush" :
+                (state.IsEnabled ? "AccentBrush" : "GoldBrush"));
             NmeaStatusText.Text = state.IsPresent ?
-                (state.IsEnabled ? "ENABLED · READY TO MONITOR" : "DISABLED") :
+                (state.HasError ? "TRANSMITTER ERROR · STICKY STATUS SET" :
+                 (state.IsEnabled ? "ENABLED · READY TO MONITOR" : "DISABLED")) :
                 "NOT PRESENT";
             NmeaStatusText.Foreground = stateBrush;
+            NmeaStatusText.ToolTip = state.HasError ?
+                "The ToD Master reports a sticky transmit error. Clear it " +
+                "explicitly with timecardctl nmea-set ... clear after " +
+                "correcting the output configuration." : null;
             NmeaEnabledCheckBox.IsChecked = state.IsEnabled;
             NmeaPolarityCheckBox.IsChecked = state.IsInverted;
+            NmeaPolarityCheckBox.IsEnabled = state.SupportsPolarity;
             SelectComboText(NmeaBaudCombo,
                 state.Baud.ToString(CultureInfo.InvariantCulture));
             UartBaudCombo.Text = state.Baud.ToString(CultureInfo.InvariantCulture);
+            bool advanced = state.HasAdvancedConfiguration &&
+                lastSnapshot != null && lastSnapshot.AbiVersion >= 13;
+            NmeaAdvancedPanel.IsEnabled = advanced;
+            NmeaCorrectionTextBox.Text = state.CorrectionSeconds.ToString(
+                CultureInfo.InvariantCulture);
+            NmeaLocalOffsetTextBox.Text = state.LocalOffsetMinutes.ToString(
+                CultureInfo.InvariantCulture);
+            SelectComboTag(NmeaGnssCombo, state.Gnss);
+            NmeaGnssCombo.IsEnabled = advanced && state.SupportsGnss;
+            NmeaDisableRmcCheckBox.IsChecked =
+                (state.MessageDisableMask & 1u) != 0;
+            NmeaDisableZdaCheckBox.IsChecked =
+                (state.MessageDisableMask & 2u) != 0;
+            NmeaDisableUtcCheckBox.IsChecked =
+                (state.MessageDisableMask & 4u) != 0;
+            NmeaDisableZdaCheckBox.IsEnabled = advanced;
+            NmeaDisableRmcCheckBox.IsEnabled = advanced && state.SupportsRmc;
+            NmeaDisableUtcCheckBox.IsEnabled = advanced && state.SupportsUtc;
+            NmeaAdvancedHintText.Text = advanced ? string.Format(
+                CultureInfo.InvariantCulture,
+                "Core {0}.{1}: GNSS {2}, RMC {3}, proprietary UTC {4}. " +
+                "All writes are disabled, applied, restored and verified.",
+                state.Version >> 24, (state.Version >> 16) & 0xffu,
+                state.SupportsGnss ? "available" : "fixed to GPS",
+                state.SupportsRmc ? "available" : "not implemented",
+                state.SupportsUtc ? "available" : "not implemented") :
+                "Install driver 1.40 / ABI 13 for correction, local-zone, " +
+                "GNSS talker and sentence-gate controls.";
             NmeaRegisterText.Text = string.Format(CultureInfo.InvariantCulture,
-                "Control 0x{0:X8} · Status 0x{1:X8} · Version 0x{2:X8}",
-                state.Control, state.Status, state.Version);
+                "Control 0x{0:X8} · Status 0x{1:X8} · Version 0x{2:X8} · " +
+                "UTC correction {3} s · local {4} min{5}",
+                state.Control, state.Status, state.Version,
+                state.CorrectionSeconds, state.LocalOffsetMinutes,
+                state.HasError ? " · sticky TX error" : string.Empty);
             NmeaApplyButton.IsEnabled = state.IsPresent;
         }
 
@@ -2494,6 +2588,9 @@ namespace TimeCardControlCenter
             case 4: return "PTP";
             case 5: return "RTC";
             case 6: return "DCF77";
+            case 7: return "NTP";
+            case 8: return "SyncE";
+            case 0xfd: return "Dynamic source";
             case 0xfe: return "Register-controlled";
             case 0xff: return "External selector";
             default: return string.Format(CultureInfo.InvariantCulture,
@@ -3747,6 +3844,59 @@ namespace TimeCardControlCenter
             }
         }
 
+        private void SignalScheduleMode_SelectionChanged(object sender,
+                                                          RoutedEventArgs e)
+        {
+            ComboBox combo = sender as ComboBox;
+            uint generator;
+            if (combo == null || signalGeneratorControls == null ||
+                !uint.TryParse(Convert.ToString(combo.Tag,
+                    CultureInfo.InvariantCulture), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out generator) ||
+                generator == 0 ||
+                generator > (uint)signalGeneratorControls.Length)
+                return;
+            UpdateSignalScheduleControls(
+                signalGeneratorControls[generator - 1]);
+        }
+
+        private static void UpdateSignalScheduleControls(
+            SignalGeneratorControls controls)
+        {
+            bool available = controls.StartMode.IsEnabled;
+            bool absolute = string.Equals(GetComboTag(controls.StartMode),
+                "Absolute", StringComparison.OrdinalIgnoreCase);
+            controls.Phase.IsEnabled = available && !absolute;
+            controls.Start.IsEnabled = available && absolute;
+        }
+
+        private static void ParsePhcStart(string text, out ulong seconds,
+                                          out uint nanoseconds)
+        {
+            string value = (text ?? string.Empty).Trim();
+            int separator = value.IndexOf('.');
+            string secondsText = separator < 0 ? value :
+                value.Substring(0, separator);
+            string fraction = separator < 0 ? string.Empty :
+                value.Substring(separator + 1);
+            if ((separator >= 0 && value.IndexOf('.', separator + 1) >= 0) ||
+                !ulong.TryParse(secondsText, NumberStyles.None,
+                    CultureInfo.InvariantCulture, out seconds) ||
+                seconds > uint.MaxValue || fraction.Length > 9 ||
+                (separator >= 0 && fraction.Length == 0) ||
+                fraction.Any(character => character < '0' || character > '9'))
+                throw new InvalidOperationException(
+                    "Enter an exact future PHC/TAI time as seconds.nanoseconds; seconds must fit the hardware's 32-bit register and the fraction may contain up to nine digits.");
+
+            uint parsedFraction = 0;
+            if (fraction.Length != 0 && !uint.TryParse(
+                fraction.PadRight(9, '0'), NumberStyles.None,
+                CultureInfo.InvariantCulture, out parsedFraction))
+                throw new InvalidOperationException(
+                    "Enter the PHC nanosecond fraction using decimal digits.");
+            nanoseconds = parsedFraction;
+        }
+
         private async void ApplySignalGenerator_Click(object sender,
                                                         RoutedEventArgs e)
         {
@@ -3768,10 +3918,17 @@ namespace TimeCardControlCenter
 
             SignalGeneratorControls controls = signalGeneratorControls[generator - 1];
             bool enabled = controls.Enabled.IsChecked == true;
-            bool inverted = controls.Invert.IsChecked == true;
+            bool activeHigh = controls.ActiveHigh.IsChecked == true;
+            bool absoluteStart = enabled && string.Equals(
+                GetComboTag(controls.StartMode), "Absolute",
+                StringComparison.OrdinalIgnoreCase);
             ulong period = 0;
             ulong pulse = 0;
             ulong phase = 0;
+            ulong startSeconds = 0;
+            uint startNanoseconds = 0;
+            uint repeat = 0;
+            uint cableDelay = 0;
             try
             {
                 if (enabled)
@@ -3794,8 +3951,20 @@ namespace TimeCardControlCenter
                     if (pulse == 0 || pulse >= period)
                         throw new InvalidOperationException(
                             "The selected frequency and duty cycle cannot be represented at one-nanosecond resolution.");
-                    phase = ParseUnsignedLong(controls.Phase.Text,
-                        "phase", 0, period - 1);
+                    if (absoluteStart)
+                        ParsePhcStart(controls.Start.Text, out startSeconds,
+                            out startNanoseconds);
+                    else
+                        phase = ParseUnsignedLong(controls.Phase.Text,
+                            "phase", 0, period - 1);
+                }
+
+                if (lastSnapshot.AbiVersion >= 12)
+                {
+                    repeat = ParseUnsigned(controls.Repeat.Text,
+                        "repeat count", 0, uint.MaxValue);
+                    cableDelay = ParseUnsigned(controls.CableDelay.Text,
+                        "generator cable delay", 0, 0xffff);
                 }
 
                 uint route = SelectedTimingRoute(controls.Route);
@@ -3813,8 +3982,11 @@ namespace TimeCardControlCenter
 
                 button.IsEnabled = false;
                 SignalGeneratorState state = await Task.Run(() =>
+                    absoluteStart ? client.SetSignalGeneratorAt(generator,
+                        enabled, period, pulse, activeHigh, repeat, cableDelay,
+                        startSeconds, startNanoseconds) :
                     client.SetSignalGenerator(generator, enabled, period,
-                        pulse, phase, inverted));
+                        pulse, phase, activeHigh, repeat, cableDelay));
                 ApplySignalGeneratorState(state);
                 if (route != 0)
                 {
@@ -3826,8 +3998,11 @@ namespace TimeCardControlCenter
                     controls.Route.SelectedIndex = (int)route;
                 }
                 Log(string.Format(CultureInfo.InvariantCulture,
-                    "Generator {0} {1}{2}.", generator,
+                    "Generator {0} {1}{2}{3}.", generator,
                     enabled ? "configured and enabled" : "disabled",
+                    absoluteStart ? string.Format(CultureInfo.InvariantCulture,
+                        " for exact PHC start {0}.{1:D9}", startSeconds,
+                        startNanoseconds) : string.Empty,
                     route == 0 ? string.Empty : " on SMA " + route));
             }
             catch (Exception ex)
@@ -3897,12 +4072,66 @@ namespace TimeCardControlCenter
             }
         }
 
+        private async void ClearSignalGeneratorStatus_Click(object sender,
+                                                              RoutedEventArgs e)
+        {
+            Button button = sender as Button;
+            uint generator;
+            if (button == null || !uint.TryParse(
+                Convert.ToString(button.Tag, CultureInfo.InvariantCulture),
+                NumberStyles.Integer, CultureInfo.InvariantCulture,
+                out generator) || !EnsureConnected())
+                return;
+            if (lastSnapshot == null || lastSnapshot.AbiVersion < 13)
+            {
+                MessageBox.Show(this,
+                    "Clearing signal-generator status requires Time Card driver 1.40 / ABI 13.",
+                    "Driver update required", MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            bool completed = false;
+            button.IsEnabled = false;
+            try
+            {
+                SignalGeneratorState state = await Task.Run(() =>
+                    client.ClearSignalGeneratorStatus(generator));
+                ApplySignalGeneratorState(state);
+                completed = true;
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "Generator {0} sticky status clear requested.", generator));
+            }
+            catch (Exception ex)
+            {
+                Log(string.Format(CultureInfo.InvariantCulture,
+                    "Generator {0} status clear failed: {1}", generator,
+                    ex.Message));
+                MessageBox.Show(this, ex.Message,
+                    "Unable to clear signal-generator status",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                if (!completed)
+                    button.IsEnabled = client != null &&
+                        lastSnapshot != null &&
+                        lastSnapshot.AbiVersion >= 13;
+            }
+        }
+
         private void ApplySignalGeneratorState(SignalGeneratorState state)
         {
             SignalGeneratorControls controls = signalGeneratorControls[state.Generator - 1];
             bool available = state.IsPresent;
             controls.Enabled.IsChecked = state.IsEnabled;
-            controls.Invert.IsChecked = state.IsInverted;
+            controls.ActiveHigh.IsChecked = state.IsActiveHigh;
+            controls.Repeat.Text = state.RepeatCount.ToString(
+                CultureInfo.InvariantCulture);
+            controls.CableDelay.Text = state.CableDelayNanoseconds.ToString(
+                CultureInfo.InvariantCulture);
+            controls.Start.Text = string.Format(CultureInfo.InvariantCulture,
+                "{0}.{1:D9}", state.StartSeconds, state.StartNanoseconds);
             if (state.PeriodNanoseconds != 0)
             {
                 controls.Frequency.Text = state.FrequencyHz.ToString(
@@ -3912,24 +4141,37 @@ namespace TimeCardControlCenter
                 controls.Phase.Text = state.PhaseNanoseconds.ToString(
                     CultureInfo.InvariantCulture);
             }
-            controls.Status.Text = state.Status != 0 ?
+            controls.Status.Text = state.HasError ?
                 string.Format(CultureInfo.InvariantCulture,
                     "FAULT 0x{0:X8}", state.Status) :
+                state.HasTimeJump ? "TIME JUMP" :
                 state.IsEnabled ? "RUNNING" : "DISABLED";
-            controls.Status.Foreground = state.Status != 0 ?
+            controls.Status.Foreground = state.HasError ?
                 (Brush)FindResource("DangerBrush") :
+                state.HasTimeJump ? (Brush)FindResource("GoldBrush") :
                 state.IsEnabled ? (Brush)FindResource("AccentBrush") :
                 (Brush)FindResource("MutedBrush");
             controls.Detail.Text = string.Format(CultureInfo.InvariantCulture,
                 "Period {0:N0} ns · Start {1}.{2:D9} TAI · v{3:X8}",
                 state.PeriodNanoseconds, state.StartSeconds,
-                state.StartNanoseconds, state.Version);
+                state.StartNanoseconds, state.Version) + string.Format(
+                    CultureInfo.InvariantCulture,
+                    " | Repeat {0} | Delay {1} ns", state.RepeatCount,
+                    state.CableDelayNanoseconds);
             controls.Enabled.IsEnabled = available;
             controls.Frequency.IsEnabled = available;
             controls.Duty.IsEnabled = available;
-            controls.Phase.IsEnabled = available;
-            controls.Invert.IsEnabled = available;
+            controls.ActiveHigh.IsEnabled = available;
+            controls.Repeat.IsEnabled = available && lastSnapshot != null &&
+                lastSnapshot.AbiVersion >= 12;
+            controls.CableDelay.IsEnabled = available && lastSnapshot != null &&
+                lastSnapshot.AbiVersion >= 12;
+            controls.StartMode.IsEnabled = available;
+            UpdateSignalScheduleControls(controls);
             controls.Route.IsEnabled = available;
+            controls.Clear.IsEnabled = available && lastSnapshot != null &&
+                lastSnapshot.AbiVersion >= 13 &&
+                (state.HasError || state.HasTimeJump);
             controls.Apply.IsEnabled = available;
         }
 
@@ -4008,8 +4250,13 @@ namespace TimeCardControlCenter
             controls.Frequency.IsEnabled = false;
             controls.Duty.IsEnabled = false;
             controls.Phase.IsEnabled = false;
-            controls.Invert.IsEnabled = false;
+            controls.ActiveHigh.IsEnabled = false;
+            controls.Repeat.IsEnabled = false;
+            controls.CableDelay.IsEnabled = false;
+            controls.StartMode.IsEnabled = false;
+            controls.Start.IsEnabled = false;
             controls.Route.IsEnabled = false;
+            controls.Clear.IsEnabled = false;
             controls.Apply.IsEnabled = false;
         }
 
@@ -5226,7 +5473,10 @@ namespace TimeCardControlCenter
 
         private async Task RefreshIdentityAsync()
         {
-            if (client == null || lastSnapshot == null ||
+            TimeCardClient activeClient;
+            int generation;
+            if (!TryCaptureDeviceSession(out activeClient, out generation) ||
+                lastSnapshot == null ||
                 !SupportsReliableI2cReads())
             {
                 SidebarSerialText.Text = "Driver 1.14 required";
@@ -5241,29 +5491,36 @@ namespace TimeCardControlCenter
                 bool valid;
                 if (lastSnapshot.AbiVersion >= 4)
                 {
-                    TimeCardIdentity identity = await Task.Run(() => client.GetIdentity());
+                    TimeCardIdentity identity = await Task.Run(() =>
+                        activeClient.GetIdentity());
                     serial = identity.SerialNumber;
                     valid = identity.IsPresent && identity.IsValid;
                 }
                 else
                 {
                     I2cReadResult result = await Task.Run(() =>
-                        client.ReadI2c(0x58, 0x9a, 1, 6, 100));
+                        activeClient.ReadI2c(0x58, 0x9a, 1, 6, 100));
                     serial = BitConverter.ToString(result.Data).Replace('-', ':');
                     valid = result.Data.Length == 6 &&
                         result.Data.Any(value => value != 0) &&
                         result.Data.Any(value => value != 0xff);
                 }
 
+                if (!IsDeviceSessionCurrent(activeClient, generation))
+                    return;
                 SidebarSerialText.Text = serial;
                 I2cSerialNumberText.Text = valid ?
                     "Unique card serial " + serial : "Identity bytes invalid: " + serial;
                 I2cSerialNumberText.Foreground = (Brush)FindResource(
                     valid ? "CyanBrush" : "GoldBrush");
+                if (valid)
+                    UpdateActiveDeviceIdentity(serial);
                 Log("Card identity read from 24MAC402: " + serial + ".");
             }
             catch (Exception ex)
             {
+                if (!IsDeviceSessionCurrent(activeClient, generation))
+                    return;
                 SidebarSerialText.Text = "Identity unavailable";
                 I2cSerialNumberText.Text = "Card serial read failed";
                 I2cSerialNumberText.Foreground = (Brush)FindResource("GoldBrush");
@@ -5882,22 +6139,36 @@ namespace TimeCardControlCenter
             Log("Diagnostic summary copied to the clipboard.");
         }
 
-        private static string BuildDiagnostics(TimeCardSnapshot snapshot)
+        private string BuildDiagnostics(TimeCardSnapshot snapshot)
         {
-            return string.Join(Environment.NewLine, new[]
+            string diagnostics = string.Join(Environment.NewLine, new[]
             {
-                "Device:       OCP Time Card Controller",
+                "Device:       " + ActiveDeviceDisplayName(),
+                "Serial:       " + (string.IsNullOrWhiteSpace(
+                    ActiveDeviceSerial()) ? "unavailable" :
+                    ActiveDeviceSerial()),
+                "Interface:    " + (string.IsNullOrWhiteSpace(
+                    ActiveDevicePath()) ? "unavailable" :
+                    ActiveDevicePath()),
                 "Driver:       " + snapshot.DriverVersion + " (ABI " + snapshot.AbiVersion + ")",
                 "Transport:    " + snapshot.Layout + " · " + snapshot.InterruptMessages + " interrupts",
                 string.Format(CultureInfo.InvariantCulture, "BAR length:    0x{0:X8}", snapshot.BarLength),
                 string.Format(CultureInfo.InvariantCulture, "Clock core:    {0} @ 0x{1:X8}", snapshot.ClockVersion, snapshot.ClockOffset),
-                string.Format(CultureInfo.InvariantCulture, "Clock status:  0x{0:X8} · {1}", snapshot.ClockStatus,
-                    snapshot.IsClockSynchronized ? "in sync" : "not in sync"),
+                snapshot.ClockStatus == uint.MaxValue ?
+                    "Clock status:  unavailable before Clock core v1.2" :
+                    string.Format(CultureInfo.InvariantCulture, "Clock status:  0x{0:X8} · {1}", snapshot.ClockStatus,
+                        snapshot.IsClockSynchronized ? "in sync" : "not in sync"),
                 string.Format(CultureInfo.InvariantCulture, "Clock source:  0x{0:X4}", snapshot.ClockSource),
-                string.Format(CultureInfo.InvariantCulture, "ToD status:    0x{0:X8}", snapshot.TodStatus),
-                string.Format(CultureInfo.InvariantCulture, "GNSS status:   0x{0:X8} · {1}", snapshot.GnssStatus, snapshot.GnssFix),
-                string.Format(CultureInfo.InvariantCulture, "Satellites:    {0} seen · {1} locked · valid {2}",
-                    snapshot.SeenSatellites, snapshot.LockedSatellites, snapshot.SatelliteDataValid ? "yes" : "no"),
+                snapshot.TodStatus == uint.MaxValue ?
+                    "ToD status:    unavailable" :
+                    string.Format(CultureInfo.InvariantCulture, "ToD status:    0x{0:X8}", snapshot.TodStatus),
+                !snapshot.GnssTelemetryAvailable ?
+                    "GNSS status:   unavailable" :
+                    string.Format(CultureInfo.InvariantCulture, "GNSS status:   0x{0:X8} · {1}", snapshot.GnssStatus, snapshot.GnssFix),
+                !snapshot.GnssTelemetryAvailable ?
+                    "Satellites:    unavailable" :
+                    string.Format(CultureInfo.InvariantCulture, "Satellites:    {0} seen · {1} locked · valid {2}",
+                        snapshot.SeenSatellites, snapshot.LockedSatellites, snapshot.SatelliteDataValid ? "yes" : "no"),
                 "Hierarchy:    " + (snapshot.HierarchyRuntimeEnabled ? "enabled" : "disabled") +
                     " · persisted " + (snapshot.HierarchyPersisted ? "yes" : "no"),
                 "Card UTC:     " + FormatUtc(snapshot.CardTimeUtc),
@@ -5905,20 +6176,209 @@ namespace TimeCardControlCenter
                 "PHC offset:   " + FormatNanoseconds(snapshot.OffsetNanoseconds),
                 "Sample window:" + " " + FormatNanoseconds(snapshot.SamplingWindowNanoseconds)
             });
+            if (lastFpgaImageInfo != null && lastFpgaImageInfo.IsPresent)
+            {
+                diagnostics += Environment.NewLine + string.Format(
+                    CultureInfo.InvariantCulture,
+                    "FPGA image:   {0} {1} · tag {2} · raw 0x{3:X8} · register 0x{4:X8} · board/layout {5}/{6}",
+                    lastFpgaImageInfo.ImageKind,
+                    lastFpgaImageInfo.VersionText,
+                    lastFpgaImageInfo.ImageTag,
+                    lastFpgaImageInfo.RawVersion,
+                    lastFpgaImageInfo.RegisterOffset,
+                    lastFpgaImageInfo.BoardProfile,
+                    lastFpgaImageInfo.Layout);
+            }
+            else if (snapshot.AbiVersion >= FpgaImageRequiredAbi &&
+                     !string.Equals(snapshot.Layout, "Orolia ART",
+                         StringComparison.OrdinalIgnoreCase))
+            {
+                diagnostics += Environment.NewLine +
+                    "FPGA image:   not sampled or no valid static image word";
+            }
+            else if (string.Equals(snapshot.Layout, "Orolia ART",
+                         StringComparison.OrdinalIgnoreCase))
+            {
+                diagnostics += Environment.NewLine +
+                    "FPGA image:   unsupported on ART; no standard static image register assumed";
+            }
+            return diagnostics;
         }
 
         private void ClearLog_Click(object sender, RoutedEventArgs e)
         {
-            LogTextBox.Clear();
+            sessionLogStore.Clear();
             Log("Session log cleared.");
         }
 
         private void Log(string message)
         {
-            if (LogTextBox == null)
+            Log(message, SessionLogStore.InferSeverity(message),
+                SessionLogStore.InferCategory(message));
+        }
+
+        private void Log(string message, SessionLogSeverity severity,
+                         string category)
+        {
+            if (string.IsNullOrWhiteSpace(message))
                 return;
-            LogTextBox.AppendText(string.Format(CultureInfo.InvariantCulture, "[{0:HH:mm:ss.fff}] {1}\r\n", DateTime.Now, message));
-            LogTextBox.ScrollToEnd();
+            if (!Dispatcher.CheckAccess())
+            {
+                if (!Dispatcher.HasShutdownStarted)
+                {
+                    Dispatcher.BeginInvoke(new Action(() =>
+                        Log(message, severity, category)));
+                }
+                return;
+            }
+
+            sessionLogStore.Append(DateTime.UtcNow, severity, category,
+                CurrentSessionLogCardContext(), message);
+            RefreshSessionLogView(true);
+        }
+
+        private string CurrentSessionLogCardContext()
+        {
+            if (client == null)
+                return productSettings != null && productSettings.DemoMode ?
+                    "demo" : "offline";
+
+            string serial = SidebarSerialText == null ? null :
+                SidebarSerialText.Text;
+            if (IsUsefulSessionLogCardIdentity(serial))
+                return serial.Trim();
+
+            if (lastSnapshot != null &&
+                !string.IsNullOrWhiteSpace(lastSnapshot.Layout))
+                return lastSnapshot.Layout + " / " +
+                    (string.IsNullOrWhiteSpace(ActiveDevicePath()) ?
+                        "Time Card" : ActiveDevicePath());
+            return string.IsNullOrWhiteSpace(ActiveDevicePath()) ?
+                "Time Card" : ActiveDevicePath();
+        }
+
+        private static bool IsUsefulSessionLogCardIdentity(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+            string[] placeholders =
+            {
+                "not read", "unavailable", "required", "reading",
+                "not available", "unknown"
+            };
+            foreach (string placeholder in placeholders)
+            {
+                if (value.IndexOf(placeholder,
+                    StringComparison.OrdinalIgnoreCase) >= 0)
+                    return false;
+            }
+            return true;
+        }
+
+        private SessionLogFilter CurrentSessionLogFilter()
+        {
+            SessionLogFilter filter = new SessionLogFilter();
+            string severityTag = GetComboTag(SessionLogSeverityCombo);
+            SessionLogSeverity severity;
+            if (!string.Equals(severityTag, "All",
+                    StringComparison.OrdinalIgnoreCase) &&
+                Enum.TryParse(severityTag, true, out severity))
+                filter.Severity = severity;
+
+            string categoryTag = GetComboTag(SessionLogCategoryCombo);
+            if (!string.IsNullOrWhiteSpace(categoryTag) &&
+                !string.Equals(categoryTag, "All",
+                    StringComparison.OrdinalIgnoreCase))
+                filter.Category = categoryTag;
+            filter.SearchText = SessionLogSearchTextBox == null ? null :
+                SessionLogSearchTextBox.Text;
+            return filter;
+        }
+
+        private void RefreshSessionLogView(bool scrollToEnd)
+        {
+            if (SessionLogListBox == null || LogTextBox == null ||
+                SessionLogCountText == null)
+                return;
+
+            List<SessionLogRecord> visibleRecords =
+                sessionLogStore.Query(CurrentSessionLogFilter());
+            SessionLogListBox.ItemsSource = visibleRecords;
+            LogTextBox.Text = sessionLogStore.ToText();
+
+            string dropped = sessionLogStore.DroppedRecordCount == 0 ?
+                string.Empty : string.Format(CultureInfo.InvariantCulture,
+                    " / {0:N0} older discarded",
+                    sessionLogStore.DroppedRecordCount);
+            SessionLogCountText.Text = string.Format(CultureInfo.InvariantCulture,
+                "{0:N0} shown / {1:N0} retained{2}", visibleRecords.Count,
+                sessionLogStore.Count, dropped);
+
+            if (scrollToEnd && visibleRecords.Count != 0)
+                SessionLogListBox.ScrollIntoView(
+                    visibleRecords[visibleRecords.Count - 1]);
+        }
+
+        private void SessionLogFilter_Changed(object sender, RoutedEventArgs e)
+        {
+            RefreshSessionLogView(false);
+        }
+
+        private void SessionLogClearFilter_Click(object sender,
+                                                   RoutedEventArgs e)
+        {
+            if (SessionLogSeverityCombo != null)
+                SessionLogSeverityCombo.SelectedIndex = 0;
+            if (SessionLogCategoryCombo != null)
+                SessionLogCategoryCombo.SelectedIndex = 0;
+            if (SessionLogSearchTextBox != null)
+                SessionLogSearchTextBox.Clear();
+            RefreshSessionLogView(false);
+        }
+
+        private void SessionLogExport_Click(object sender, RoutedEventArgs e)
+        {
+            Microsoft.Win32.SaveFileDialog dialog =
+                new Microsoft.Win32.SaveFileDialog
+                {
+                    Title = "Export filtered Time Card session log",
+                    Filter = "Text log (*.txt)|*.txt|JSON log (*.json)|*.json",
+                    FilterIndex = 1,
+                    AddExtension = true,
+                    DefaultExt = ".txt",
+                    FileName = "timecard-session-" +
+                        DateTime.UtcNow.ToString("yyyyMMdd-HHmmss",
+                            CultureInfo.InvariantCulture) + ".txt"
+                };
+            if (productSettings != null)
+                dialog.InitialDirectory = ExistingDirectory(
+                    productSettings.LastExportDirectory);
+            if (dialog.ShowDialog(this) != true)
+                return;
+
+            try
+            {
+                SessionLogFilter filter = CurrentSessionLogFilter();
+                bool json = dialog.FilterIndex == 2 ||
+                    string.Equals(Path.GetExtension(dialog.FileName), ".json",
+                        StringComparison.OrdinalIgnoreCase);
+                string content = json ? sessionLogStore.ToJson(filter) :
+                    sessionLogStore.ToText(filter);
+                File.WriteAllText(dialog.FileName, content,
+                    new UTF8Encoding(false));
+                if (productSettings != null)
+                    RememberExportDirectory(dialog.FileName);
+                Log("Session log view exported to " +
+                    Path.GetFileName(dialog.FileName) + ".",
+                    SessionLogSeverity.Information, "Diagnostics");
+            }
+            catch (Exception ex)
+            {
+                Log("Session log export failed: " + ex.Message,
+                    SessionLogSeverity.Error, "Diagnostics");
+                MessageBox.Show(this, ex.Message, "Session log export failed",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private async void OpenNmea_Click(object sender, RoutedEventArgs e)
@@ -6224,6 +6684,7 @@ namespace TimeCardControlCenter
 
             flashUpdating = true;
             UpdateFlashStartState();
+            UpdateDeviceSelectionControls();
             FlashAcknowledgeCheckBox.IsEnabled = false;
             FlashProgressBar.Value = 0;
             FlashLogTextBox.Clear();
@@ -6261,6 +6722,7 @@ namespace TimeCardControlCenter
                 flashUpdating = false;
                 FlashAcknowledgeCheckBox.IsEnabled = true;
                 UpdateFlashStartState();
+                UpdateDeviceSelectionControls();
             }
         }
 
@@ -6423,7 +6885,10 @@ namespace TimeCardControlCenter
 
         private async Task RefreshSensorsAsync()
         {
-            if (sensorsRefreshing || client == null)
+            TimeCardClient activeClient;
+            int generation;
+            if (sensorsRefreshing || !TryCaptureDeviceSession(
+                out activeClient, out generation))
                 return;
             if (lastSnapshot == null || lastSnapshot.AbiVersion < 10)
             {
@@ -6444,7 +6909,9 @@ namespace TimeCardControlCenter
             try
             {
                 SensorTelemetrySnapshot telemetry = await Task.Run(
-                    () => client.GetSensorTelemetry());
+                    () => activeClient.GetSensorTelemetry());
+                if (!IsDeviceSessionCurrent(activeClient, generation))
+                    return;
                 sampleTimer.Stop();
                 RecordSensorSamplingDuration(sampleTimer.Elapsed.TotalMilliseconds,
                     true);
@@ -6452,6 +6919,8 @@ namespace TimeCardControlCenter
             }
             catch (Exception ex)
             {
+                if (!IsDeviceSessionCurrent(activeClient, generation))
+                    return;
                 sampleTimer.Stop();
                 RecordSensorSamplingDuration(sampleTimer.Elapsed.TotalMilliseconds,
                     false);
@@ -7055,6 +7524,8 @@ namespace TimeCardControlCenter
                 await RefreshSmaAsync();
             else if (page == "Timing")
                 await RefreshTimingAsync();
+            else if (page == "Fpga")
+                await RefreshFpgaCoresAsync();
             else if (page == "Sensors")
                 await RefreshSensorsAsync();
             else if (page == "I2c")
@@ -7077,6 +7548,7 @@ namespace TimeCardControlCenter
             UartPage.Visibility = name == "Uart" ? Visibility.Visible : Visibility.Collapsed;
             SmaPage.Visibility = name == "Sma" ? Visibility.Visible : Visibility.Collapsed;
             TimingPage.Visibility = name == "Timing" ? Visibility.Visible : Visibility.Collapsed;
+            FpgaPage.Visibility = name == "Fpga" ? Visibility.Visible : Visibility.Collapsed;
             SensorsPage.Visibility = name == "Sensors" ? Visibility.Visible : Visibility.Collapsed;
             I2cPage.Visibility = name == "I2c" ? Visibility.Visible : Visibility.Collapsed;
             TelemetryPage.Visibility = name == "Telemetry" ? Visibility.Visible : Visibility.Collapsed;
@@ -7090,6 +7562,7 @@ namespace TimeCardControlCenter
                 name == "Uart" ? "UART Console" :
                 name == "Sma" ? "SMA Connectors" :
                 name == "Timing" ? "Generators & Frequency" :
+                name == "Fpga" ? "FPGA Engines" :
                 name == "Sensors" ? "Sensors & IMU" :
                 name == "Telemetry" ? "Telemetry Studio" :
                 name == "Operations" ? "Profiles & Self-Test" :

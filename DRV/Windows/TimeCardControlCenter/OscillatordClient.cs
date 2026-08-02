@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
@@ -58,6 +59,21 @@ namespace TimeCardControlCenter
         [DataMember(Name = "Action requested")]
         public string ActionRequested { get; set; }
 
+        [DataMember(Name = "service_state", EmitDefaultValue = false)]
+        public string ServiceState { get; set; }
+
+        [DataMember(Name = "board", EmitDefaultValue = false)]
+        public string Board { get; set; }
+
+        [DataMember(Name = "card_serial", EmitDefaultValue = false)]
+        public string CardSerial { get; set; }
+
+        [DataMember(Name = "updated_utc", EmitDefaultValue = false)]
+        public string UpdatedUtc { get; set; }
+
+        [DataMember(Name = "eeprom", EmitDefaultValue = false)]
+        public OscillatordEeprom Eeprom { get; set; }
+
         [DataMember(Name = "clock")]
         public OscillatordClock Clock { get; set; }
 
@@ -69,6 +85,25 @@ namespace TimeCardControlCenter
 
         [DataMember(Name = "gnss")]
         public OscillatordGnss Gnss { get; set; }
+    }
+
+    [DataContract]
+    public sealed class OscillatordEeprom
+    {
+        [DataMember(Name = "present")]
+        public bool Present { get; set; }
+
+        [DataMember(Name = "valid")]
+        public bool Valid { get; set; }
+
+        [DataMember(Name = "length")]
+        public int Length { get; set; }
+
+        [DataMember(Name = "sha256", EmitDefaultValue = false)]
+        public string Sha256 { get; set; }
+
+        [DataMember(Name = "data_base64", EmitDefaultValue = false)]
+        public string DataBase64 { get; set; }
     }
 
     [DataContract]
@@ -153,6 +188,7 @@ namespace TimeCardControlCenter
     public sealed class OscillatordClient
     {
         private const int MaximumResponseBytes = 1024 * 1024;
+        private const string LocalPipeName = "OcpTimeCard.Oscillatord.v1";
         private readonly TimeSpan timeout;
 
         public OscillatordClient(TimeSpan timeout)
@@ -166,7 +202,7 @@ namespace TimeCardControlCenter
             OscillatordRequest request, string token)
         {
             if (string.IsNullOrWhiteSpace(host))
-                throw new ArgumentException("Enter the Linux host or IP address.", "host");
+                throw new ArgumentException("Enter the service host or IP address.", "host");
             if (port < 1 || port > 65535)
                 throw new ArgumentOutOfRangeException("port");
 
@@ -177,32 +213,78 @@ namespace TimeCardControlCenter
                 await AwaitWithTimeout(connect, "Connecting to oscillatord timed out.");
 
                 using (NetworkStream stream = client.GetStream())
-                {
-                    byte[] requestBytes = SerializeRequest(request, token);
-                    Task write = stream.WriteAsync(requestBytes, 0, requestBytes.Length);
-                    await AwaitWithTimeout(write, "Sending the oscillatord request timed out.");
-                    await AwaitWithTimeout(stream.FlushAsync(),
-                        "Flushing the oscillatord request timed out.");
-
-                    using (MemoryStream response = new MemoryStream())
-                    {
-                        byte[] buffer = new byte[4096];
-                        while (response.Length < MaximumResponseBytes)
-                        {
-                            Task<int> read = stream.ReadAsync(buffer, 0, buffer.Length);
-                            await AwaitWithTimeout(read, "Waiting for oscillatord timed out.");
-                            int count = read.Result;
-                            if (count == 0)
-                                break;
-                            response.Write(buffer, 0, count);
-                            OscillatordSnapshot snapshot;
-                            if (TryParseResponse(response.ToArray(), out snapshot))
-                                return snapshot;
-                        }
-                    }
-                }
+                    return await ExchangeAsync(stream, request, token);
             }
             throw new InvalidDataException("oscillatord returned an incomplete or oversized JSON response.");
+        }
+
+        public async Task<OscillatordSnapshot> RequestPreferredAsync(
+            string host, int port, OscillatordRequest request, string token)
+        {
+            string value = (host ?? string.Empty).Trim();
+            if (string.Equals(value, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "::1", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    return await RequestLocalAsync(request, token);
+                }
+                catch (IOException)
+                {
+                }
+                catch (TimeoutException)
+                {
+                }
+            }
+            return await RequestAsync(host, port, request, token);
+        }
+
+        public async Task<OscillatordSnapshot> RequestLocalAsync(
+            OscillatordRequest request, string token)
+        {
+            using (NamedPipeClientStream pipe = new NamedPipeClientStream(
+                ".", LocalPipeName, PipeDirection.InOut,
+                PipeOptions.Asynchronous))
+            {
+                Task connect = pipe.ConnectAsync(checked((int)Math.Min(
+                    timeout.TotalMilliseconds, int.MaxValue)));
+                await AwaitWithTimeout(connect,
+                    "Connecting to the local Windows oscillatord service timed out.");
+                return await ExchangeAsync(pipe, request, token);
+            }
+        }
+
+        private async Task<OscillatordSnapshot> ExchangeAsync(Stream stream,
+            OscillatordRequest request, string token)
+        {
+            byte[] requestBytes = SerializeRequest(request, token);
+            Task write = stream.WriteAsync(requestBytes, 0,
+                requestBytes.Length);
+            await AwaitWithTimeout(write,
+                "Sending the oscillatord request timed out.");
+            await AwaitWithTimeout(stream.FlushAsync(),
+                "Flushing the oscillatord request timed out.");
+
+            using (MemoryStream response = new MemoryStream())
+            {
+                byte[] buffer = new byte[4096];
+                while (response.Length < MaximumResponseBytes)
+                {
+                    Task<int> read = stream.ReadAsync(buffer, 0, buffer.Length);
+                    await AwaitWithTimeout(read,
+                        "Waiting for oscillatord timed out.");
+                    int count = read.Result;
+                    if (count == 0)
+                        break;
+                    response.Write(buffer, 0, count);
+                    OscillatordSnapshot snapshot;
+                    if (TryParseResponse(response.ToArray(), out snapshot))
+                        return snapshot;
+                }
+            }
+            throw new InvalidDataException(
+                "oscillatord returned an incomplete or oversized JSON response.");
         }
 
         public static OscillatordSnapshot ParseResponse(string json)

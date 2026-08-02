@@ -39,4 +39,7 @@ DRV/Windows/submission/
 DRV/Windows/TimeCardControlCenter/bin/
 DRV/Windows/TimeCardControlCenter/obj/
 DRV/Windows/TimeCardDiscipline/bin/
+DRV/Windows/TimeCardOscillatord/bin/
+DRV/Windows/TimeCardOscillatord/obj/
+DRV/Windows/TimeCardTimeProvider/bin/
 DRV/Windows/*.log

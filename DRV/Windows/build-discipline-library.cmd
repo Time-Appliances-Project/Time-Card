@@ -19,11 +19,16 @@ if not exist "%VCVARS%" (
 )
 
 set "MINIPOD=..\..\Software\oscillatord\third_party\disciplining-minipod"
+set /p "MINIPOD_VERSION="<"%MINIPOD%\version"
+if "%MINIPOD_VERSION%"=="" (
+    echo error: disciplining-minipod version is missing.
+    exit /b 1
+)
 set "OUT=TimeCardDiscipline\bin\Release"
 if not exist "%OUT%" mkdir "%OUT%"
 
 call "%VCVARS%" >nul
-"%LLVM%" /nologo /LD /O2 /MD /W4 /D_CRT_SECURE_NO_WARNINGS /DPACKAGE_VERSION=\"3.6.0\" ^
+"%LLVM%" /nologo /LD /O2 /MT /W4 /D_CRT_SECURE_NO_WARNINGS /DPACKAGE_VERSION=\"%MINIPOD_VERSION%\" ^
   /I"%MINIPOD%\include" /I"%MINIPOD%\src" ^
   TimeCardDiscipline\timecard_discipline.c ^
   "%MINIPOD%\src\checks.c" "%MINIPOD%\src\fine_circular_buffer.c" ^

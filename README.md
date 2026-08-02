@@ -171,17 +171,30 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
   [`DRV/MacOS`](DRV/MacOS)
 * Windows KMDF driver, command-line tools, and Control Center in
   [`DRV/Windows`](DRV/Windows)
-* The integrated Orolia/Safran [`oscillatord`](Software/oscillatord) service,
-  which disciplines an ART mRO-50 from the GNSS/PHC phase measurements exposed
-  by `ptp_ocp`, initializes the PHC, feeds NTP shared memory, and publishes live
-  oscillator, GNSS, phase, convergence, and holdover telemetry. Its pinned,
-  reproducible build includes the complete upstream v3.10.0 source and utilities.
-  The same upstream miniCOD algorithm is built as a native Windows DLL and
-  connected to the Windows driver's guarded phase, mRO-50, PHC, and calibration
-  EEPROM operations.
+* The integrated Orolia/Safran [`oscillatord`](Software/oscillatord) source and
+  a complete [native Windows service](DRV/Windows/TimeCardOscillatord/README.md).
+  Both use the pinned miniCOD 3.6.0 algorithm to discipline an ART mRO-50 from
+  GNSS/PHC phase measurements. Windows performs edge-bound GNSS/PHC startup
+  alignment, steering, per-card persistence, hot-plug recovery, monitoring, and
+  optional qualified Windows Time Service integration directly through driver
+  ABI 15—without WSL, `/dev/ptp*`, chrony, or Linux NTP shared memory. It accepts
+  only fresh, checksum-valid, iTOW-coherent GNSS epochs and new error-free FPGA
+  PPS counters; PHC writes are verified against newer GNSS data. SA5x/SA53
+  hardware discipline and safe SA3x monitoring are selected by capabilities on
+  other cards.
+  u-blox receiver changes remain explicitly opt-in, require CFG-VALSET
+  acknowledgement, and persist to battery-backed RAM/flash only through a
+  second opt-in. The native session also reports MON-RF antenna state. Optional
+  CRC/checksum-validated RTCM3 and UBX-RXM-RAWX/SFRBX data is exposed through a
+  protected, local-only, bounded `\\.\pipe\OcpTimeCard.Rtcm.v1` stream, so a
+  slow consumer cannot block discipline. W32Time sees only a synchronized,
+  bounded cross-timestamp from an eligible locked or holdover-ready source, and
+  its provider independently rejects stale or malformed samples. Read-only
+  discipline-EEPROM monitoring returns validity, length, SHA-256, and the exact
+  binary payload as Base64.
 * CAD files for the custom PCIe bracket 
 
-The Windows package currently ships driver **1.38 / ABI 11** and a native
+The Windows package currently ships driver **1.42 / ABI 15** and a native
 Control Center that brings the complete Time Card into one application:
 
 * Precision-clock telemetry, detail-focused rolling offset graphs, clock-source
@@ -196,7 +209,25 @@ Control Center that brings the complete Time Card into one application:
   calibration, convergence and holdover state, and verified 24c08 persistence.
   SA53-based and future variants are selected through capability discovery and
   use their hardware discipline interface without touching ART-only registers.
-* SMA routing plus four PHC-aligned generators and four frequency counters.
+* SMA routing plus four phase-aligned or exact-future-PHC generators and four
+  frequency counters, with manual-correct active-high/active-low polarity.
+* A version-gated FPGA Engines workspace for the documented PPS master/slave,
+  IRIG-B/G master/slave, DCF77 master/slave, and ToD input-parser cores, plus
+  safe common-register clock telemetry, smooth and advanced clock controls,
+  generator repeat/cable-delay status, and interrupt-backed generator events.
+  Core locations come only from the trusted Linux-derived board profiles;
+  synthesis-dependent registers and guessed BAR addresses are never probed.
+  ABI 15 adds six timestamp channels, a typed static core inventory, PFEC and
+  protocol-gated ToD telemetry, ToD Master UTC handling, advanced IRIG fields,
+  and an explicit exact-image synthesis contract. The contract revalidates the
+  raw image word before every optional access and fails closed after a reflash.
+  Contracted clock sources include NTP on Clock 1.8+ and SyncE/dynamic on Clock
+  2.7+ when the matching datapath is guaranteed by the bitstream manifest.
+  ART retains its published basic timestamp surface but is excluded from
+  synthesis-optional access because it has no equivalent static image identity.
+* Multi-card Windows enumeration with stable identity, active-card selection,
+  rescan/hot-plug handling, and per-card settings in the Control Center and
+  native oscillator service.
 * Schematic-aware I2C routing, card identity, automatic/manual RGB status LEDs,
   electrical diagnostics, live environmental sensors, power rails, and a live
   quaternion-driven 3D IMU orientation view. Its six faces carry the supplied
@@ -214,7 +245,43 @@ Control Center that brings the complete Time Card into one application:
 
 See the [Windows driver guide](DRV/Windows/README.md) and the
 [Control Center guide](DRV/Windows/TimeCardControlCenter/README.md) for build,
-installation, safety, and hardware details.
+installation, safety, and hardware details. The
+[native oscillatord service guide](DRV/Windows/TimeCardOscillatord/README.md)
+covers the no-WSL service, configuration, monitoring protocol, and optional
+W32Time input provider. The
+[FPGA core coverage audit](DRV/Windows/FPGA_CORE_COVERAGE.md) maps every manual
+in `SOM/FPGA/Doc` to Linux, Windows, and the application.
+
+# FPGA and UCM coverage status
+
+Driver 1.42 / ABI 15 implements every software-feasible gap identified by the
+FPGA-manual review and the Universal Configuration Manager audit:
+
+* Six interrupt-backed signal-timestamp channels and four signal-generator
+  completion queues, with bounded overflow reporting and exact PHC scheduling.
+* Smooth and advanced clock control, including servo factors and logs,
+  holdover, aging, outlier filters, rate limiters, revert, and dynamic updates.
+* PFEC plus the existing NMEA, UBX, TSIP, and ESIP ToD inputs; optional
+  UTC/GNSS telemetry; ToD Master UTC handshakes; and IRIG AM/manual-year fields.
+* A typed static core inventory and explicit exact-image synthesis contracts.
+  Optional MMIO is rejected for loader, mismatched, reflashed, or uncontracted
+  images instead of probing guessed addresses.
+* Equivalent fail-closed Linux gates, including PCI-BDF-bound contracts so
+  mixed-card systems cannot accidentally apply one image manifest to another
+  card.
+* Full command-line and Control Center configuration, status, event, and
+  capability surfaces for the new driver ABI.
+
+The implementation was validated with a warning-free Windows Release build,
+WDK code analysis and signability, a warning-free Control Center Release build,
+all 16 Windows regression/integration suites, 137 advanced FPGA contract
+assertions, the Linux FPGA contract suite, and a final adversarial code audit.
+These checks do not replace electrical loopback and signal-integrity testing on
+each physical card/bitstream combination. Network-oriented UCM cores and other
+blocks without a published Time Card address, interrupt assignment, and
+synthesis manifest remain hardware/bitstream work rather than speculative
+driver interfaces. See the [coverage matrix](DRV/Windows/FPGA_CORE_COVERAGE.md)
+for the exact revision and synthesis gates.
 
 ![OCP Time Card Control Center](DRV/Windows/assets/timecard-control-center.png)
 

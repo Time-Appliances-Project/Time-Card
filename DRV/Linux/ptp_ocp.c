@@ -24,6 +24,7 @@
 #include <linux/nvmem-consumer.h>
 #include <linux/version.h>
 #include <linux/crc16.h>
+#include <linux/string.h>
 #include <linux/timekeeping.h>
 
 #include <linux/version.h>
@@ -93,6 +94,60 @@ static struct class timecard_class = {
 	.name		= "timecard",
 };
 
+/*
+ * These register blocks are controlled by synthesis generics, not by the
+ * public core version.  Leave them inaccessible unless the operator has an
+ * explicit contract for the loaded FPGA image.  Permissions are read-only so
+ * the policy cannot change while a card is active.
+ */
+static bool clock_optional_registers;
+module_param_named(clock_optional_registers, clock_optional_registers,
+		   bool, 0444);
+MODULE_PARM_DESC(clock_optional_registers,
+	"allow Clock servo/log registers on a bitstream known to synthesize them");
+
+static bool tod_optional_telemetry;
+module_param_named(tod_optional_telemetry, tod_optional_telemetry, bool, 0444);
+MODULE_PARM_DESC(tod_optional_telemetry,
+	"allow ToD UTC/leap/GNSS/satellite registers on a known bitstream");
+
+static bool irig_optional_features;
+module_param_named(irig_optional_features, irig_optional_features, bool, 0444);
+MODULE_PARM_DESC(irig_optional_features,
+	"allow synthesis-optional IRIG controls for a contracted bitstream");
+
+/*
+ * The feature opt-ins above are not sufficient on their own.  The operator
+ * must also pin them to the exact raw value read from the Image Version
+ * register.  This prevents an opt-in intended for one FPGA build from silently
+ * carrying over after a reflash.  Zero, invalid image words, firmware-loader
+ * images and boards without the published Image register never match.
+ */
+static unsigned int optional_image_version;
+module_param_named(optional_image_version, optional_image_version, uint, 0444);
+MODULE_PARM_DESC(optional_image_version,
+	"legacy exact raw FPGA Image Version word (requires optional_image_device)");
+
+/*
+ * A raw image word is not a device identity.  Binding one module-wide value to
+ * every enumerated card could therefore enable optional MMIO on a second card
+ * merely because it reports the same version.  Keep the legacy version option,
+ * but require an exact PCI BDF alongside it.  The contract array provides the
+ * same binding for multiple cards; each entry is <domain:bus:slot.func>=<raw>.
+ */
+static char *optional_image_device;
+module_param_named(optional_image_device, optional_image_device, charp, 0444);
+MODULE_PARM_DESC(optional_image_device,
+	"PCI BDF bound to optional_image_version (for example 0000:03:00.0)");
+
+#define OCP_OPTIONAL_IMAGE_CONTRACT_MAX 32
+static char *optional_image_contracts[OCP_OPTIONAL_IMAGE_CONTRACT_MAX];
+static unsigned int optional_image_contract_count;
+module_param_array_named(optional_image_contracts, optional_image_contracts,
+			 charp, &optional_image_contract_count, 0444);
+MODULE_PARM_DESC(optional_image_contracts,
+	"per-device exact-image contracts: BDF=raw-version[,BDF=raw-version...]");
+
 #define CSR_BASE 0x0L
 /* msi_base */
 #define CSR_PCIE_MSI_BASE (CSR_BASE + 0x1800L)
@@ -153,13 +208,20 @@ struct ocp_reg {
 #define OCP_SELECT_CLK_NONE	0
 #define OCP_SELECT_CLK_REG	0xfe
 
+#define FPGA_CORE_VERSION(_major, _minor) \
+	(((u32)(_major) << 24) | ((u32)(_minor) << 16))
+
+#define CLOCK_VERSION_STATUS		FPGA_CORE_VERSION(1, 2)
+#define CLOCK_VERSION_OPTIONAL_REGS	FPGA_CORE_VERSION(1, 6)
+
 struct tod_reg {
 	u32	ctrl;
 	u32	status;
 	u32	uart_polarity;
 	u32	version;
 	u32	adj_sec;
-	u32	__pad0[3];
+	u32	local_offset;
+	u32	__pad0[2];
 	u32	uart_baud;
 	u32	__pad1[3];
 	u32	utc_status;
@@ -174,9 +236,55 @@ struct tod_reg {
 #define TOD_CTRL_PROTOCOL_SHIFT		28
 #define TOD_CTRL_DISABLE_FMT_A		BIT(17)
 #define TOD_CTRL_DISABLE_FMT_B		BIT(16)
+#define TOD_CTRL_DISABLE_MESSAGE_SHIFT	16
+#define TOD_CTRL_DISABLE_MESSAGE_MASK	(0xffU << TOD_CTRL_DISABLE_MESSAGE_SHIFT)
+#define TOD_MESSAGE_NMEA_BASE_MASK	0x1bU
+#define TOD_MESSAGE_NMEA_FULL_MASK	0x1fU
+#define TOD_MESSAGE_UBX_BASE_MASK	0x07U
+#define TOD_MESSAGE_UBX_FULL_MASK	0x1fU
+#define TOD_MESSAGE_TSIP_MASK		0x1fU
+#define TOD_MESSAGE_ESIP_MASK		0xffU
 #define TOD_CTRL_ENABLE				BIT(0)
 #define TOD_CTRL_GNSS_MASK			((1U << 4) - 1)
 #define TOD_CTRL_GNSS_SHIFT			24
+
+#define TOD_STATUS_PARSE_ERROR		BIT(0)
+#define TOD_STATUS_CHECKSUM_ERROR	BIT(1)
+#define TOD_STATUS_UART_ERROR		BIT(2)
+#define TOD_STATUS_ERROR_MASK		(TOD_STATUS_PARSE_ERROR | \
+					 TOD_STATUS_CHECKSUM_ERROR | \
+					 TOD_STATUS_UART_ERROR)
+
+#define TOD_VERSION_STATUS		FPGA_CORE_VERSION(1, 2)
+#define TOD_VERSION_POLARITY		FPGA_CORE_VERSION(1, 3)
+#define TOD_VERSION_ALL_ERRORS		FPGA_CORE_VERSION(1, 4)
+#define TOD_VERSION_GNSS_SELECT		FPGA_CORE_VERSION(1, 5)
+#define TOD_VERSION_UBX			FPGA_CORE_VERSION(1, 6)
+#define TOD_VERSION_GNSS_TELEMETRY	FPGA_CORE_VERSION(1, 7)
+#define TOD_VERSION_TSIP		FPGA_CORE_VERSION(1, 9)
+#define TOD_VERSION_NMEA_STATUS_MESSAGE FPGA_CORE_VERSION(2, 0)
+#define TOD_VERSION_ESIP		FPGA_CORE_VERSION(2, 1)
+#define TOD_VERSION_NMEA_GNSS_TELEMETRY FPGA_CORE_VERSION(2, 2)
+#define TOD_VERSION_PFEC		FPGA_CORE_VERSION(2, 3)
+#define TOD_MESSAGE_PFEC_MASK		0x7fU
+#define TOD_MASTER_VERSION_STATUS	FPGA_CORE_VERSION(1, 1)
+#define TOD_MASTER_VERSION_POLARITY	FPGA_CORE_VERSION(1, 2)
+#define TOD_MASTER_VERSION_GNSS		FPGA_CORE_VERSION(1, 3)
+#define TOD_MASTER_VERSION_RMC		FPGA_CORE_VERSION(1, 4)
+#define TOD_MASTER_VERSION_UTC		FPGA_CORE_VERSION(1, 6)
+#define TOD_MASTER_STATUS_ERROR		BIT(0)
+#define TOD_MASTER_CTRL_ENABLE		BIT(0)
+#define TOD_MASTER_CTRL_GNSS_SHIFT	24
+#define TOD_MASTER_CTRL_GNSS_MASK	(0xfU << TOD_MASTER_CTRL_GNSS_SHIFT)
+#define TOD_MASTER_CTRL_MESSAGE_SHIFT	16
+#define TOD_MASTER_DISABLE_RMC		BIT(0)
+#define TOD_MASTER_DISABLE_ZDA		BIT(1)
+#define TOD_MASTER_DISABLE_UTC		BIT(2)
+#define TOD_MASTER_LOCAL_SIGN		BIT(31)
+#define TOD_MASTER_LOCAL_HOUR_SHIFT	16
+#define TOD_MASTER_LOCAL_HOUR_MASK	(0xfU << TOD_MASTER_LOCAL_HOUR_SHIFT)
+#define TOD_MASTER_LOCAL_MINUTE_MASK	0x3fU
+#define TOD_MASTER_LOCAL_MAX_MINUTES	((13 * 60) + 59)
 
 #define TOD_STATUS_UTC_MASK			0xff
 #define TOD_STATUS_UTC_VALID		BIT(8)
@@ -228,12 +336,30 @@ struct ts_reg {
 struct pps_reg {
 	u32	ctrl;
 	u32	status;
-	u32	__pad0[6];
+	u32	polarity;
+	u32	version;
+	u32	pulse_width;
+	u32	__pad0[3];
 	u32	cable_delay;
 };
 
 #define PPS_STATUS_FILTER_ERR	BIT(0)
 #define PPS_STATUS_SUPERV_ERR	BIT(1)
+#define PPS_STATUS_ERR_MASK	(PPS_STATUS_FILTER_ERR | PPS_STATUS_SUPERV_ERR)
+
+/* PPS cable delay is signed magnitude: sign in bit 31, magnitude in 29:0. */
+#define PPS_CABLE_DELAY_SIGN		BIT(31)
+#define PPS_CABLE_DELAY_MAG_MASK	(BIT(30) - 1)
+#define PPS_CABLE_DELAY_LEGACY_MASK	0x0000ffffU
+#define PPS_VERSION_PULSE_WIDTH		FPGA_CORE_VERSION(1, 0)
+#define PPS_MASTER_VERSION_POLARITY	FPGA_CORE_VERSION(1, 1)
+#define PPS_SLAVE_VERSION_POLARITY	FPGA_CORE_VERSION(1, 2)
+#define PPS_MASTER_VERSION_STATUS	FPGA_CORE_VERSION(1, 2)
+#define PPS_SLAVE_VERSION_STATUS	FPGA_CORE_VERSION(1, 3)
+#define PPS_MASTER_VERSION_CABLE_DELAY	FPGA_CORE_VERSION(1, 4)
+#define PPS_VERSION_WIDE_CABLE_DELAY	FPGA_CORE_VERSION(1, 6)
+#define PPS_MASTER_PULSE_WIDTH_MIN	1U
+#define PPS_MASTER_PULSE_WIDTH_MAX	999U
 
 struct img_reg {
 	u32	version;
@@ -256,10 +382,27 @@ struct irig_master_reg {
 	u32	__pad0;
 	u32	version;
 	u32	adj_sec;
-	u32	mode_ctrl;
+	u32	control_bits;
 };
 
-#define IRIG_M_CTRL_ENABLE	BIT(0)
+#define IRIG_CTRL_ENABLE	BIT(0)
+#define IRIG_CTRL_CODE_SHIFT	16
+#define IRIG_CTRL_CODE_MASK	(0x7U << IRIG_CTRL_CODE_SHIFT)
+#define IRIG_CTRL_MODE_SHIFT	24
+#define IRIG_CTRL_MODE_MASK	(0x3U << IRIG_CTRL_MODE_SHIFT)
+#define IRIG_CTRL_MODE_B	(1U << IRIG_CTRL_MODE_SHIFT)
+#define IRIG_CTRL_AM		BIT(1)
+#define IRIG_SLAVE_CTRL_YEAR_VALID BIT(8)
+#define IRIG_CONTROL_BITS_MASK	0x07ffffffU
+#define IRIG_MASTER_VERSION_MODE_CONTROL FPGA_CORE_VERSION(1, 2)
+#define IRIG_SLAVE_VERSION_MODE_CONTROL  FPGA_CORE_VERSION(1, 3)
+#define IRIG_MASTER_VERSION_AM		FPGA_CORE_VERSION(1, 5)
+#define IRIG_SLAVE_VERSION_CODE_YEAR	FPGA_CORE_VERSION(1, 5)
+#define IRIG_SLAVE_VERSION_AM		FPGA_CORE_VERSION(1, 6)
+#define IRIG_YEAR_MASK			0x00000fffU
+#define IRIG_YEAR_MIN			1970U
+#define IRIG_YEAR_MAX			2069U
+#define IRIG_M_CTRL_ENABLE	IRIG_CTRL_ENABLE
 
 struct irig_slave_reg {
 	u32	ctrl;
@@ -267,10 +410,13 @@ struct irig_slave_reg {
 	u32	__pad0;
 	u32	version;
 	u32	adj_sec;
-	u32	mode_ctrl;
+	u32	control_bits;
+	u32	__pad1[2];
+	u32	cable_delay;
+	u32	year;
 };
 
-#define IRIG_S_CTRL_ENABLE	BIT(0)
+#define IRIG_S_CTRL_ENABLE	IRIG_CTRL_ENABLE
 
 struct dcf_master_reg {
 	u32	ctrl;
@@ -288,9 +434,32 @@ struct dcf_slave_reg {
 	u32	__pad0;
 	u32	version;
 	u32	adj_sec;
+	u32	__pad1[3];
+	u32	air_delay;
+	u32	__pad2[3];
+	u32	bit_position;
 };
 
 #define DCF_S_CTRL_ENABLE	BIT(0)
+
+#define TIMECODE_STATUS_ERROR	BIT(0)
+#define TIMECODE_VERSION_STATUS	FPGA_CORE_VERSION(1, 1)
+#define TIMECODE_COR_SIGN	BIT(31)
+#define TIMECODE_COR_MAG_MASK	0x7fffffffU
+#define IRIG_CABLE_DELAY_MASK	0x0000ffffU
+#define DCF_AIR_DELAY_MASK	0x3fffffffU
+#define DCF_BIT_POSITION_MASK	0x0000003fU
+
+static_assert(offsetof(struct irig_master_reg, control_bits) == 0x14);
+static_assert(offsetof(struct irig_slave_reg, control_bits) == 0x14);
+static_assert(offsetof(struct irig_slave_reg, cable_delay) == 0x20);
+static_assert(offsetof(struct irig_slave_reg, year) == 0x24);
+static_assert(offsetof(struct dcf_slave_reg, air_delay) == 0x20);
+static_assert(offsetof(struct dcf_slave_reg, bit_position) == 0x30);
+static_assert(offsetof(struct pps_reg, polarity) == 0x08);
+static_assert(offsetof(struct pps_reg, version) == 0x0c);
+static_assert(offsetof(struct pps_reg, pulse_width) == 0x10);
+static_assert(offsetof(struct pps_reg, cable_delay) == 0x20);
 
 struct signal_reg {
 	u32	enable;
@@ -311,6 +480,12 @@ struct signal_reg {
 	u32	period_sec;
 	u32	repeat_count;
 };
+
+#define SIGNAL_VERSION_CABLE_DELAY	FPGA_CORE_VERSION(1, 2)
+#define SIGNAL_VERSION_CURRENT_MAP	FPGA_CORE_VERSION(1, 3)
+#define SIGNAL_CABLE_DELAY_MAX		0xffffU
+#define SIGNAL_CTRL_ENABLE		BIT(0)
+#define SIGNAL_CTRL_VALUES_VALID	BIT(1)
 
 struct frequency_reg {
 	u32	ctrl;
@@ -392,6 +567,8 @@ struct ptp_ocp_signal {
 	ktime_t		phase;
 	ktime_t		start;
 	int		duty;
+	u32		repeat_count;
+	u16		cable_delay;
 	bool		polarity;
 	bool		running;
 };
@@ -482,6 +659,180 @@ struct ptp_ocp {
 	u64			ptm_t1_prev;
 	u64			ptm_t4_prev;
 };
+
+static bool
+ptp_ocp_core_version_at_least(u32 __iomem *version_reg, u32 minimum)
+{
+	u32 version = ioread32(version_reg);
+
+	return version && version != U32_MAX && version >= minimum;
+}
+
+static int
+ptp_ocp_contract_entry_for_device(const char *entry, const char *device,
+				  u32 *expected)
+{
+	const char *separator;
+	size_t device_len;
+	u32 value;
+
+	if (!entry || !*entry)
+		return false;
+	separator = strchr(entry, '=');
+	if (!separator)
+		return false;
+
+	device_len = separator - entry;
+	if (device_len != strlen(device) ||
+	    strncasecmp(entry, device, device_len))
+		return false;
+
+	/* A matching BDF with a malformed value invalidates the binding. */
+	if (!separator[1] || strchr(separator + 1, '=') ||
+	    kstrtou32(separator + 1, 0, &value) ||
+	    !value || value == U32_MAX)
+		return -EINVAL;
+
+	*expected = value;
+	return true;
+}
+
+static bool
+ptp_ocp_optional_image_contract_expected(struct ptp_ocp *bp, u32 *expected)
+{
+	const char *device = pci_name(bp->pdev);
+	u32 candidate, selected = 0;
+	bool found = false;
+	unsigned int i;
+	int match;
+
+	/* The legacy scalar is safe only when it names this exact PCI function. */
+	if (optional_image_device &&
+	    !strcasecmp(optional_image_device, device)) {
+		if (!optional_image_version || optional_image_version == U32_MAX)
+			return false;
+		selected = optional_image_version;
+		found = true;
+	}
+
+	for (i = 0; i < optional_image_contract_count; i++) {
+		match = ptp_ocp_contract_entry_for_device(
+			optional_image_contracts[i], device, &candidate);
+		if (match < 0)
+			return false;
+		if (!match)
+			continue;
+		/* Conflicting contracts for one function are ambiguous: fail closed. */
+		if (found && selected != candidate)
+			return false;
+		selected = candidate;
+		found = true;
+	}
+
+	if (!found)
+		return false;
+	*expected = selected;
+	return true;
+}
+
+static bool
+ptp_ocp_optional_image_contract_matches(struct ptp_ocp *bp)
+{
+	u32 expected, image_version;
+
+	if (!bp->image || bp->fw_loader ||
+	    !ptp_ocp_optional_image_contract_expected(bp, &expected))
+		return false;
+
+	image_version = ioread32(&bp->image->version);
+	if (!image_version || image_version == U32_MAX)
+		return false;
+
+	return image_version == expected;
+}
+
+static bool
+ptp_ocp_clock_has_status(struct ptp_ocp *bp)
+{
+	return ptp_ocp_core_version_at_least(&bp->reg->version,
+					     CLOCK_VERSION_STATUS);
+}
+
+static bool
+ptp_ocp_clock_optional_registers_enabled(struct ptp_ocp *bp)
+{
+	return clock_optional_registers &&
+		ptp_ocp_optional_image_contract_matches(bp) &&
+		ptp_ocp_core_version_at_least(&bp->reg->version,
+					      CLOCK_VERSION_OPTIONAL_REGS);
+}
+
+static bool
+ptp_ocp_irig_optional_features_enabled(struct ptp_ocp *bp)
+{
+	return irig_optional_features &&
+		ptp_ocp_optional_image_contract_matches(bp);
+}
+
+static bool
+ptp_ocp_tod_optional_utc_enabled(struct ptp_ocp *bp)
+{
+	u32 ctrl, protocol, version;
+
+	if (!tod_optional_telemetry || !bp->tod ||
+	    !ptp_ocp_optional_image_contract_matches(bp))
+		return false;
+	version = ioread32(&bp->tod->version);
+	if (!version || version == U32_MAX)
+		return false;
+	ctrl = ioread32(&bp->tod->ctrl);
+	protocol = (ctrl >> TOD_CTRL_PROTOCOL_SHIFT) & TOD_CTRL_PROTOCOL_MASK;
+
+	switch (protocol) {
+	case 0: /* NMEA UTC/status message */
+		return version >= TOD_VERSION_NMEA_STATUS_MESSAGE;
+	case 1: /* UBX NAV-TIMEUTC / NAV-TIMELS */
+		return version >= TOD_VERSION_UBX;
+	case 2: /* TSIP timing information */
+		return version >= TOD_VERSION_TSIP;
+	case 3: /* ESIP CRW */
+		return version >= TOD_VERSION_ESIP;
+	case 4: /* PFEC GNTPS_A */
+		return version >= TOD_VERSION_PFEC;
+	default:
+		return false;
+	}
+}
+
+static bool
+ptp_ocp_tod_optional_gnss_enabled(struct ptp_ocp *bp)
+{
+	u32 ctrl, protocol, version;
+
+	if (!tod_optional_telemetry || !bp->tod ||
+	    !ptp_ocp_optional_image_contract_matches(bp))
+		return false;
+	version = ioread32(&bp->tod->version);
+	if (!version || version == U32_MAX)
+		return false;
+	ctrl = ioread32(&bp->tod->ctrl);
+	protocol = (ctrl >> TOD_CTRL_PROTOCOL_SHIFT) & TOD_CTRL_PROTOCOL_MASK;
+
+	switch (protocol) {
+	case 0: /* NMEA GxGNS/GxGSV status was added in 2.2. */
+		return version >= TOD_VERSION_NMEA_GNSS_TELEMETRY;
+	case 1: /* UBX GNSS telemetry was added in 1.7. */
+		return version >= TOD_VERSION_GNSS_TELEMETRY;
+	case 2:
+		return version >= TOD_VERSION_TSIP;
+	case 3:
+		return version >= TOD_VERSION_ESIP;
+	case 4: /* PFEC GNTPS_B */
+		return version >= TOD_VERSION_PFEC;
+	default:
+		return false;
+	}
+}
 
 #define OCP_REQ_TIMESTAMP	BIT(0)
 #define OCP_REQ_PPS		BIT(1)
@@ -1294,6 +1645,28 @@ static const struct ocp_selector ptp_ocp_tod_protocol[] = {
 	{ .name = "UBX",	.value = 1 },
 	{ .name = "TSIP",	.value = 2 },
 	{ .name = "ESIP",	.value = 3 },
+	{ .name = "PFEC",	.value = 4 },
+	{ }
+};
+
+static const struct ocp_selector ptp_ocp_tod_gnss[] = {
+	{ .name = "ALL",	.value = 0 },
+	{ .name = "COMBINED",	.value = 1 },
+	{ .name = "GPS",	.value = 2 },
+	{ .name = "GLONASS",	.value = 3 },
+	{ .name = "GALILEO",	.value = 4 },
+	{ .name = "BEIDOU",	.value = 5 },
+	{ }
+};
+
+static const struct ocp_selector ptp_ocp_nmea_gnss[] = {
+	{ .name = "DEFAULT",     .value = 0 },
+	{ .name = "COMBINED",    .value = 1 },
+	{ .name = "GPS",         .value = 2 },
+	{ .name = "GLONASS",     .value = 3 },
+	{ .name = "GALILEO",     .value = 4 },
+	{ .name = "BEIDOU",      .value = 5 },
+	{ .name = "PROPRIETARY", .value = 15 },
 	{ }
 };
 
@@ -1506,7 +1879,7 @@ __ptp_ocp_settime_locked(struct ptp_ocp *bp, const struct timespec64 *ts)
 	iowrite32(ctrl, &bp->reg->ctrl);
 
 	/* restore clock selection */
-	iowrite32(select >> 16, &bp->reg->select);
+	iowrite32(select & 0xff, &bp->reg->select);
 }
 
 static int
@@ -1537,7 +1910,7 @@ __ptp_ocp_adjtime_locked(struct ptp_ocp *bp, u32 adj_val)
 	iowrite32(ctrl, &bp->reg->ctrl);
 
 	/* restore clock selection */
-	iowrite32(select >> 16, &bp->reg->select);
+	iowrite32(select & 0xff, &bp->reg->select);
 }
 
 static void
@@ -1618,7 +1991,7 @@ __ptp_ocp_adjfine_locked(struct ptp_ocp *bp, long scaled_ppm)
 	iowrite32(ctrl, &bp->reg->ctrl);
 
 	/* restore clock selection */
-	iowrite32(select >> 16, &bp->reg->select);
+	iowrite32(select & 0xff, &bp->reg->select);
 }
 
 static int
@@ -1865,24 +2238,67 @@ __ptp_ocp_clear_drift_locked(struct ptp_ocp *bp)
 	iowrite32(ctrl, &bp->reg->ctrl);
 
 	/* restore clock selection */
-	iowrite32(select >> 16, &bp->reg->select);
+	iowrite32(select & 0xff, &bp->reg->select);
+}
+
+static void
+ptp_ocp_master_correction_write(u32 __iomem *ctrl_reg,
+				u32 __iomem *correction_reg,
+				u32 correction)
+{
+	u32 ctrl;
+
+	ctrl = ioread32(ctrl_reg);
+	if (ctrl & BIT(0))
+		iowrite32(ctrl & ~BIT(0), ctrl_reg);
+	iowrite32(correction, correction_reg);
+	if (ctrl & BIT(0))
+		iowrite32(ctrl, ctrl_reg);
 }
 
 static void
 ptp_ocp_utc_distribute(struct ptp_ocp *bp, u32 val)
 {
 	unsigned long flags;
+	u32 magnitude, master_correction;
+
+	/*
+	 * IRIG and DCF transmit UTC from the card's TAI clock, so their
+	 * correction is negative.  The receive cores perform the inverse
+	 * conversion and therefore need the same magnitude with a positive
+	 * sign.  These cores use sign-magnitude rather than two's complement.
+	 */
+	magnitude = val & TIMECODE_COR_MAG_MASK;
+	if (val != magnitude)
+		dev_warn_once(&bp->pdev->dev,
+			      "UTC offset %#x exceeds the timecode correction field; truncating\n",
+			      val);
+	master_correction = TIMECODE_COR_SIGN | magnitude;
 
 	spin_lock_irqsave(&bp->lock, flags);
 
-	bp->utc_tai_offset = val;
+	bp->utc_tai_offset = magnitude;
 
-	if (bp->irig_out)
-		iowrite32(val, &bp->irig_out->adj_sec);
-	if (bp->dcf_out)
-		iowrite32(val, &bp->dcf_out->adj_sec);
-	if (bp->nmea_out)
-		iowrite32(val, &bp->nmea_out->adj_sec);
+	if (bp->irig_out && ptp_ocp_core_version_at_least(
+			&bp->irig_out->version, FPGA_CORE_VERSION(1, 0)))
+		ptp_ocp_master_correction_write(&bp->irig_out->ctrl,
+						&bp->irig_out->adj_sec,
+						master_correction);
+	if (bp->irig_in && ptp_ocp_core_version_at_least(
+			&bp->irig_in->version, FPGA_CORE_VERSION(1, 0)))
+		iowrite32(magnitude, &bp->irig_in->adj_sec);
+	if (bp->dcf_out && ptp_ocp_core_version_at_least(
+			&bp->dcf_out->version, FPGA_CORE_VERSION(1, 0)))
+		ptp_ocp_master_correction_write(&bp->dcf_out->ctrl,
+						&bp->dcf_out->adj_sec,
+						master_correction);
+	if (bp->dcf_in && ptp_ocp_core_version_at_least(
+			&bp->dcf_in->version, FPGA_CORE_VERSION(1, 0)))
+		iowrite32(magnitude, &bp->dcf_in->adj_sec);
+	/* The ToD Master is a separate synthesis-optional AXI block.  Generic
+	 * UTC distribution can run during initialization/watchdog activity, so
+	 * it must never use that path as an implicit capability probe.  Its
+	 * correction has a dedicated, explicitly requested sysfs control. */
 
 	spin_unlock_irqrestore(&bp->lock, flags);
 }
@@ -1894,9 +2310,12 @@ ptp_ocp_watchdog(struct timer_list *t)
 	unsigned long flags;
 	u32 status, utc_offset;
 
+	/* The timer is only installed when the PPS Slave has a status register. */
 	status = ioread32(&bp->pps_to_clk->status);
 
-	if (status & PPS_STATUS_SUPERV_ERR) {
+	status &= PPS_STATUS_ERR_MASK;
+	if (status) {
+		/* Both documented error bits are write-one-to-clear. */
 		iowrite32(status, &bp->pps_to_clk->status);
 		if (!bp->gnss_lost) {
 			spin_lock_irqsave(&bp->lock, flags);
@@ -1912,7 +2331,7 @@ ptp_ocp_watchdog(struct timer_list *t)
 	/* if GNSS provides correct data we can rely on
 	 * it to get leap second information
 	 */
-	if (bp->tod) {
+	if (ptp_ocp_tod_optional_utc_enabled(bp)) {
 		status = ioread32(&bp->tod->utc_status);
 		utc_offset = status & TOD_STATUS_UTC_MASK;
 		if (status & TOD_STATUS_UTC_VALID &&
@@ -1952,21 +2371,28 @@ ptp_ocp_init_clock(struct ptp_ocp *bp)
 {
 	struct timespec64 ts;
 	bool sync;
-	u32 ctrl;
+	u32 version;
 
-	ctrl = OCP_CTRL_ENABLE;
-	iowrite32(ctrl, &bp->reg->ctrl);
+	version = ioread32(&bp->reg->version);
+	if (!version || version == U32_MAX) {
+		dev_err(&bp->pdev->dev, "invalid Clock core version\n");
+		return -ENODEV;
+	}
 
-	/* NO DRIFT Correction */
-	/* offset_p:i 1/8, offset_i: 1/16, drift_p: 0, drift_i: 0 */
-	iowrite32(0x2000, &bp->reg->servo_offset_p);
-	iowrite32(0x1000, &bp->reg->servo_offset_i);
-	iowrite32(0,	  &bp->reg->servo_drift_p);
-	iowrite32(0,	  &bp->reg->servo_drift_i);
+	/* Servo coefficients may only be latched while the clock is disabled. */
+	iowrite32(0, &bp->reg->ctrl);
 
-	/* latch servo values */
-	ctrl |= OCP_CTRL_ADJUST_SERVO;
-	iowrite32(ctrl, &bp->reg->ctrl);
+	if (ptp_ocp_clock_optional_registers_enabled(bp)) {
+		/* NO DRIFT Correction: offset P/I 1/8 and 1/16. */
+		iowrite32(0x2000, &bp->reg->servo_offset_p);
+		iowrite32(0x1000, &bp->reg->servo_offset_i);
+		iowrite32(0, &bp->reg->servo_drift_p);
+		iowrite32(0, &bp->reg->servo_drift_i);
+
+		/* Latch servo values while the clock is disabled. */
+		iowrite32(OCP_CTRL_ADJUST_SERVO, &bp->reg->ctrl);
+	}
+	iowrite32(OCP_CTRL_ENABLE, &bp->reg->ctrl);
 
 	if ((ioread32(&bp->reg->ctrl) & OCP_CTRL_ENABLE) == 0) {
 		dev_err(&bp->pdev->dev, "clock not enabled\n");
@@ -1975,14 +2401,17 @@ ptp_ocp_init_clock(struct ptp_ocp *bp)
 
 	ptp_ocp_estimate_pci_timing(bp);
 
-	sync = ioread32(&bp->reg->status) & OCP_STATUS_IN_SYNC;
+	sync = ptp_ocp_clock_has_status(bp) &&
+		(ioread32(&bp->reg->status) & OCP_STATUS_IN_SYNC);
 	if (!sync) {
 		ktime_get_clocktai_ts64(&ts);
 		ptp_ocp_settime(&bp->ptp_info, &ts);
 	}
 
 	/* If there is a clock supervisor, then enable the watchdog */
-	if (bp->pps_to_clk) {
+	if (bp->pps_to_clk &&
+	    ptp_ocp_core_version_at_least(&bp->pps_to_clk->version,
+					  PPS_SLAVE_VERSION_STATUS)) {
 		timer_setup(&bp->watchdog, ptp_ocp_watchdog, 0);
 		mod_timer(&bp->watchdog, jiffies + HZ);
 	}
@@ -1993,16 +2422,21 @@ ptp_ocp_init_clock(struct ptp_ocp *bp)
 static void
 ptp_ocp_tod_init(struct ptp_ocp *bp)
 {
-	u32 ctrl, reg;
+	u32 ctrl, reg, version;
 
+	/* Preserve the reset/image-selected protocol and message gates. */
+	version = ioread32(&bp->tod->version);
+	if (!version || version == U32_MAX)
+		return;
 	ctrl = ioread32(&bp->tod->ctrl);
-	ctrl |= TOD_CTRL_PROTOCOL | TOD_CTRL_ENABLE;
-	ctrl &= ~(TOD_CTRL_DISABLE_FMT_A | TOD_CTRL_DISABLE_FMT_B);
-	iowrite32(ctrl, &bp->tod->ctrl);
+	if (!(ctrl & TOD_CTRL_ENABLE))
+		iowrite32(ctrl | TOD_CTRL_ENABLE, &bp->tod->ctrl);
 
-	reg = ioread32(&bp->tod->utc_status);
-	if (reg & TOD_STATUS_UTC_VALID)
-		ptp_ocp_utc_distribute(bp, reg & TOD_STATUS_UTC_MASK);
+	if (ptp_ocp_tod_optional_utc_enabled(bp)) {
+		reg = ioread32(&bp->tod->utc_status);
+		if (reg & TOD_STATUS_UTC_VALID)
+			ptp_ocp_utc_distribute(bp, reg & TOD_STATUS_UTC_MASK);
+	}
 }
 
 static const char *
@@ -2013,6 +2447,7 @@ ptp_ocp_tod_proto_name(int idx)
 		"UBX",
 		"TSIP",
 		"ESIP",
+		"PFEC",
 		"unknown"
 	};
 	if (idx >= ARRAY_SIZE(proto_name))
@@ -2487,6 +2922,13 @@ ptp_ocp_signal_irq(int irq, void *priv)
 	int gen;
 
 	gen = ext->info->index - 1;
+	if (!ptp_ocp_core_version_at_least(&reg->version,
+					   SIGNAL_VERSION_CURRENT_MAP)) {
+		/* Only Enable and Version have stable offsets before version 1.3. */
+		iowrite32(0, &reg->enable);
+		bp->signal[gen].running = false;
+		return IRQ_HANDLED;
+	}
 
 	enable = ioread32(&reg->enable);
 	status = ioread32(&reg->status);
@@ -2498,7 +2940,7 @@ ptp_ocp_signal_irq(int irq, void *priv)
 		bp->signal[gen].running = false;
 	}
 
-	iowrite32(0, &reg->intr);	/* ack interrupt */
+	iowrite32(1, &reg->intr);	/* write one to acknowledge */
 
 	return IRQ_HANDLED;
 }
@@ -2506,10 +2948,18 @@ ptp_ocp_signal_irq(int irq, void *priv)
 static int
 ptp_ocp_signal_set(struct ptp_ocp *bp, int gen, struct ptp_ocp_signal *s)
 {
+	struct signal_reg __iomem *reg;
 	struct ptp_system_timestamp sts;
 	struct timespec64 ts;
 	ktime_t start_ns;
 	int err;
+
+	if (!bp->signal_out[gen])
+		return -EOPNOTSUPP;
+	reg = bp->signal_out[gen]->mem;
+	if (!ptp_ocp_core_version_at_least(&reg->version,
+					   SIGNAL_VERSION_CURRENT_MAP))
+		return -EOPNOTSUPP;
 
 	if (!s->period)
 		return 0;
@@ -2524,7 +2974,7 @@ ptp_ocp_signal_set(struct ptp_ocp *bp, int gen, struct ptp_ocp_signal *s)
 	start_ns = ktime_set(ts.tv_sec, ts.tv_nsec) + NSEC_PER_MSEC;
 	if (!s->start) {
 		/* roundup() does not work on 32-bit systems */
-		s->start = DIV_ROUND_UP_ULL(start_ns, s->period);
+		s->start = DIV_ROUND_UP_ULL(start_ns, s->period) * s->period;
 		s->start = ktime_add(s->start, s->phase);
 	}
 
@@ -2549,6 +2999,8 @@ ptp_ocp_signal_from_perout(struct ptp_ocp *bp, int gen,
 	struct ptp_ocp_signal s = { };
 
 	s.polarity = bp->signal[gen].polarity;
+	s.repeat_count = bp->signal[gen].repeat_count;
+	s.cable_delay = bp->signal[gen].cable_delay;
 	s.period = ktime_set(req->period.sec, req->period.nsec);
 	if (!s.period)
 		return 0;
@@ -2577,6 +3029,13 @@ ptp_ocp_signal_enable(void *priv, struct ptp_clock_request *rq,
 	int gen;
 
 	gen = ext->info->index - 1;
+	if (!ptp_ocp_core_version_at_least(&reg->version,
+					   SIGNAL_VERSION_CURRENT_MAP)) {
+		/* The interrupt and timing fields moved in version 1.3. */
+		iowrite32(0, &reg->enable);
+		bp->signal[gen].running = false;
+		return enable ? -EOPNOTSUPP : 0;
+	}
 
 	iowrite32(0, &reg->intr_mask);
 	iowrite32(0, &reg->enable);
@@ -2597,9 +3056,15 @@ ptp_ocp_signal_enable(void *priv, struct ptp_clock_request *rq,
 	iowrite32(ts.tv_nsec, &reg->pulse_ns);
 
 	iowrite32(bp->signal[gen].polarity, &reg->polarity);
-	iowrite32(0, &reg->repeat_count);
+	if (ptp_ocp_core_version_at_least(&reg->version,
+					       SIGNAL_VERSION_CABLE_DELAY))
+		iowrite32(bp->signal[gen].cable_delay, &reg->cable_delay);
+	if (ptp_ocp_core_version_at_least(&reg->version,
+					       SIGNAL_VERSION_CURRENT_MAP))
+		iowrite32(bp->signal[gen].repeat_count, &reg->repeat_count);
 
-	iowrite32(0, &reg->intr);		/* clear interrupt state */
+	iowrite32(BIT(0) | BIT(1), &reg->status); /* clear sticky errors */
+	iowrite32(1, &reg->intr);		/* clear interrupt state */
 	iowrite32(1, &reg->intr_mask);		/* enable interrupt */
 	iowrite32(3, &reg->enable);		/* valid & enable */
 
@@ -2778,26 +3243,24 @@ ptp_ocp_register_mem(struct ptp_ocp *bp, struct ocp_resource *r)
 }
 
 static void
-ptp_ocp_nmea_out_init(struct ptp_ocp *bp)
-{
-	if (!bp->nmea_out)
-		return;
-
-	iowrite32(0, &bp->nmea_out->ctrl);		/* disable */
-	iowrite32(3, &bp->nmea_out->uart_baud);		/* 9600 */
-	iowrite32(1, &bp->nmea_out->ctrl);		/* enable */
-}
-
-static void
 _ptp_ocp_signal_init(struct ptp_ocp_signal *s, struct signal_reg __iomem *reg)
 {
-	u32 val;
+	u32 val, version;
 
+	version = ioread32(&reg->version);
 	iowrite32(0, &reg->enable);		/* disable */
+	s->duty = 50;
+	if (!version || version == U32_MAX ||
+	    version < SIGNAL_VERSION_CURRENT_MAP)
+		return;
 
 	val = ioread32(&reg->polarity);
 	s->polarity = val ? true : false;
-	s->duty = 50;
+	if (version >= SIGNAL_VERSION_CABLE_DELAY)
+		s->cable_delay = ioread32(&reg->cable_delay) &
+				 SIGNAL_CABLE_DELAY_MAX;
+	if (version >= SIGNAL_VERSION_CURRENT_MAP)
+		s->repeat_count = ioread32(&reg->repeat_count);
 }
 
 static void
@@ -2880,7 +3343,9 @@ ptp_ocp_fb_board_init(struct ptp_ocp *bp, struct ocp_resource *r)
 	ptp_ocp_fb_set_version(bp);
 
 	ptp_ocp_tod_init(bp);
-	ptp_ocp_nmea_out_init(bp);
+	/* Do not probe or rewrite the synthesis-optional ToD Master at boot.
+	 * Its typed sysfs controls validate Version when the operator elects
+	 * to use the NMEA generator.  This also preserves firmware settings. */
 	ptp_ocp_sma_init(bp);
 	ptp_ocp_signal_init(bp);
 
@@ -3769,6 +4234,8 @@ signal_store(struct device *dev, struct device_attribute *attr,
 	s.phase = bp->signal[gen].phase;
 	s.period = bp->signal[gen].period;
 	s.polarity = bp->signal[gen].polarity;
+	s.repeat_count = bp->signal[gen].repeat_count;
+	s.cable_delay = bp->signal[gen].cable_delay;
 
 	switch (argc) {
 	case 4:
@@ -3893,6 +4360,122 @@ static EXT_ATTR_RO(signal, polarity, 0);
 static EXT_ATTR_RO(signal, polarity, 1);
 static EXT_ATTR_RO(signal, polarity, 2);
 static EXT_ATTR_RO(signal, polarity, 3);
+
+static void
+ptp_ocp_signal_latch_if_running(struct signal_reg __iomem *reg)
+{
+	u32 ctrl;
+
+	ctrl = ioread32(&reg->enable);
+	if (ctrl & SIGNAL_CTRL_ENABLE)
+		iowrite32(ctrl | SIGNAL_CTRL_VALUES_VALID, &reg->enable);
+}
+
+static ssize_t
+repeat_count_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct dev_ext_attribute *ea = to_ext_attr(attr);
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int i = (uintptr_t)ea->var;
+	struct signal_reg __iomem *reg;
+
+	if (!bp->signal_out[i])
+		return -EOPNOTSUPP;
+	reg = bp->signal_out[i]->mem;
+	if (!ptp_ocp_core_version_at_least(&reg->version,
+						SIGNAL_VERSION_CURRENT_MAP))
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n", bp->signal[i].repeat_count);
+}
+
+static ssize_t
+repeat_count_store(struct device *dev, struct device_attribute *attr,
+		   const char *buf, size_t count)
+{
+	struct dev_ext_attribute *ea = to_ext_attr(attr);
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int i = (uintptr_t)ea->var;
+	struct signal_reg __iomem *reg;
+	unsigned long flags;
+	u32 repeat_count;
+	int err;
+
+	if (!bp->signal_out[i])
+		return -EOPNOTSUPP;
+	reg = bp->signal_out[i]->mem;
+	if (!ptp_ocp_core_version_at_least(&reg->version,
+						SIGNAL_VERSION_CURRENT_MAP))
+		return -EOPNOTSUPP;
+	err = kstrtou32(buf, 0, &repeat_count);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	bp->signal[i].repeat_count = repeat_count;
+	iowrite32(repeat_count, &reg->repeat_count);
+	ptp_ocp_signal_latch_if_running(reg);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static EXT_ATTR_RW(signal, repeat_count, 0);
+static EXT_ATTR_RW(signal, repeat_count, 1);
+static EXT_ATTR_RW(signal, repeat_count, 2);
+static EXT_ATTR_RW(signal, repeat_count, 3);
+
+static ssize_t
+cable_delay_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct dev_ext_attribute *ea = to_ext_attr(attr);
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int i = (uintptr_t)ea->var;
+	struct signal_reg __iomem *reg;
+
+	if (!bp->signal_out[i])
+		return -EOPNOTSUPP;
+	reg = bp->signal_out[i]->mem;
+	if (!ptp_ocp_core_version_at_least(&reg->version,
+						SIGNAL_VERSION_CABLE_DELAY))
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n", bp->signal[i].cable_delay);
+}
+
+static ssize_t
+cable_delay_store(struct device *dev, struct device_attribute *attr,
+		  const char *buf, size_t count)
+{
+	struct dev_ext_attribute *ea = to_ext_attr(attr);
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int i = (uintptr_t)ea->var;
+	struct signal_reg __iomem *reg;
+	unsigned long flags;
+	u16 cable_delay;
+	int err;
+
+	if (!bp->signal_out[i])
+		return -EOPNOTSUPP;
+	reg = bp->signal_out[i]->mem;
+	if (!ptp_ocp_core_version_at_least(&reg->version,
+						SIGNAL_VERSION_CABLE_DELAY))
+		return -EOPNOTSUPP;
+	err = kstrtou16(buf, 0, &cable_delay);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	bp->signal[i].cable_delay = cable_delay;
+	iowrite32(cable_delay, &reg->cable_delay);
+	ptp_ocp_signal_latch_if_running(reg);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static EXT_ATTR_RW(signal, cable_delay, 0);
+static EXT_ATTR_RW(signal, cable_delay, 1);
+static EXT_ATTR_RW(signal, cable_delay, 2);
+static EXT_ATTR_RW(signal, cable_delay, 3);
 
 static ssize_t
 running_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -4024,7 +4607,7 @@ utc_tai_offset_show(struct device *dev,
 {
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
 
-	return sysfs_emit(buf, "%d\n", bp->utc_tai_offset);
+	return sysfs_emit(buf, "%u\n", bp->utc_tai_offset);
 }
 
 static ssize_t
@@ -4039,6 +4622,8 @@ utc_tai_offset_store(struct device *dev,
 	err = kstrtou32(buf, 0, &val);
 	if (err)
 		return err;
+	if (val > TIMECODE_COR_MAG_MASK)
+		return -ERANGE;
 
 	ptp_ocp_utc_distribute(bp, val);
 
@@ -4046,14 +4631,206 @@ utc_tai_offset_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(utc_tai_offset);
 
+static int
+ptp_ocp_pps_require_version(struct pps_reg __iomem *reg, u32 minimum)
+{
+	if (!reg || !ptp_ocp_core_version_at_least(&reg->version, minimum))
+		return -EOPNOTSUPP;
+
+	return 0;
+}
+
+static void
+ptp_ocp_pps_config_write(struct pps_reg __iomem *reg,
+			 u32 __iomem *config_reg, u32 value)
+{
+	u32 ctrl;
+
+	ctrl = ioread32(&reg->ctrl);
+	if (ctrl & BIT(0))
+		iowrite32(ctrl & ~BIT(0), &reg->ctrl);
+	iowrite32(value, config_reg);
+	if (ctrl & BIT(0))
+		iowrite32(ctrl, &reg->ctrl);
+}
+
+static ssize_t
+external_pps_polarity_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int err;
+
+	err = ptp_ocp_pps_require_version(bp->pps_to_ext,
+					  PPS_MASTER_VERSION_POLARITY);
+	if (err)
+		return err;
+
+	return sysfs_emit(buf, "%u\n",
+			  ioread32(&bp->pps_to_ext->polarity) & 1U);
+}
+
+static ssize_t
+external_pps_polarity_store(struct device *dev,
+			    struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool polarity;
+	int err;
+
+	err = ptp_ocp_pps_require_version(bp->pps_to_ext,
+					  PPS_MASTER_VERSION_POLARITY);
+	if (err)
+		return err;
+	err = kstrtobool(buf, &polarity);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ptp_ocp_pps_config_write(bp->pps_to_ext,
+				 &bp->pps_to_ext->polarity, polarity);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static DEVICE_ATTR_RW(external_pps_polarity);
+
+static ssize_t
+internal_pps_polarity_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int err;
+
+	err = ptp_ocp_pps_require_version(bp->pps_to_clk,
+					  PPS_SLAVE_VERSION_POLARITY);
+	if (err)
+		return err;
+
+	return sysfs_emit(buf, "%u\n",
+			  ioread32(&bp->pps_to_clk->polarity) & 1U);
+}
+
+static ssize_t
+internal_pps_polarity_store(struct device *dev,
+			    struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool polarity;
+	int err;
+
+	err = ptp_ocp_pps_require_version(bp->pps_to_clk,
+					  PPS_SLAVE_VERSION_POLARITY);
+	if (err)
+		return err;
+	err = kstrtobool(buf, &polarity);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ptp_ocp_pps_config_write(bp->pps_to_clk,
+				 &bp->pps_to_clk->polarity, polarity);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static DEVICE_ATTR_RW(internal_pps_polarity);
+
+static ssize_t
+external_pps_pulse_width_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int err;
+
+	err = ptp_ocp_pps_require_version(bp->pps_to_ext,
+					  PPS_VERSION_PULSE_WIDTH);
+	if (err)
+		return err;
+
+	return sysfs_emit(buf, "%u\n",
+			  ioread32(&bp->pps_to_ext->pulse_width));
+}
+
+static ssize_t
+external_pps_pulse_width_store(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 pulse_width;
+	int err;
+
+	err = ptp_ocp_pps_require_version(bp->pps_to_ext,
+					  PPS_VERSION_PULSE_WIDTH);
+	if (err)
+		return err;
+	err = kstrtou32(buf, 0, &pulse_width);
+	if (err)
+		return err;
+	if (pulse_width < PPS_MASTER_PULSE_WIDTH_MIN ||
+	    pulse_width > PPS_MASTER_PULSE_WIDTH_MAX)
+		return -ERANGE;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ptp_ocp_pps_config_write(bp->pps_to_ext,
+				 &bp->pps_to_ext->pulse_width, pulse_width);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static DEVICE_ATTR_RW(external_pps_pulse_width);
+
+static u32
+ptp_ocp_pps_cable_delay_mask(struct pps_reg __iomem *reg)
+{
+	return ptp_ocp_core_version_at_least(
+			&reg->version, PPS_VERSION_WIDE_CABLE_DELAY) ?
+		PPS_CABLE_DELAY_MAG_MASK : PPS_CABLE_DELAY_LEGACY_MASK;
+}
+
+static s32
+ptp_ocp_pps_cable_delay_decode(u32 reg, u32 magnitude_mask)
+{
+	s32 delay = reg & magnitude_mask;
+
+	return reg & PPS_CABLE_DELAY_SIGN ? -delay : delay;
+}
+
+static int
+ptp_ocp_pps_cable_delay_encode(s32 delay, u32 magnitude_mask, u32 *reg)
+{
+	u32 magnitude;
+
+	if (delay < -(s32)magnitude_mask || delay > (s32)magnitude_mask)
+		return -ERANGE;
+
+	magnitude = delay < 0 ? -delay : delay;
+	*reg = magnitude | (delay < 0 ? PPS_CABLE_DELAY_SIGN : 0);
+	return 0;
+}
+
 static ssize_t
 external_pps_cable_delay_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
-	u32 val;
+	s32 val;
+	int err;
 
-	val = ioread32(&bp->pps_to_ext->cable_delay);
+	err = ptp_ocp_pps_require_version(bp->pps_to_ext,
+					  PPS_MASTER_VERSION_CABLE_DELAY);
+	if (err)
+		return err;
+
+	val = ptp_ocp_pps_cable_delay_decode(
+		ioread32(&bp->pps_to_ext->cable_delay),
+		ptp_ocp_pps_cable_delay_mask(bp->pps_to_ext));
 	return sysfs_emit(buf, "%d\n", val);
 }
 
@@ -4064,15 +4841,25 @@ external_pps_cable_delay_store(struct device *dev,
 {
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
 	unsigned long flags;
+	u32 reg;
+	s32 val;
 	int err;
-	u16 val;
 
-	err = kstrtou16(buf, 0, &val);
+	err = ptp_ocp_pps_require_version(bp->pps_to_ext,
+					  PPS_MASTER_VERSION_CABLE_DELAY);
+	if (err)
+		return err;
+	err = kstrtos32(buf, 0, &val);
+	if (err)
+		return err;
+	err = ptp_ocp_pps_cable_delay_encode(
+		val, ptp_ocp_pps_cable_delay_mask(bp->pps_to_ext), &reg);
 	if (err)
 		return err;
 
 	spin_lock_irqsave(&bp->lock, flags);
-	iowrite32(val, &bp->pps_to_ext->cable_delay);
+	ptp_ocp_pps_config_write(bp->pps_to_ext,
+				 &bp->pps_to_ext->cable_delay, reg);
 	spin_unlock_irqrestore(&bp->lock, flags);
 
 	return count;
@@ -4084,9 +4871,17 @@ internal_pps_cable_delay_show(struct device *dev,
 			      struct device_attribute *attr, char *buf)
 {
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
-	u32 val;
+	s32 val;
+	int err;
 
-	val = ioread32(&bp->pps_to_clk->cable_delay);
+	err = ptp_ocp_pps_require_version(bp->pps_to_clk,
+					  FPGA_CORE_VERSION(1, 0));
+	if (err)
+		return err;
+
+	val = ptp_ocp_pps_cable_delay_decode(
+		ioread32(&bp->pps_to_clk->cable_delay),
+		ptp_ocp_pps_cable_delay_mask(bp->pps_to_clk));
 	return sysfs_emit(buf, "%d\n", val);
 }
 
@@ -4097,15 +4892,25 @@ internal_pps_cable_delay_store(struct device *dev,
 {
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
 	unsigned long flags;
+	u32 reg;
+	s32 val;
 	int err;
-	u16 val;
 
-	err = kstrtou16(buf, 0, &val);
+	err = ptp_ocp_pps_require_version(bp->pps_to_clk,
+					  FPGA_CORE_VERSION(1, 0));
+	if (err)
+		return err;
+	err = kstrtos32(buf, 0, &val);
+	if (err)
+		return err;
+	err = ptp_ocp_pps_cable_delay_encode(
+		val, ptp_ocp_pps_cable_delay_mask(bp->pps_to_clk), &reg);
 	if (err)
 		return err;
 
 	spin_lock_irqsave(&bp->lock, flags);
-	iowrite32(val, &bp->pps_to_clk->cable_delay);
+	ptp_ocp_pps_config_write(bp->pps_to_clk,
+				 &bp->pps_to_clk->cable_delay, reg);
 	spin_unlock_irqrestore(&bp->lock, flags);
 
 	return count;
@@ -4289,14 +5094,421 @@ ts_window_adjust_store(struct device *dev,
 static DEVICE_ATTR_RW(ts_window_adjust);
 
 static ssize_t
+irig_input_cable_delay_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+
+	if (!bp->irig_in)
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n",
+			  ioread32(&bp->irig_in->cable_delay) &
+			  IRIG_CABLE_DELAY_MASK);
+}
+
+static ssize_t
+irig_input_cable_delay_store(struct device *dev,
+			     struct device_attribute *attr,
+			     const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 ctrl;
+	u16 delay;
+	int err;
+
+	if (!bp->irig_in)
+		return -EOPNOTSUPP;
+
+	err = kstrtou16(buf, 0, &delay);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->irig_in->ctrl);
+	if (ctrl & IRIG_S_CTRL_ENABLE)
+		iowrite32(ctrl & ~IRIG_S_CTRL_ENABLE, &bp->irig_in->ctrl);
+	iowrite32(delay, &bp->irig_in->cable_delay);
+	if (ctrl & IRIG_S_CTRL_ENABLE)
+		iowrite32(ctrl, &bp->irig_in->ctrl);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static DEVICE_ATTR_RW(irig_input_cable_delay);
+
+static ssize_t
+dcf_input_air_delay_show(struct device *dev,
+			 struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+
+	if (!bp->dcf_in)
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n",
+			  ioread32(&bp->dcf_in->air_delay) &
+			  DCF_AIR_DELAY_MASK);
+}
+
+static ssize_t
+dcf_input_air_delay_store(struct device *dev,
+			  struct device_attribute *attr,
+			  const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 ctrl, delay;
+	int err;
+
+	if (!bp->dcf_in)
+		return -EOPNOTSUPP;
+
+	err = kstrtou32(buf, 0, &delay);
+	if (err)
+		return err;
+	if (delay > DCF_AIR_DELAY_MASK)
+		return -ERANGE;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->dcf_in->ctrl);
+	if (ctrl & DCF_S_CTRL_ENABLE)
+		iowrite32(ctrl & ~DCF_S_CTRL_ENABLE, &bp->dcf_in->ctrl);
+	iowrite32(delay, &bp->dcf_in->air_delay);
+	if (ctrl & DCF_S_CTRL_ENABLE)
+		iowrite32(ctrl, &bp->dcf_in->ctrl);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static DEVICE_ATTR_RW(dcf_input_air_delay);
+
+static ssize_t
+dcf_input_bit_position_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+
+	if (!bp->dcf_in)
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n",
+			  ioread32(&bp->dcf_in->bit_position) &
+			  DCF_BIT_POSITION_MASK);
+}
+static DEVICE_ATTR_RO(dcf_input_bit_position);
+
+enum timecode_error_index {
+	TIMECODE_ERROR_IRIG_OUTPUT,
+	TIMECODE_ERROR_IRIG_INPUT,
+	TIMECODE_ERROR_DCF_OUTPUT,
+	TIMECODE_ERROR_DCF_INPUT,
+};
+
+static u32 __iomem *
+ptp_ocp_timecode_status_reg(struct ptp_ocp *bp, unsigned int index)
+{
+	u32 __iomem *status, *version;
+
+	switch (index) {
+	case TIMECODE_ERROR_IRIG_OUTPUT:
+		if (!bp->irig_out)
+			return NULL;
+		status = &bp->irig_out->status;
+		version = &bp->irig_out->version;
+		break;
+	case TIMECODE_ERROR_IRIG_INPUT:
+		if (!bp->irig_in)
+			return NULL;
+		status = &bp->irig_in->status;
+		version = &bp->irig_in->version;
+		break;
+	case TIMECODE_ERROR_DCF_OUTPUT:
+		if (!bp->dcf_out)
+			return NULL;
+		status = &bp->dcf_out->status;
+		version = &bp->dcf_out->version;
+		break;
+	case TIMECODE_ERROR_DCF_INPUT:
+		if (!bp->dcf_in)
+			return NULL;
+		status = &bp->dcf_in->status;
+		version = &bp->dcf_in->version;
+		break;
+	default:
+		return NULL;
+	}
+
+	return ptp_ocp_core_version_at_least(version,
+					     TIMECODE_VERSION_STATUS) ?
+		status : NULL;
+}
+
+static ssize_t
+timecode_error_show(struct device *dev, struct device_attribute *attr,
+		    char *buf)
+{
+	struct dev_ext_attribute *ea = to_ext_attr(attr);
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 __iomem *status;
+
+	status = ptp_ocp_timecode_status_reg(bp, (uintptr_t)ea->var);
+	if (!status)
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n",
+			  !!(ioread32(status) & TIMECODE_STATUS_ERROR));
+}
+
+static ssize_t
+timecode_error_store(struct device *dev, struct device_attribute *attr,
+		     const char *buf, size_t count)
+{
+	struct dev_ext_attribute *ea = to_ext_attr(attr);
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 __iomem *status;
+	bool clear;
+	int err;
+
+	status = ptp_ocp_timecode_status_reg(bp, (uintptr_t)ea->var);
+	if (!status)
+		return -EOPNOTSUPP;
+
+	err = kstrtobool(buf, &clear);
+	if (err)
+		return err;
+	if (!clear)
+		return -EINVAL;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	iowrite32(TIMECODE_STATUS_ERROR, status);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+
+#define TIMECODE_ERROR_ATTR(_name, _index)				\
+	struct dev_ext_attribute dev_attr_##_name = {			\
+		__ATTR(_name, 0644, timecode_error_show,		\
+		       timecode_error_store), (void *)_index		\
+	}
+
+/* These status bits are sticky; write 1 to the corresponding file to clear. */
+static TIMECODE_ERROR_ATTR(irig_output_error, TIMECODE_ERROR_IRIG_OUTPUT);
+static TIMECODE_ERROR_ATTR(irig_input_error, TIMECODE_ERROR_IRIG_INPUT);
+static TIMECODE_ERROR_ATTR(dcf_output_error, TIMECODE_ERROR_DCF_OUTPUT);
+static TIMECODE_ERROR_ATTR(dcf_input_error, TIMECODE_ERROR_DCF_INPUT);
+
+static bool
+ptp_ocp_irig_master_core(struct ptp_ocp *bp, u32 minimum)
+{
+	return bp->irig_out &&
+		ptp_ocp_core_version_at_least(&bp->irig_out->version, minimum);
+}
+
+static bool
+ptp_ocp_irig_master_feature(struct ptp_ocp *bp, u32 minimum)
+{
+	return bp->irig_out && ptp_ocp_irig_optional_features_enabled(bp) &&
+		ptp_ocp_core_version_at_least(&bp->irig_out->version, minimum);
+}
+
+static bool
+ptp_ocp_irig_slave_core(struct ptp_ocp *bp, u32 minimum)
+{
+	return bp->irig_in &&
+		ptp_ocp_core_version_at_least(&bp->irig_in->version, minimum);
+}
+
+static bool
+ptp_ocp_irig_slave_feature(struct ptp_ocp *bp, u32 minimum)
+{
+	return bp->irig_in && ptp_ocp_irig_optional_features_enabled(bp) &&
+		ptp_ocp_core_version_at_least(&bp->irig_in->version, minimum);
+}
+
+/* Caller holds bp->lock.  Preserve reserved bits and the prior enable state. */
+static int
+ptp_ocp_irig_ctrl_update_locked(u32 __iomem *ctrl_reg, u32 mask, u32 value)
+{
+	u32 configured, ctrl, readback;
+
+	ctrl = ioread32(ctrl_reg);
+	configured = (ctrl & ~(IRIG_CTRL_ENABLE | mask)) | (value & mask);
+	iowrite32(ctrl & ~IRIG_CTRL_ENABLE, ctrl_reg);
+	iowrite32(configured, ctrl_reg);
+	if (ctrl & IRIG_CTRL_ENABLE)
+		iowrite32(configured | IRIG_CTRL_ENABLE, ctrl_reg);
+
+	readback = ioread32(ctrl_reg);
+	if ((readback & (IRIG_CTRL_ENABLE | mask)) ==
+	    ((configured & mask) | (ctrl & IRIG_CTRL_ENABLE)))
+		return 0;
+
+	/* Best-effort rollback uses the same required disabled write sequence. */
+	iowrite32(readback & ~IRIG_CTRL_ENABLE, ctrl_reg);
+	iowrite32(ctrl & ~IRIG_CTRL_ENABLE, ctrl_reg);
+	if (ctrl & IRIG_CTRL_ENABLE)
+		iowrite32(ctrl, ctrl_reg);
+	return -EIO;
+}
+
+static ssize_t
+irig_output_mode_show(struct device *dev, struct device_attribute *attr,
+		      char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 ctrl;
+
+	if (!ptp_ocp_irig_master_core(bp,
+				      IRIG_MASTER_VERSION_MODE_CONTROL))
+		return -EOPNOTSUPP;
+	ctrl = ioread32(&bp->irig_out->ctrl);
+	return sysfs_emit(buf, "%u\n",
+			  (ctrl & IRIG_CTRL_MODE_MASK) >> IRIG_CTRL_MODE_SHIFT);
+}
+
+static ssize_t
+irig_output_mode_store(struct device *dev, struct device_attribute *attr,
+		       const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u8 mode;
+	int err;
+
+	if (!ptp_ocp_irig_master_core(bp,
+				      IRIG_MASTER_VERSION_MODE_CONTROL))
+		return -EOPNOTSUPP;
+	err = kstrtou8(buf, 0, &mode);
+	if (err)
+		return err;
+	if (mode > 2)
+		return -EINVAL;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	err = ptp_ocp_irig_ctrl_update_locked(&bp->irig_out->ctrl,
+		IRIG_CTRL_MODE_MASK, (u32)mode << IRIG_CTRL_MODE_SHIFT);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return err ? err : count;
+}
+static DEVICE_ATTR_RW(irig_output_mode);
+
+static ssize_t
+irig_input_mode_show(struct device *dev, struct device_attribute *attr,
+		     char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 ctrl;
+
+	if (!ptp_ocp_irig_slave_core(bp,
+				     IRIG_SLAVE_VERSION_MODE_CONTROL))
+		return -EOPNOTSUPP;
+	ctrl = ioread32(&bp->irig_in->ctrl);
+	return sysfs_emit(buf, "%u\n",
+			  (ctrl & IRIG_CTRL_MODE_MASK) >> IRIG_CTRL_MODE_SHIFT);
+}
+
+static ssize_t
+irig_input_mode_store(struct device *dev, struct device_attribute *attr,
+		      const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u8 mode;
+	int err;
+
+	if (!ptp_ocp_irig_slave_core(bp,
+				     IRIG_SLAVE_VERSION_MODE_CONTROL))
+		return -EOPNOTSUPP;
+	err = kstrtou8(buf, 0, &mode);
+	if (err)
+		return err;
+	if (mode > 2)
+		return -EINVAL;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	err = ptp_ocp_irig_ctrl_update_locked(&bp->irig_in->ctrl,
+		IRIG_CTRL_MODE_MASK, (u32)mode << IRIG_CTRL_MODE_SHIFT);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return err ? err : count;
+}
+static DEVICE_ATTR_RW(irig_input_mode);
+
+static ssize_t
+irig_output_control_bits_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 control_bits;
+
+	if (!ptp_ocp_irig_master_feature(bp,
+					 IRIG_MASTER_VERSION_MODE_CONTROL))
+		return -EOPNOTSUPP;
+
+	control_bits = ioread32(&bp->irig_out->control_bits);
+	return sysfs_emit(buf, "0x%07x\n",
+			  control_bits & IRIG_CONTROL_BITS_MASK);
+}
+
+static ssize_t
+irig_output_control_bits_store(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 control_bits, ctrl, old_control_bits, readback;
+	int err;
+
+	if (!ptp_ocp_irig_master_feature(bp,
+					 IRIG_MASTER_VERSION_MODE_CONTROL))
+		return -EOPNOTSUPP;
+
+	err = kstrtou32(buf, 0, &control_bits);
+	if (err)
+		return err;
+	if (control_bits & ~IRIG_CONTROL_BITS_MASK)
+		return -ERANGE;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->irig_out->ctrl);
+	old_control_bits = ioread32(&bp->irig_out->control_bits);
+	iowrite32(ctrl & ~IRIG_M_CTRL_ENABLE, &bp->irig_out->ctrl);
+	iowrite32(control_bits, &bp->irig_out->control_bits);
+	if (ctrl & IRIG_M_CTRL_ENABLE)
+		iowrite32(ctrl, &bp->irig_out->ctrl);
+	readback = ioread32(&bp->irig_out->control_bits);
+	if ((readback & IRIG_CONTROL_BITS_MASK) != control_bits) {
+		iowrite32(ctrl & ~IRIG_M_CTRL_ENABLE, &bp->irig_out->ctrl);
+		iowrite32(old_control_bits, &bp->irig_out->control_bits);
+		if (ctrl & IRIG_M_CTRL_ENABLE)
+			iowrite32(ctrl, &bp->irig_out->ctrl);
+		err = -EIO;
+	}
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return err ? err : count;
+}
+static DEVICE_ATTR_RW(irig_output_control_bits);
+
+static ssize_t
 irig_b_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
 	u32 val;
 
+	if (!ptp_ocp_irig_master_core(bp,
+				      IRIG_MASTER_VERSION_MODE_CONTROL))
+		return -EOPNOTSUPP;
+
 	val = ioread32(&bp->irig_out->ctrl);
-	val = (val >> 16) & 0x07;
-	return sysfs_emit(buf, "%d\n", val);
+	val = (val & IRIG_CTRL_CODE_MASK) >> IRIG_CTRL_CODE_SHIFT;
+	return sysfs_emit(buf, "%u\n", val);
 }
 
 static ssize_t
@@ -4307,8 +5519,11 @@ irig_b_mode_store(struct device *dev,
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
 	unsigned long flags;
 	int err;
-	u32 reg;
 	u8 val;
+
+	if (!ptp_ocp_irig_master_core(bp,
+				      IRIG_MASTER_VERSION_MODE_CONTROL))
+		return -EOPNOTSUPP;
 
 	err = kstrtou8(buf, 0, &val);
 	if (err)
@@ -4316,17 +5531,227 @@ irig_b_mode_store(struct device *dev,
 	if (val > 7)
 		return -EINVAL;
 
-	reg = ((val & 0x7) << 16);
-
 	spin_lock_irqsave(&bp->lock, flags);
-	iowrite32(0, &bp->irig_out->ctrl);		/* disable */
-	iowrite32(reg, &bp->irig_out->ctrl);		/* change mode */
-	iowrite32(reg | IRIG_M_CTRL_ENABLE, &bp->irig_out->ctrl);
+	err = ptp_ocp_irig_ctrl_update_locked(&bp->irig_out->ctrl,
+		IRIG_CTRL_MODE_MASK | IRIG_CTRL_CODE_MASK,
+		IRIG_CTRL_MODE_B | ((u32)val << IRIG_CTRL_CODE_SHIFT));
 	spin_unlock_irqrestore(&bp->lock, flags);
 
-	return count;
+	return err ? err : count;
 }
 static DEVICE_ATTR_RW(irig_b_mode);
+
+static ssize_t
+irig_output_am_show(struct device *dev, struct device_attribute *attr,
+		    char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+
+	if (!ptp_ocp_irig_master_feature(bp, IRIG_MASTER_VERSION_AM))
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n",
+			  !!(ioread32(&bp->irig_out->ctrl) & IRIG_CTRL_AM));
+}
+
+static ssize_t
+irig_output_am_store(struct device *dev, struct device_attribute *attr,
+		     const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool am;
+	int err;
+
+	if (!ptp_ocp_irig_master_feature(bp, IRIG_MASTER_VERSION_AM))
+		return -EOPNOTSUPP;
+	err = kstrtobool(buf, &am);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	err = ptp_ocp_irig_ctrl_update_locked(&bp->irig_out->ctrl,
+		IRIG_CTRL_AM, am ? IRIG_CTRL_AM : 0);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return err ? err : count;
+}
+static DEVICE_ATTR_RW(irig_output_am);
+
+static ssize_t
+irig_input_code_show(struct device *dev, struct device_attribute *attr,
+		     char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 ctrl;
+
+	if (!ptp_ocp_irig_slave_feature(bp,
+					IRIG_SLAVE_VERSION_CODE_YEAR))
+		return -EOPNOTSUPP;
+	ctrl = ioread32(&bp->irig_in->ctrl);
+	return sysfs_emit(buf, "%u\n",
+			  (ctrl & IRIG_CTRL_CODE_MASK) >> IRIG_CTRL_CODE_SHIFT);
+}
+
+static ssize_t
+irig_input_code_store(struct device *dev, struct device_attribute *attr,
+		      const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u8 code;
+	int err;
+
+	if (!ptp_ocp_irig_slave_feature(bp,
+					IRIG_SLAVE_VERSION_CODE_YEAR))
+		return -EOPNOTSUPP;
+	err = kstrtou8(buf, 0, &code);
+	if (err)
+		return err;
+	if (code > 7)
+		return -EINVAL;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	err = ptp_ocp_irig_ctrl_update_locked(&bp->irig_in->ctrl,
+		IRIG_CTRL_CODE_MASK, (u32)code << IRIG_CTRL_CODE_SHIFT);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return err ? err : count;
+}
+static DEVICE_ATTR_RW(irig_input_code);
+
+static ssize_t
+irig_input_manual_year_show(struct device *dev,
+			    struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+
+	if (!ptp_ocp_irig_slave_feature(bp,
+					IRIG_SLAVE_VERSION_CODE_YEAR))
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n",
+			  ioread32(&bp->irig_in->year) & IRIG_YEAR_MASK);
+}
+
+static ssize_t
+irig_input_manual_year_store(struct device *dev,
+			     struct device_attribute *attr,
+			     const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 configured, ctrl, old_year, readback, year;
+	int err;
+
+	if (!ptp_ocp_irig_slave_feature(bp,
+					IRIG_SLAVE_VERSION_CODE_YEAR))
+		return -EOPNOTSUPP;
+	err = kstrtou32(buf, 0, &year);
+	if (err)
+		return err;
+	if (year < IRIG_YEAR_MIN || year > IRIG_YEAR_MAX)
+		return -ERANGE;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->irig_in->ctrl);
+	old_year = ioread32(&bp->irig_in->year) & IRIG_YEAR_MASK;
+	configured = ctrl & ~(IRIG_S_CTRL_ENABLE |
+			      IRIG_SLAVE_CTRL_YEAR_VALID);
+	iowrite32(configured, &bp->irig_in->ctrl);
+	iowrite32(year, &bp->irig_in->year);
+	readback = ioread32(&bp->irig_in->year) & IRIG_YEAR_MASK;
+	if (readback != year) {
+		err = -EIO;
+		goto rollback;
+	}
+
+	/* YEAR_VALID is a self-clearing strobe that latches the new year. */
+	iowrite32(configured | IRIG_SLAVE_CTRL_YEAR_VALID,
+		  &bp->irig_in->ctrl);
+	(void)ioread32(&bp->irig_in->ctrl); /* flush the strobe before restore */
+	if (ctrl & IRIG_S_CTRL_ENABLE)
+		iowrite32(configured | IRIG_S_CTRL_ENABLE,
+			  &bp->irig_in->ctrl);
+	else
+		iowrite32(configured, &bp->irig_in->ctrl);
+	readback = ioread32(&bp->irig_in->ctrl);
+	if ((readback & IRIG_S_CTRL_ENABLE) ==
+	    (ctrl & IRIG_S_CTRL_ENABLE)) {
+		spin_unlock_irqrestore(&bp->lock, flags);
+		return count;
+	}
+
+	err = -EIO;
+rollback:
+	iowrite32(configured, &bp->irig_in->ctrl);
+	iowrite32(old_year, &bp->irig_in->year);
+	iowrite32(configured | IRIG_SLAVE_CTRL_YEAR_VALID,
+		  &bp->irig_in->ctrl);
+	(void)ioread32(&bp->irig_in->ctrl);
+	iowrite32(ctrl & ~IRIG_SLAVE_CTRL_YEAR_VALID, &bp->irig_in->ctrl);
+	spin_unlock_irqrestore(&bp->lock, flags);
+	return err;
+}
+static DEVICE_ATTR_RW(irig_input_manual_year);
+
+static ssize_t
+irig_input_am_show(struct device *dev, struct device_attribute *attr,
+		   char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+
+	if (!ptp_ocp_irig_slave_feature(bp, IRIG_SLAVE_VERSION_AM))
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n",
+			  !!(ioread32(&bp->irig_in->ctrl) & IRIG_CTRL_AM));
+}
+
+static ssize_t
+irig_input_am_store(struct device *dev, struct device_attribute *attr,
+		    const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool am;
+	int err;
+
+	if (!ptp_ocp_irig_slave_feature(bp, IRIG_SLAVE_VERSION_AM))
+		return -EOPNOTSUPP;
+	err = kstrtobool(buf, &am);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	err = ptp_ocp_irig_ctrl_update_locked(&bp->irig_in->ctrl,
+		IRIG_CTRL_AM, am ? IRIG_CTRL_AM : 0);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return err ? err : count;
+}
+static DEVICE_ATTR_RW(irig_input_am);
+
+static ssize_t
+optional_image_contract_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 actual, expected = 0;
+	bool targeted;
+
+	if (!bp->image)
+		return -EOPNOTSUPP;
+	actual = ioread32(&bp->image->version);
+	targeted = ptp_ocp_optional_image_contract_expected(bp, &expected);
+
+	return sysfs_emit(buf,
+		"pci=%s actual=0x%08x expected=0x%08x targeted=%u match=%u loader=%u\n",
+		pci_name(bp->pdev), actual, expected, targeted ? 1U : 0U,
+		ptp_ocp_optional_image_contract_matches(bp) ? 1U : 0U,
+		bp->fw_loader ? 1U : 0U);
+}
+static DEVICE_ATTR_RO(optional_image_contract);
 
 static ssize_t
 clock_source_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -4377,6 +5802,9 @@ clock_status_drift_show(struct device *dev,
 	u32 val;
 	int res;
 
+	if (!ptp_ocp_clock_optional_registers_enabled(bp))
+		return -EOPNOTSUPP;
+
 	val = ioread32(&bp->reg->status_drift);
 	res = (val & ~INT_MAX) ? -1 : 1;
 	res *= (val & INT_MAX);
@@ -4392,12 +5820,521 @@ clock_status_offset_show(struct device *dev,
 	u32 val;
 	int res;
 
+	if (!ptp_ocp_clock_optional_registers_enabled(bp))
+		return -EOPNOTSUPP;
+
 	val = ioread32(&bp->reg->status_offset);
 	res = (val & ~INT_MAX) ? -1 : 1;
 	res *= (val & INT_MAX);
 	return sysfs_emit(buf, "%d\n", res);
 }
 static DEVICE_ATTR_RO(clock_status_offset);
+
+static int
+ptp_ocp_nmea_require_version(struct ptp_ocp *bp, u32 minimum,
+			     u32 *version)
+{
+	u32 value;
+
+	if (!bp->nmea_out)
+		return -EOPNOTSUPP;
+	value = ioread32(&bp->nmea_out->version);
+	if (!value || value == U32_MAX || value < minimum)
+		return -EOPNOTSUPP;
+	if (version)
+		*version = value;
+	return 0;
+}
+
+static u32
+ptp_ocp_nmea_message_mask(u32 version)
+{
+	u32 mask = TOD_MASTER_DISABLE_ZDA;
+
+	if (version >= TOD_MASTER_VERSION_RMC)
+		mask |= TOD_MASTER_DISABLE_RMC;
+	if (version >= TOD_MASTER_VERSION_UTC)
+		mask |= TOD_MASTER_DISABLE_UTC;
+	return mask;
+}
+
+static int
+ptp_ocp_nmea_ctrl_update_locked(struct ptp_ocp *bp, u32 mask, u32 value)
+{
+	u32 configured, ctrl, expected;
+
+	ctrl = ioread32(&bp->nmea_out->ctrl);
+	configured = (ctrl & ~(TOD_MASTER_CTRL_ENABLE | mask)) |
+		     (value & mask);
+	expected = configured | (ctrl & TOD_MASTER_CTRL_ENABLE);
+	iowrite32(ctrl & ~TOD_MASTER_CTRL_ENABLE, &bp->nmea_out->ctrl);
+	iowrite32(configured, &bp->nmea_out->ctrl);
+	if (ctrl & TOD_MASTER_CTRL_ENABLE)
+		iowrite32(expected, &bp->nmea_out->ctrl);
+	ctrl = ioread32(&bp->nmea_out->ctrl);
+	return (ctrl & (mask | TOD_MASTER_CTRL_ENABLE)) ==
+	       (expected & (mask | TOD_MASTER_CTRL_ENABLE)) ? 0 : -EIO;
+}
+
+static ssize_t
+nmea_enable_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), NULL);
+	if (err)
+		return err;
+	return sysfs_emit(buf, "%u\n",
+			  !!(ioread32(&bp->nmea_out->ctrl) &
+			     TOD_MASTER_CTRL_ENABLE));
+}
+
+static ssize_t
+nmea_enable_store(struct device *dev, struct device_attribute *attr,
+		  const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool enable;
+	u32 ctrl, readback;
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), NULL);
+	if (err)
+		return err;
+	err = kstrtobool(buf, &enable);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->nmea_out->ctrl);
+	ctrl = enable ? ctrl | TOD_MASTER_CTRL_ENABLE :
+			ctrl & ~TOD_MASTER_CTRL_ENABLE;
+	iowrite32(ctrl, &bp->nmea_out->ctrl);
+	readback = ioread32(&bp->nmea_out->ctrl);
+	spin_unlock_irqrestore(&bp->lock, flags);
+	if (!!(readback & TOD_MASTER_CTRL_ENABLE) != enable)
+		return -EIO;
+	return count;
+}
+static DEVICE_ATTR_RW(nmea_enable);
+
+static ssize_t
+nmea_uart_polarity_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp,
+		TOD_MASTER_VERSION_POLARITY, NULL);
+	if (err)
+		return err;
+	/* Raw FPGA convention: one is normal, zero is inverted. */
+	return sysfs_emit(buf, "%u\n",
+			  ioread32(&bp->nmea_out->uart_polarity) & 1U);
+}
+
+static ssize_t
+nmea_uart_polarity_store(struct device *dev,
+			 struct device_attribute *attr,
+			 const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool polarity;
+	u32 ctrl, readback_ctrl, readback_value, value;
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp,
+		TOD_MASTER_VERSION_POLARITY, NULL);
+	if (err)
+		return err;
+	err = kstrtobool(buf, &polarity);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->nmea_out->ctrl);
+	iowrite32(ctrl & ~TOD_MASTER_CTRL_ENABLE, &bp->nmea_out->ctrl);
+	value = ioread32(&bp->nmea_out->uart_polarity);
+	value = (value & ~1U) | polarity;
+	iowrite32(value, &bp->nmea_out->uart_polarity);
+	if (ctrl & TOD_MASTER_CTRL_ENABLE)
+		iowrite32(ctrl, &bp->nmea_out->ctrl);
+	readback_value = ioread32(&bp->nmea_out->uart_polarity);
+	readback_ctrl = ioread32(&bp->nmea_out->ctrl);
+	spin_unlock_irqrestore(&bp->lock, flags);
+	if ((readback_value & 1U) != polarity ||
+	    (readback_ctrl & TOD_MASTER_CTRL_ENABLE) !=
+	    (ctrl & TOD_MASTER_CTRL_ENABLE))
+		return -EIO;
+	return count;
+}
+static DEVICE_ATTR_RW(nmea_uart_polarity);
+
+static ssize_t
+nmea_baud_rate_show(struct device *dev, struct device_attribute *attr,
+		    char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	const char *name;
+	u32 selector;
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), NULL);
+	if (err)
+		return err;
+	selector = ioread32(&bp->nmea_out->uart_baud) & TOD_UART_BAUD_MASK;
+	name = ptp_ocp_select_name_from_val(ptp_ocp_tod_baud_rates, selector);
+	return sysfs_emit(buf, "%s\n", name ? name : "UNKNOWN");
+}
+
+static ssize_t
+nmea_baud_rate_store(struct device *dev, struct device_attribute *attr,
+		     const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 ctrl, readback_ctrl, readback_value, value;
+	int err, selector;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), NULL);
+	if (err)
+		return err;
+	selector = ptp_ocp_select_val_from_name(ptp_ocp_tod_baud_rates, buf);
+	if (selector < 0)
+		return selector;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->nmea_out->ctrl);
+	iowrite32(ctrl & ~TOD_MASTER_CTRL_ENABLE, &bp->nmea_out->ctrl);
+	value = ioread32(&bp->nmea_out->uart_baud);
+	value = (value & ~TOD_UART_BAUD_MASK) |
+		((u32)selector & TOD_UART_BAUD_MASK);
+	iowrite32(value, &bp->nmea_out->uart_baud);
+	if (ctrl & TOD_MASTER_CTRL_ENABLE)
+		iowrite32(ctrl, &bp->nmea_out->ctrl);
+	readback_value = ioread32(&bp->nmea_out->uart_baud);
+	readback_ctrl = ioread32(&bp->nmea_out->ctrl);
+	spin_unlock_irqrestore(&bp->lock, flags);
+	if ((readback_value & TOD_UART_BAUD_MASK) != (u32)selector ||
+	    (readback_ctrl & TOD_MASTER_CTRL_ENABLE) !=
+	    (ctrl & TOD_MASTER_CTRL_ENABLE))
+		return -EIO;
+	return count;
+}
+static DEVICE_ATTR_RW(nmea_baud_rate);
+
+static ssize_t
+available_nmea_baud_rates_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), NULL);
+	if (err)
+		return err;
+	return ptp_ocp_select_table_show(ptp_ocp_tod_baud_rates, buf);
+}
+static DEVICE_ATTR_RO(available_nmea_baud_rates);
+
+static ssize_t
+nmea_errors_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp,
+		TOD_MASTER_VERSION_STATUS, NULL);
+	if (err)
+		return err;
+	return sysfs_emit(buf, "0x%x\n",
+			  ioread32(&bp->nmea_out->status) &
+			  TOD_MASTER_STATUS_ERROR);
+}
+
+static ssize_t
+nmea_errors_store(struct device *dev, struct device_attribute *attr,
+		  const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 errors;
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp,
+		TOD_MASTER_VERSION_STATUS, NULL);
+	if (err)
+		return err;
+	err = kstrtou32(buf, 0, &errors);
+	if (err)
+		return err;
+	if (errors != TOD_MASTER_STATUS_ERROR)
+		return -EINVAL;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	iowrite32(errors, &bp->nmea_out->status);
+	spin_unlock_irqrestore(&bp->lock, flags);
+	return count;
+}
+static DEVICE_ATTR_RW(nmea_errors);
+
+static ssize_t
+nmea_correction_seconds_show(struct device *dev,
+			     struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 value;
+	int correction, err;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), NULL);
+	if (err)
+		return err;
+	value = ioread32(&bp->nmea_out->adj_sec);
+	correction = value & INT_MAX;
+	if (value & BIT(31))
+		correction = -correction;
+	return sysfs_emit(buf, "%d\n", correction);
+}
+
+static ssize_t
+nmea_correction_seconds_store(struct device *dev,
+			      struct device_attribute *attr,
+			      const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 ctrl, encoded, magnitude, readback_ctrl, readback_value;
+	int correction, err;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), NULL);
+	if (err)
+		return err;
+	err = kstrtoint(buf, 0, &correction);
+	if (err)
+		return err;
+	if (correction == INT_MIN)
+		return -ERANGE;
+	magnitude = correction < 0 ? -correction : correction;
+	encoded = magnitude | (correction < 0 ? BIT(31) : 0);
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->nmea_out->ctrl);
+	iowrite32(ctrl & ~TOD_MASTER_CTRL_ENABLE, &bp->nmea_out->ctrl);
+	iowrite32(encoded, &bp->nmea_out->adj_sec);
+	if (ctrl & TOD_MASTER_CTRL_ENABLE)
+		iowrite32(ctrl, &bp->nmea_out->ctrl);
+	readback_value = ioread32(&bp->nmea_out->adj_sec);
+	readback_ctrl = ioread32(&bp->nmea_out->ctrl);
+	spin_unlock_irqrestore(&bp->lock, flags);
+	if (readback_value != encoded ||
+	    (readback_ctrl & TOD_MASTER_CTRL_ENABLE) !=
+	    (ctrl & TOD_MASTER_CTRL_ENABLE))
+		return -EIO;
+	return count;
+}
+static DEVICE_ATTR_RW(nmea_correction_seconds);
+
+static ssize_t
+nmea_local_offset_minutes_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 hours, minutes, value;
+	int result;
+
+	if (ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), NULL))
+		return -EOPNOTSUPP;
+	value = ioread32(&bp->nmea_out->local_offset);
+	hours = (value & TOD_MASTER_LOCAL_HOUR_MASK) >>
+		TOD_MASTER_LOCAL_HOUR_SHIFT;
+	minutes = value & TOD_MASTER_LOCAL_MINUTE_MASK;
+	if (hours > 13 || minutes > 59)
+		return -EIO;
+	result = hours * 60 + minutes;
+	if (value & TOD_MASTER_LOCAL_SIGN)
+		result = -result;
+	return sysfs_emit(buf, "%d\n", result);
+}
+
+static ssize_t
+nmea_local_offset_minutes_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 ctrl, magnitude, readback_ctrl, readback_value, value;
+	int minutes, err;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), NULL);
+	if (err)
+		return err;
+	err = kstrtoint(buf, 0, &minutes);
+	if (err)
+		return err;
+	if (minutes < -TOD_MASTER_LOCAL_MAX_MINUTES ||
+	    minutes > TOD_MASTER_LOCAL_MAX_MINUTES)
+		return -ERANGE;
+	magnitude = minutes < 0 ? -minutes : minutes;
+	value = ((magnitude / 60) << TOD_MASTER_LOCAL_HOUR_SHIFT) |
+		(magnitude % 60) |
+		(minutes < 0 ? TOD_MASTER_LOCAL_SIGN : 0);
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->nmea_out->ctrl);
+	iowrite32(ctrl & ~TOD_MASTER_CTRL_ENABLE, &bp->nmea_out->ctrl);
+	iowrite32(value, &bp->nmea_out->local_offset);
+	if (ctrl & TOD_MASTER_CTRL_ENABLE)
+		iowrite32(ctrl, &bp->nmea_out->ctrl);
+	readback_value = ioread32(&bp->nmea_out->local_offset);
+	readback_ctrl = ioread32(&bp->nmea_out->ctrl);
+	spin_unlock_irqrestore(&bp->lock, flags);
+	if (readback_value != value ||
+	    (readback_ctrl & TOD_MASTER_CTRL_ENABLE) !=
+	    (ctrl & TOD_MASTER_CTRL_ENABLE))
+		return -EIO;
+	return count;
+}
+static DEVICE_ATTR_RW(nmea_local_offset_minutes);
+
+static ssize_t
+nmea_gnss_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	const char *name;
+	u32 value;
+
+	if (ptp_ocp_nmea_require_version(bp, TOD_MASTER_VERSION_GNSS, NULL))
+		return -EOPNOTSUPP;
+	value = (ioread32(&bp->nmea_out->ctrl) & TOD_MASTER_CTRL_GNSS_MASK) >>
+		TOD_MASTER_CTRL_GNSS_SHIFT;
+	name = ptp_ocp_select_name_from_val(ptp_ocp_nmea_gnss, value);
+	return sysfs_emit(buf, "%s\n", name ? name : "UNKNOWN");
+}
+
+static ssize_t
+nmea_gnss_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	int err, value;
+
+	err = ptp_ocp_nmea_require_version(bp, TOD_MASTER_VERSION_GNSS, NULL);
+	if (err)
+		return err;
+	value = ptp_ocp_select_val_from_name(ptp_ocp_nmea_gnss, buf);
+	if (value < 0)
+		return value;
+	spin_lock_irqsave(&bp->lock, flags);
+	err = ptp_ocp_nmea_ctrl_update_locked(bp,
+		TOD_MASTER_CTRL_GNSS_MASK,
+		(u32)value << TOD_MASTER_CTRL_GNSS_SHIFT);
+	spin_unlock_irqrestore(&bp->lock, flags);
+	return err ? err : count;
+}
+static DEVICE_ATTR_RW(nmea_gnss);
+
+static ssize_t
+available_nmea_gnss_show(struct device *dev,
+			 struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+
+	if (ptp_ocp_nmea_require_version(bp, TOD_MASTER_VERSION_GNSS, NULL))
+		return -EOPNOTSUPP;
+	return ptp_ocp_select_table_show(ptp_ocp_nmea_gnss, buf);
+}
+static DEVICE_ATTR_RO(available_nmea_gnss);
+
+static ssize_t
+nmea_message_disable_mask_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 ctrl, mask, version;
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), &version);
+	if (err)
+		return err;
+	mask = ptp_ocp_nmea_message_mask(version);
+	ctrl = ioread32(&bp->nmea_out->ctrl);
+	return sysfs_emit(buf, "0x%02x\n",
+		(ctrl >> TOD_MASTER_CTRL_MESSAGE_SHIFT) & mask);
+}
+
+static ssize_t
+nmea_message_disable_mask_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 mask, register_mask, version;
+	u8 value;
+	int err;
+
+	err = ptp_ocp_nmea_require_version(bp, FPGA_CORE_VERSION(1, 0), &version);
+	if (err)
+		return err;
+	err = kstrtou8(buf, 0, &value);
+	if (err)
+		return err;
+	mask = ptp_ocp_nmea_message_mask(version);
+	if (value & ~mask)
+		return -EOPNOTSUPP;
+	register_mask = mask << TOD_MASTER_CTRL_MESSAGE_SHIFT;
+	spin_lock_irqsave(&bp->lock, flags);
+	err = ptp_ocp_nmea_ctrl_update_locked(bp, register_mask,
+		(u32)value << TOD_MASTER_CTRL_MESSAGE_SHIFT);
+	spin_unlock_irqrestore(&bp->lock, flags);
+	return err ? err : count;
+}
+static DEVICE_ATTR_RW(nmea_message_disable_mask);
+
+static bool
+ptp_ocp_tod_protocol_supported(u32 version, int protocol)
+{
+	if (!version || version == U32_MAX)
+		return false;
+
+	switch (protocol) {
+	case 0: /* NMEA */
+		return true;
+	case 1: /* UBX */
+		return version >= TOD_VERSION_UBX;
+	case 2: /* TSIP */
+		return version >= TOD_VERSION_TSIP;
+	case 3: /* ESIP */
+		return version >= TOD_VERSION_ESIP;
+	case 4: /* PFEC */
+		return version >= TOD_VERSION_PFEC;
+	default:
+		return false;
+	}
+}
+
+static void
+ptp_ocp_tod_ctrl_update_locked(struct ptp_ocp *bp, u32 mask, u32 value)
+{
+	u32 configured, ctrl;
+
+	ctrl = ioread32(&bp->tod->ctrl);
+	configured = (ctrl & ~(TOD_CTRL_ENABLE | mask)) | (value & mask);
+
+	/* Configuration fields may only change while the core is disabled. */
+	iowrite32(ctrl & ~TOD_CTRL_ENABLE, &bp->tod->ctrl);
+	iowrite32(configured, &bp->tod->ctrl);
+	if (ctrl & TOD_CTRL_ENABLE)
+		iowrite32(configured | TOD_CTRL_ENABLE, &bp->tod->ctrl);
+}
+
+static int ptp_ocp_tod_message_mask(u32 version, u32 ctrl,
+				    u32 *register_mask);
 
 static ssize_t
 tod_protocol_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -4406,11 +6343,14 @@ tod_protocol_show(struct device *dev, struct device_attribute *attr, char *buf)
 	const char *p;
 	u32 select;
 
+	if (!bp->tod)
+		return -EOPNOTSUPP;
+
 	select = ioread32(&bp->tod->ctrl);
 	select = (select >> TOD_CTRL_PROTOCOL_SHIFT) & TOD_CTRL_PROTOCOL_MASK;
 	p = ptp_ocp_select_name_from_val(ptp_ocp_tod_protocol, select);
 
-	return sysfs_emit(buf, "%s\n", p);
+	return sysfs_emit(buf, "%s\n", p ? p : "UNKNOWN");
 }
 
 static ssize_t
@@ -4419,19 +6359,32 @@ tod_protocol_store(struct device *dev, struct device_attribute *attr,
 {
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
 	unsigned long flags;
-	u32 ctrl_reg;
+	u32 ctrl, message_mask, protocol_mask, version;
 	int val;
+
+	if (!bp->tod)
+		return -EOPNOTSUPP;
 
 	val = ptp_ocp_select_val_from_name(ptp_ocp_tod_protocol, buf);
 	if (val < 0)
 		return val;
+	version = ioread32(&bp->tod->version);
+	if (!ptp_ocp_tod_protocol_supported(version, val))
+		return -EOPNOTSUPP;
 
-	ctrl_reg = ioread32(&bp->tod->ctrl);
-	ctrl_reg &= ~(TOD_CTRL_PROTOCOL_MASK << TOD_CTRL_PROTOCOL_SHIFT);
-	ctrl_reg |= (val & TOD_CTRL_PROTOCOL_MASK) << TOD_CTRL_PROTOCOL_SHIFT;
-
+	protocol_mask = TOD_CTRL_PROTOCOL_MASK << TOD_CTRL_PROTOCOL_SHIFT;
 	spin_lock_irqsave(&bp->lock, flags);
-	iowrite32(ctrl_reg, &bp->tod->ctrl);
+	ctrl = ioread32(&bp->tod->ctrl);
+	ctrl = (ctrl & ~protocol_mask) |
+		((u32)val << TOD_CTRL_PROTOCOL_SHIFT);
+	if (ptp_ocp_tod_message_mask(version, ctrl, &message_mask)) {
+		spin_unlock_irqrestore(&bp->lock, flags);
+		return -EOPNOTSUPP;
+	}
+	/* Do not carry message-disable bits that the new parser cannot use. */
+	ptp_ocp_tod_ctrl_update_locked(bp,
+		protocol_mask | TOD_CTRL_DISABLE_MESSAGE_MASK,
+		(ctrl & protocol_mask) | (ctrl & message_mask));
 	spin_unlock_irqrestore(&bp->lock, flags);
 
 	return count;
@@ -4442,9 +6395,285 @@ static ssize_t
 available_tod_protocols_show(struct device *dev,
 			     struct device_attribute *attr, char *buf)
 {
-	return ptp_ocp_select_table_show(ptp_ocp_tod_protocol, buf);
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	ssize_t count = 0;
+	u32 version;
+	int i;
+
+	if (!bp->tod)
+		return -EOPNOTSUPP;
+	version = ioread32(&bp->tod->version);
+
+	for (i = 0; ptp_ocp_tod_protocol[i].name; i++) {
+		if (!ptp_ocp_tod_protocol_supported(
+				version, ptp_ocp_tod_protocol[i].value))
+			continue;
+		count += sysfs_emit_at(buf, count, "%s ",
+				       ptp_ocp_tod_protocol[i].name);
+	}
+	if (count)
+		count--;
+	count += sysfs_emit_at(buf, count, "\n");
+	return count;
 }
 static DEVICE_ATTR_RO(available_tod_protocols);
+
+static ssize_t
+tod_gnss_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	const char *name;
+	u32 select;
+
+	if (!bp->tod ||
+	    !ptp_ocp_core_version_at_least(&bp->tod->version,
+					    TOD_VERSION_GNSS_SELECT))
+		return -EOPNOTSUPP;
+
+	select = ioread32(&bp->tod->ctrl);
+	select = (select >> TOD_CTRL_GNSS_SHIFT) & TOD_CTRL_GNSS_MASK;
+	name = ptp_ocp_select_name_from_val(ptp_ocp_tod_gnss, select);
+
+	return sysfs_emit(buf, "%s\n", name ? name : "UNKNOWN");
+}
+
+static ssize_t
+tod_gnss_store(struct device *dev, struct device_attribute *attr,
+	       const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	int select;
+
+	if (!bp->tod ||
+	    !ptp_ocp_core_version_at_least(&bp->tod->version,
+					    TOD_VERSION_GNSS_SELECT))
+		return -EOPNOTSUPP;
+
+	select = ptp_ocp_select_val_from_name(ptp_ocp_tod_gnss, buf);
+	if (select < 0)
+		return select;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ptp_ocp_tod_ctrl_update_locked(bp,
+		TOD_CTRL_GNSS_MASK << TOD_CTRL_GNSS_SHIFT,
+		(u32)select << TOD_CTRL_GNSS_SHIFT);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static DEVICE_ATTR_RW(tod_gnss);
+
+static ssize_t
+available_tod_gnss_show(struct device *dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+
+	if (!bp->tod ||
+	    !ptp_ocp_core_version_at_least(&bp->tod->version,
+					    TOD_VERSION_GNSS_SELECT))
+		return -EOPNOTSUPP;
+
+	return ptp_ocp_select_table_show(ptp_ocp_tod_gnss, buf);
+}
+static DEVICE_ATTR_RO(available_tod_gnss);
+
+static int
+ptp_ocp_tod_message_mask(u32 version, u32 ctrl, u32 *register_mask)
+{
+	u32 mask, protocol;
+
+	protocol = (ctrl >> TOD_CTRL_PROTOCOL_SHIFT) & TOD_CTRL_PROTOCOL_MASK;
+	if (!ptp_ocp_tod_protocol_supported(version, protocol))
+		return -EOPNOTSUPP;
+
+	switch (protocol) {
+	case 0: /* NMEA: GxGNS/status message arrived in version 2.0. */
+		mask = version >= TOD_VERSION_NMEA_STATUS_MESSAGE ?
+			TOD_MESSAGE_NMEA_FULL_MASK : TOD_MESSAGE_NMEA_BASE_MASK;
+		break;
+	case 1: /* UBX GNSS telemetry messages arrived in version 1.7. */
+		mask = version >= TOD_VERSION_GNSS_TELEMETRY ?
+			TOD_MESSAGE_UBX_FULL_MASK : TOD_MESSAGE_UBX_BASE_MASK;
+		break;
+	case 2:
+		mask = TOD_MESSAGE_TSIP_MASK;
+		break;
+	case 3:
+		mask = TOD_MESSAGE_ESIP_MASK;
+		break;
+	case 4:
+		mask = TOD_MESSAGE_PFEC_MASK;
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+
+	*register_mask = mask << TOD_CTRL_DISABLE_MESSAGE_SHIFT;
+	return 0;
+}
+
+static ssize_t
+tod_message_disable_mask_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 ctrl, mask, version;
+	int err;
+
+	if (!bp->tod)
+		return -EOPNOTSUPP;
+
+	version = ioread32(&bp->tod->version);
+	ctrl = ioread32(&bp->tod->ctrl);
+	err = ptp_ocp_tod_message_mask(version, ctrl, &mask);
+	if (err)
+		return err;
+
+	return sysfs_emit(buf, "0x%02x\n",
+			  (ctrl & mask) >> TOD_CTRL_DISABLE_MESSAGE_SHIFT);
+}
+
+static ssize_t
+tod_message_disable_mask_store(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 ctrl, mask, version;
+	u8 disable_mask;
+	int err;
+
+	if (!bp->tod)
+		return -EOPNOTSUPP;
+
+	err = kstrtou8(buf, 0, &disable_mask);
+	if (err)
+		return err;
+	version = ioread32(&bp->tod->version);
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->tod->ctrl);
+	err = ptp_ocp_tod_message_mask(version, ctrl, &mask);
+	if (err) {
+		spin_unlock_irqrestore(&bp->lock, flags);
+		return err;
+	}
+	if (disable_mask & ~(mask >> TOD_CTRL_DISABLE_MESSAGE_SHIFT)) {
+		spin_unlock_irqrestore(&bp->lock, flags);
+		return -EOPNOTSUPP;
+	}
+	ptp_ocp_tod_ctrl_update_locked(
+		bp, TOD_CTRL_DISABLE_MESSAGE_MASK,
+		(u32)disable_mask << TOD_CTRL_DISABLE_MESSAGE_SHIFT);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static DEVICE_ATTR_RW(tod_message_disable_mask);
+
+static ssize_t
+tod_uart_polarity_show(struct device *dev,
+		       struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+
+	if (!bp->tod ||
+	    !ptp_ocp_core_version_at_least(&bp->tod->version,
+					    TOD_VERSION_POLARITY))
+		return -EOPNOTSUPP;
+
+	return sysfs_emit(buf, "%u\n",
+			  ioread32(&bp->tod->uart_polarity) & 1U);
+}
+
+static ssize_t
+tod_uart_polarity_store(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	bool polarity;
+	u32 ctrl;
+	int err;
+
+	if (!bp->tod ||
+	    !ptp_ocp_core_version_at_least(&bp->tod->version,
+					    TOD_VERSION_POLARITY))
+		return -EOPNOTSUPP;
+
+	err = kstrtobool(buf, &polarity);
+	if (err)
+		return err;
+
+	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->tod->ctrl);
+	iowrite32(ctrl & ~TOD_CTRL_ENABLE, &bp->tod->ctrl);
+	iowrite32(polarity, &bp->tod->uart_polarity);
+	if (ctrl & TOD_CTRL_ENABLE)
+		iowrite32(ctrl, &bp->tod->ctrl);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static DEVICE_ATTR_RW(tod_uart_polarity);
+
+static u32
+ptp_ocp_tod_error_mask(u32 version)
+{
+	return version >= TOD_VERSION_ALL_ERRORS ? TOD_STATUS_ERROR_MASK :
+		TOD_STATUS_PARSE_ERROR;
+}
+
+static ssize_t
+tod_errors_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	u32 mask, version;
+
+	if (!bp->tod)
+		return -EOPNOTSUPP;
+	version = ioread32(&bp->tod->version);
+	if (!version || version == U32_MAX || version < TOD_VERSION_STATUS)
+		return -EOPNOTSUPP;
+	mask = ptp_ocp_tod_error_mask(version);
+
+	return sysfs_emit(buf, "0x%x\n", ioread32(&bp->tod->status) & mask);
+}
+
+static ssize_t
+tod_errors_store(struct device *dev, struct device_attribute *attr,
+		 const char *buf, size_t count)
+{
+	struct ptp_ocp *bp = dev_get_drvdata(dev);
+	unsigned long flags;
+	u32 errors, mask, version;
+	int err;
+
+	if (!bp->tod)
+		return -EOPNOTSUPP;
+	version = ioread32(&bp->tod->version);
+	if (!version || version == U32_MAX || version < TOD_VERSION_STATUS)
+		return -EOPNOTSUPP;
+
+	err = kstrtou32(buf, 0, &errors);
+	if (err)
+		return err;
+	mask = ptp_ocp_tod_error_mask(version);
+	if (!errors || (errors & ~mask))
+		return -EINVAL;
+
+	/* The requested sticky status bits are write-one-to-clear. */
+	spin_lock_irqsave(&bp->lock, flags);
+	iowrite32(errors, &bp->tod->status);
+	spin_unlock_irqrestore(&bp->lock, flags);
+
+	return count;
+}
+static DEVICE_ATTR_RW(tod_errors);
 
 static ssize_t
 tod_baud_rate_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -4466,32 +6695,25 @@ tod_baud_rate_store(struct device *dev, struct device_attribute *attr,
 {
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
 	unsigned long flags;
-	u32 uart_baud_reg;
-	u32 ctrl_reg;
+	u32 uart_baud_reg, ctrl_reg, enable;
 	int val;
 
 	val = ptp_ocp_select_val_from_name(ptp_ocp_tod_baud_rates, buf);
 	if (val < 0)
 		return val;
 
-	// When overwriting the UART baud rate the TOD Slave must get restarted
-	ctrl_reg = ioread32(&bp->tod->ctrl);
-	ctrl_reg &= ~TOD_CTRL_ENABLE;
-
 	spin_lock_irqsave(&bp->lock, flags);
+	ctrl_reg = ioread32(&bp->tod->ctrl);
+	enable = ctrl_reg & TOD_CTRL_ENABLE;
+	ctrl_reg &= ~TOD_CTRL_ENABLE;
 	iowrite32(ctrl_reg, &bp->tod->ctrl);
-	spin_unlock_irqrestore(&bp->lock, flags);
 
 	uart_baud_reg = ioread32(&bp->tod->uart_baud);
 	uart_baud_reg &= ~(TOD_UART_BAUD_MASK << TOD_UART_BAUD_SHIFT);
 	uart_baud_reg |= (val & TOD_UART_BAUD_MASK) << TOD_UART_BAUD_SHIFT;
-
-	ctrl_reg = ioread32(&bp->tod->ctrl);
-	ctrl_reg |= TOD_CTRL_ENABLE;
-
-	spin_lock_irqsave(&bp->lock, flags);
 	iowrite32(uart_baud_reg, &bp->tod->uart_baud);
-	iowrite32(ctrl_reg, &bp->tod->ctrl);
+	if (enable)
+		iowrite32(ctrl_reg | TOD_CTRL_ENABLE, &bp->tod->ctrl);
 	spin_unlock_irqrestore(&bp->lock, flags);
 
 	return count;
@@ -4526,20 +6748,25 @@ tod_correction_store(struct device *dev, struct device_attribute *attr,
 {
 	struct ptp_ocp *bp = dev_get_drvdata(dev);
 	unsigned long flags;
-	int err, res;
-	u32 val = 0;
+	s32 correction;
+	u32 ctrl, magnitude, val;
+	int err;
 
-	err = kstrtos32(buf, 0, &res);
+	err = kstrtos32(buf, 0, &correction);
 	if (err)
 		return err;
-	if (res < 0) {
-		res *= -1;
-		val |= BIT(31);
-	}
-	val |= res;
+	if (correction == INT_MIN)
+		return -ERANGE;
+	magnitude = correction < 0 ? -correction : correction;
+	val = magnitude | (correction < 0 ? BIT(31) : 0);
 
 	spin_lock_irqsave(&bp->lock, flags);
+	ctrl = ioread32(&bp->tod->ctrl);
+	if (ctrl & TOD_CTRL_ENABLE)
+		iowrite32(ctrl & ~TOD_CTRL_ENABLE, &bp->tod->ctrl);
 	iowrite32(val, &bp->tod->adj_sec);
+	if (ctrl & TOD_CTRL_ENABLE)
+		iowrite32(ctrl, &bp->tod->ctrl);
 	spin_unlock_irqrestore(&bp->lock, flags);
 
 	return count;
@@ -4553,6 +6780,8 @@ static DEVICE_ATTR_RW(tod_correction);
 		&dev_attr_signal##_nr##_phase.attr.attr,		\
 		&dev_attr_signal##_nr##_period.attr.attr,		\
 		&dev_attr_signal##_nr##_polarity.attr.attr,		\
+		&dev_attr_signal##_nr##_repeat_count.attr.attr,		\
+		&dev_attr_signal##_nr##_cable_delay.attr.attr,		\
 		&dev_attr_signal##_nr##_running.attr.attr,		\
 		&dev_attr_signal##_nr##_start.attr.attr,		\
 		NULL,							\
@@ -4822,8 +7051,12 @@ static OCP_BIN_ATTR_CONST struct bin_attribute *OCP_BIN_ATTR_CONST bin_timecard_
 static struct attribute *fb_timecard_attrs[] = {
 	&dev_attr_serialnum.attr,
 	&dev_attr_gnss_sync.attr,
+	&dev_attr_optional_image_contract.attr,
 	&dev_attr_clock_source.attr,
 	&dev_attr_available_clock_sources.attr,
+	&dev_attr_external_pps_polarity.attr,
+	&dev_attr_internal_pps_polarity.attr,
+	&dev_attr_external_pps_pulse_width.attr,
 	&dev_attr_external_pps_cable_delay.attr,
 	&dev_attr_internal_pps_cable_delay.attr,
 	&dev_attr_holdover.attr,
@@ -4836,11 +7069,40 @@ static struct attribute *fb_timecard_attrs[] = {
 	&dev_attr_available_sma_outputs.attr,
 	&dev_attr_clock_status_drift.attr,
 	&dev_attr_clock_status_offset.attr,
+	&dev_attr_irig_output_mode.attr,
+	&dev_attr_irig_input_mode.attr,
+	&dev_attr_irig_output_control_bits.attr,
 	&dev_attr_irig_b_mode.attr,
+	&dev_attr_irig_output_am.attr,
+	&dev_attr_irig_input_code.attr,
+	&dev_attr_irig_input_manual_year.attr,
+	&dev_attr_irig_input_am.attr,
+	&dev_attr_irig_input_cable_delay.attr,
+	&dev_attr_dcf_input_air_delay.attr,
+	&dev_attr_dcf_input_bit_position.attr,
+	&dev_attr_irig_output_error.attr.attr,
+	&dev_attr_irig_input_error.attr.attr,
+	&dev_attr_dcf_output_error.attr.attr,
+	&dev_attr_dcf_input_error.attr.attr,
 	&dev_attr_utc_tai_offset.attr,
+	&dev_attr_nmea_enable.attr,
+	&dev_attr_nmea_uart_polarity.attr,
+	&dev_attr_nmea_baud_rate.attr,
+	&dev_attr_available_nmea_baud_rates.attr,
+	&dev_attr_nmea_errors.attr,
+	&dev_attr_nmea_correction_seconds.attr,
+	&dev_attr_nmea_local_offset_minutes.attr,
+	&dev_attr_nmea_gnss.attr,
+	&dev_attr_available_nmea_gnss.attr,
+	&dev_attr_nmea_message_disable_mask.attr,
 	&dev_attr_ts_window_adjust.attr,
 	&dev_attr_tod_protocol.attr,
 	&dev_attr_available_tod_protocols.attr,
+	&dev_attr_tod_gnss.attr,
+	&dev_attr_available_tod_gnss.attr,
+	&dev_attr_tod_message_disable_mask.attr,
+	&dev_attr_tod_uart_polarity.attr,
+	&dev_attr_tod_errors.attr,
 	&dev_attr_tod_baud_rate.attr,
 	&dev_attr_available_tod_baud_rates.attr,
 	&dev_attr_tod_correction.attr,
@@ -4948,6 +7210,13 @@ _signal_summary_show(struct seq_file *s, struct ptp_ocp *bp, int nr)
 
 	if (!signal)
 		return;
+	if (!ptp_ocp_core_version_at_least(&reg->version,
+					   SIGNAL_VERSION_CURRENT_MAP)) {
+		sprintf(label, "GEN%d", nr + 1);
+		seq_printf(s, "%7s: unsupported register layout (< 1.3)\n",
+			   label);
+		return;
+	}
 
 	on = signal->running;
 	sprintf(label, "GEN%d", nr + 1);
@@ -5000,7 +7269,9 @@ ptp_ocp_summary_show(struct seq_file *s, void *data)
 	struct device *dev = s->private;
 	struct ptp_system_timestamp sts;
 	struct ts_reg __iomem *ts_reg;
+	u32 __iomem *status_reg;
 	char *buf, *src, *mac_src;
+	char error[4];
 	struct timespec64 ts;
 	struct ptp_ocp *bp;
 	u16 sma_val[4][2];
@@ -5122,41 +7393,77 @@ ptp_ocp_summary_show(struct seq_file *s, void *data)
 	if (bp->irig_out) {
 		ctrl = ioread32(&bp->irig_out->ctrl);
 		on = ctrl & IRIG_M_CTRL_ENABLE;
-		val = ioread32(&bp->irig_out->status);
+		status_reg = ptp_ocp_timecode_status_reg(
+			bp, TIMECODE_ERROR_IRIG_OUTPUT);
+		if (status_reg)
+			snprintf(error, sizeof(error), "%u",
+				 !!(ioread32(status_reg) & TIMECODE_STATUS_ERROR));
+		else
+			strscpy(error, "n/a", sizeof(error));
 		gpio_output_map(buf, bp, sma_val, 4);
-		seq_printf(s, "%7s: %s, error: %d, mode %d, out: %s\n", "IRIG",
-			   on ? " ON" : "OFF", val, (ctrl >> 16), buf);
+		seq_printf(s,
+			   "%7s: %s, error: %s, mode: %u, code: %u, out: %s\n",
+			   "IRIG", on ? " ON" : "OFF", error,
+			   (ctrl & IRIG_CTRL_MODE_MASK) >> IRIG_CTRL_MODE_SHIFT,
+			   (ctrl & IRIG_CTRL_CODE_MASK) >> IRIG_CTRL_CODE_SHIFT,
+			   buf);
 	}
 
 	if (bp->irig_in) {
-		on = ioread32(&bp->irig_in->ctrl) & IRIG_S_CTRL_ENABLE;
-		val = ioread32(&bp->irig_in->status);
+		ctrl = ioread32(&bp->irig_in->ctrl);
+		on = ctrl & IRIG_S_CTRL_ENABLE;
+		status_reg = ptp_ocp_timecode_status_reg(
+			bp, TIMECODE_ERROR_IRIG_INPUT);
+		if (status_reg)
+			snprintf(error, sizeof(error), "%u",
+				 !!(ioread32(status_reg) & TIMECODE_STATUS_ERROR));
+		else
+			strscpy(error, "n/a", sizeof(error));
 		gpio_input_map(buf, bp, sma_val, 4, NULL);
-		seq_printf(s, "%7s: %s, error: %d, src: %s\n", "IRIG in",
-			   on ? " ON" : "OFF", val, buf);
+		seq_printf(s, "%7s: %s, error: %s, mode: %u, src: %s\n",
+			   "IRIG in", on ? " ON" : "OFF", error,
+			   (ctrl & IRIG_CTRL_MODE_MASK) >> IRIG_CTRL_MODE_SHIFT,
+			   buf);
 	}
 
 	if (bp->dcf_out) {
 		on = ioread32(&bp->dcf_out->ctrl) & DCF_M_CTRL_ENABLE;
-		val = ioread32(&bp->dcf_out->status);
+		status_reg = ptp_ocp_timecode_status_reg(
+			bp, TIMECODE_ERROR_DCF_OUTPUT);
+		if (status_reg)
+			snprintf(error, sizeof(error), "%u",
+				 !!(ioread32(status_reg) & TIMECODE_STATUS_ERROR));
+		else
+			strscpy(error, "n/a", sizeof(error));
 		gpio_output_map(buf, bp, sma_val, 5);
-		seq_printf(s, "%7s: %s, error: %d, out: %s\n", "DCF",
-			   on ? " ON" : "OFF", val, buf);
+		seq_printf(s, "%7s: %s, error: %s, out: %s\n", "DCF",
+			   on ? " ON" : "OFF", error, buf);
 	}
 
 	if (bp->dcf_in) {
 		on = ioread32(&bp->dcf_in->ctrl) & DCF_S_CTRL_ENABLE;
-		val = ioread32(&bp->dcf_in->status);
+		status_reg = ptp_ocp_timecode_status_reg(
+			bp, TIMECODE_ERROR_DCF_INPUT);
+		if (status_reg)
+			snprintf(error, sizeof(error), "%u",
+				 !!(ioread32(status_reg) & TIMECODE_STATUS_ERROR));
+		else
+			strscpy(error, "n/a", sizeof(error));
 		gpio_input_map(buf, bp, sma_val, 5, NULL);
-		seq_printf(s, "%7s: %s, error: %d, src: %s\n", "DCF in",
-			   on ? " ON" : "OFF", val, buf);
+		seq_printf(s, "%7s: %s, error: %s, src: %s\n", "DCF in",
+			   on ? " ON" : "OFF", error, buf);
 	}
 
 	if (bp->nmea_out) {
 		on = ioread32(&bp->nmea_out->ctrl) & 1;
-		val = ioread32(&bp->nmea_out->status);
-		seq_printf(s, "%7s: %s, error: %d\n", "NMEA",
-			   on ? " ON" : "OFF", val);
+		if (ptp_ocp_core_version_at_least(&bp->nmea_out->version,
+						  TOD_MASTER_VERSION_STATUS))
+			snprintf(error, sizeof(error), "%u",
+				 ioread32(&bp->nmea_out->status));
+		else
+			strscpy(error, "n/a", sizeof(error));
+		seq_printf(s, "%7s: %s, error: %s\n", "NMEA",
+			   on ? " ON" : "OFF", error);
 	}
 
 	/* compute src for PPS1, used below. */
@@ -5209,9 +7516,14 @@ ptp_ocp_summary_show(struct seq_file *s, void *data)
 		strcpy(buf, "unknown");
 		break;
 	}
-	val = ioread32(&bp->reg->status);
-	seq_printf(s, "%7s: %s, state: %s\n", "PHC src", buf,
-		   val & OCP_STATUS_IN_SYNC ? "sync" : "unsynced");
+	if (ptp_ocp_clock_has_status(bp)) {
+		val = ioread32(&bp->reg->status);
+		seq_printf(s, "%7s: %s, state: %s\n", "PHC src", buf,
+			   val & OCP_STATUS_IN_SYNC ? "sync" : "unsynced");
+	} else {
+		seq_printf(s, "%7s: %s, state: unavailable (< 1.2)\n",
+			   "PHC src", buf);
+	}
 
 	if (!ptp_ocp_gettimex(&bp->ptp_info, &ts, &sts)) {
 		struct timespec64 sys_ts;
@@ -5243,35 +7555,65 @@ ptp_ocp_tod_status_show(struct seq_file *s, void *data)
 {
 	struct device *dev = s->private;
 	struct ptp_ocp *bp;
-	u32 val;
+	u32 ctrl, expected = 0, val, version;
 	int idx;
 
 	bp = dev_get_drvdata(dev);
+	version = ioread32(&bp->tod->version);
+	if (!version || version == U32_MAX) {
+		seq_puts(s, "TOD version register is invalid\n");
+		return 0;
+	}
 
-	val = ioread32(&bp->tod->ctrl);
-	if (!(val & TOD_CTRL_ENABLE)) {
+	ctrl = ioread32(&bp->tod->ctrl);
+	if (!(ctrl & TOD_CTRL_ENABLE)) {
 		seq_printf(s, "TOD Slave disabled\n");
 		return 0;
 	}
-	seq_printf(s, "TOD Slave enabled, Control Register 0x%08X\n", val);
+	seq_printf(s, "TOD Slave enabled, Control Register 0x%08X\n", ctrl);
 
-	idx = (val >> TOD_CTRL_PROTOCOL_SHIFT) & TOD_CTRL_PROTOCOL_MASK;
+	idx = (ctrl >> TOD_CTRL_PROTOCOL_SHIFT) & TOD_CTRL_PROTOCOL_MASK;
 	seq_printf(s, "Protocol %s\n", ptp_ocp_tod_proto_name(idx));
 
-	idx = (val >> TOD_CTRL_GNSS_SHIFT) & TOD_CTRL_GNSS_MASK;
-	seq_printf(s, "GNSS %s\n", ptp_ocp_tod_gnss_name(idx));
+	if (version >= TOD_VERSION_GNSS_SELECT) {
+		idx = (ctrl >> TOD_CTRL_GNSS_SHIFT) & TOD_CTRL_GNSS_MASK;
+		seq_printf(s, "GNSS %s\n", ptp_ocp_tod_gnss_name(idx));
+	} else {
+		seq_puts(s, "GNSS selector unavailable (< 1.5)\n");
+	}
 
-	val = ioread32(&bp->tod->version);
 	seq_printf(s, "TOD Version %d.%d.%d\n",
-		val >> 24, (val >> 16) & 0xff, val & 0xffff);
+		version >> 24, (version >> 16) & 0xff, version & 0xffff);
 
-	val = ioread32(&bp->tod->status);
-	seq_printf(s, "Status register: 0x%08X\n", val);
+	if (version >= TOD_VERSION_STATUS) {
+		val = ioread32(&bp->tod->status);
+		seq_printf(s, "Status register: 0x%08X\n", val);
+	} else {
+		seq_puts(s, "Status register unavailable (< 1.2)\n");
+	}
 
 	val = ioread32(&bp->tod->adj_sec);
 	idx = (val & ~INT_MAX) ? -1 : 1;
 	idx *= (val & INT_MAX);
 	seq_printf(s, "Correction seconds: %d\n", idx);
+	if (!tod_optional_telemetry) {
+		seq_puts(s,
+			 "Optional UTC/leap/GNSS/satellite telemetry disabled; "
+			 "load with tod_optional_telemetry=1 and an exact image contract\n");
+		return 0;
+	}
+	if (!ptp_ocp_optional_image_contract_matches(bp)) {
+		(void)ptp_ocp_optional_image_contract_expected(bp, &expected);
+		seq_printf(s,
+			 "Optional image contract mismatch for %s (expected 0x%08x); telemetry remains gated\n",
+			 pci_name(bp->pdev), expected);
+		return 0;
+	}
+	if (!ptp_ocp_tod_optional_utc_enabled(bp)) {
+		seq_puts(s,
+			 "UTC/leap telemetry is not defined for this protocol/revision\n");
+		return 0;
+	}
 
 	val = ioread32(&bp->tod->utc_status);
 	seq_printf(s, "UTC status register: 0x%08X\n", val);
@@ -5283,6 +7625,12 @@ ptp_ocp_tod_status_show(struct seq_file *s, void *data)
 
 	val = ioread32(&bp->tod->leap);
 	seq_printf(s, "Time to next leap second (in sec): %d\n", (s32) val);
+
+	if (!ptp_ocp_tod_optional_gnss_enabled(bp)) {
+		seq_puts(s,
+			 "GNSS/satellite telemetry is not defined for this protocol/revision\n");
+		return 0;
+	}
 
 	val = ioread32(&bp->tod->gnss_status);
 	seq_printf(s, "GNSS status register: 0x%08X\n", val);
@@ -5489,11 +7837,14 @@ ptp_ocp_phc_info(struct ptp_ocp *bp)
 		 ptp_ocp_select_name_from_val(ptp_ocp_clock, select >> 16),
 		 ptp_clock_index(bp->ptp));
 
-	sync = ioread32(&bp->reg->status) & OCP_STATUS_IN_SYNC;
+	sync = ptp_ocp_clock_has_status(bp) &&
+		(ioread32(&bp->reg->status) & OCP_STATUS_IN_SYNC);
 	if (!ptp_ocp_gettimex(&bp->ptp_info, &ts, NULL))
 		dev_info(&bp->pdev->dev, "Time: %lld.%ld, %s\n",
 			 ts.tv_sec, ts.tv_nsec,
-			 sync ? "in-sync" : "UNSYNCED");
+			 ptp_ocp_clock_has_status(bp) ?
+				(sync ? "in-sync" : "UNSYNCED") :
+				"sync-status unavailable");
 }
 
 static void
@@ -5560,26 +7911,16 @@ ptp_ocp_enable_ptm(struct ptp_ocp *bp)
 static void
 ptp_ocp_info(struct ptp_ocp *bp)
 {
-	static int nmea_baud[] = {
-		1200, 2400, 4800, 9600, 19200, 38400,
-		57600, 115200, 230400, 460800, 921600,
-		1000000, 2000000
-	};
 	struct device *dev = &bp->pdev->dev;
-	u32 reg;
 	int i;
 
 	ptp_ocp_phc_info(bp);
 
 	for (i = 0; i < __PORT_COUNT; i++) {
-		if (i == PORT_NMEA && bp->nmea_out && bp->port[i].line != -1) {
+		/* The ToD Master is synthesis optional.  Do not read its baud
+		 * register merely to decorate the probe log. */
+		if (i == PORT_NMEA)
 			bp->port[i].baud = -1;
-
-			reg = ioread32(&bp->nmea_out->uart_baud);
-			if (reg < ARRAY_SIZE(nmea_baud))
-				bp->port[i].baud = nmea_baud[reg];
-
-		}
 		ptp_ocp_serial_info(dev, ptp_ocp_tty_port_name(i), bp->port[i].line,
 				    bp->port[i].baud);
 	}

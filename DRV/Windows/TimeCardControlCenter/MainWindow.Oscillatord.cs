@@ -28,7 +28,7 @@ namespace TimeCardControlCenter
                 return;
             if (productSettings != null && productSettings.DemoMode)
             {
-                NativeDisciplineConnectionText.Text = "DEMO · ABI 11";
+                NativeDisciplineConnectionText.Text = "DEMO · ABI 12";
                 NativeDisciplineConnectionText.Foreground =
                     (Brush)FindResource("AccentBrush");
                 NativeDisciplineBoardText.Text = "Orolia/Safran ART";
@@ -75,14 +75,27 @@ namespace TimeCardControlCenter
                     () => client.GetCapabilities());
                 nativeDisciplineCapabilities = capabilities;
                 ApplyNativeDisciplineCapabilities(capabilities);
+                if (capabilities.AbiVersion >= 14u)
+                {
+                    DisciplineLeaseState lease = client.GetDisciplineLease();
+                    if (lease.IsActive && !lease.IsOwner)
+                    {
+                        NativeDisciplineConnectionText.Text = "WINDOWS SERVICE OWNS";
+                        NativeDisciplineCapabilityText.Text +=
+                            " The background Windows service owns discipline; use the service controls below so discipline continues after this app closes.";
+                        NativeDisciplineStartButton.IsEnabled = false;
+                        NativeDisciplineCalibrateButton.IsEnabled = false;
+                        NativeDisciplineBypassSurveyCheckBox.IsEnabled = false;
+                    }
+                }
             }
             catch (Exception ex)
             {
-                NativeDisciplineConnectionText.Text = "ABI 11 REQUIRED";
+                NativeDisciplineConnectionText.Text = "ABI 11+ REQUIRED";
                 NativeDisciplineConnectionText.Foreground =
                     (Brush)FindResource("DangerBrush");
                 NativeDisciplineCapabilityText.Text =
-                    "Install Time Card driver 1.38 / ABI 11. " + ex.Message;
+                    "Install Time Card driver 1.39 / ABI 12. " + ex.Message;
                 NativeDisciplineStartButton.IsEnabled = false;
                 if (showError)
                     MessageBox.Show(this, ex.Message,
@@ -313,7 +326,7 @@ namespace TimeCardControlCenter
             try
             {
                 int port = ParseOscillatordPort();
-                OscillatordSnapshot snapshot = await oscillatordClient.RequestAsync(
+                OscillatordSnapshot snapshot = await oscillatordClient.RequestPreferredAsync(
                     OscillatordHostTextBox.Text, port, OscillatordRequest.Status,
                     OscillatordTokenBox.Password);
                 ApplyOscillatordSnapshot(snapshot);
@@ -366,7 +379,7 @@ namespace TimeCardControlCenter
             OscillatordRefreshButton.IsEnabled = false;
             try
             {
-                OscillatordSnapshot snapshot = await oscillatordClient.RequestAsync(
+                OscillatordSnapshot snapshot = await oscillatordClient.RequestPreferredAsync(
                     OscillatordHostTextBox.Text, ParseOscillatordPort(), request,
                     OscillatordTokenBox.Password);
                 ApplyOscillatordSnapshot(snapshot);
@@ -408,7 +421,7 @@ namespace TimeCardControlCenter
                 snapshot.Version ?? "unknown", snapshot.ProtocolVersion);
             OscillatordControlPolicyText.Text = snapshot.ControlEnabled ?
                 "The service permits token-authorized state changes. This client still confirms every operation." :
-                "The service is read-only. Enable monitoring-allow-control in its Linux configuration to permit guarded operations.";
+                "TCP control is read-only. Local Windows administrators can use the protected named pipe for guarded operations.";
             OscillatordControlPolicyText.Foreground = (Brush)FindResource(
                 snapshot.ControlEnabled ? "GoldBrush" : "MutedBrush");
 

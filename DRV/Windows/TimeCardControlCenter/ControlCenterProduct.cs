@@ -127,10 +127,14 @@ namespace TimeCardControlCenter
                     gnssOk ? "FIX VALID" : "NO FIX",
                     used.ToString(CultureInfo.InvariantCulture) + " satellites used"));
             bool utcValid = (snapshot.UtcStatus & (1u << 8)) != 0;
-            if (!snapshot.TodTelemetryAvailable)
+            if (!snapshot.TodCoreAvailable)
                 nodes.Add(new HealthNode("tod", "Time-of-Day engine", "Gnss",
                     HealthSeverity.Informational, "NOT IMPLEMENTED",
                     "This board profile has no FPGA ToD/NMEA engine."));
+            else if (!snapshot.TodTelemetryAvailable)
+                nodes.Add(new HealthNode("tod", "Time-of-Day engine", "Gnss",
+                    HealthSeverity.Informational, "SUMMARY NOT EXPOSED",
+                    "The FPGA image does not publish synthesis-optional UTC/leap summary registers."));
             else
                 nodes.Add(Node("tod", "Time-of-Day engine", "Gnss", utcValid,
                     utcValid ? "UTC VALID" : "UTC INVALID",
@@ -213,6 +217,8 @@ namespace TimeCardControlCenter
         public bool CompactNavigation { get; set; }
         public int TelemetryCapacity { get; set; }
         public string LastExportDirectory { get; set; }
+        public string SelectedDeviceSerial { get; set; }
+        public string SelectedDevicePath { get; set; }
         public List<string> ConfigurationHistory { get; set; }
         public ConfigurationProfile LastKnownGoodProfile { get; set; }
 
@@ -270,8 +276,79 @@ namespace TimeCardControlCenter
     }
 
     [Serializable]
+    public sealed class PpsProfileSetting
+    {
+        public uint Core { get; set; }
+        public uint CoreVersion { get; set; }
+        public bool Enabled { get; set; }
+        public bool ActiveHigh { get; set; }
+        public bool HasPulseWidth { get; set; }
+        public uint PulseWidthMilliseconds { get; set; }
+        public int CableDelayNanoseconds { get; set; }
+    }
+
+    [Serializable]
+    public sealed class TimecodeProfileSetting
+    {
+        public uint Format { get; set; }
+        public uint Role { get; set; }
+        public uint CoreVersion { get; set; }
+        public bool Enabled { get; set; }
+        public uint Mode { get; set; }
+        public uint Code { get; set; }
+        public int CorrectionSeconds { get; set; }
+        public bool HasDelay { get; set; }
+        public int DelayNanoseconds { get; set; }
+        public bool HasControlBits { get; set; }
+        public uint ControlBits { get; set; }
+    }
+
+    [Serializable]
+    public sealed class TodParserProfileSetting
+    {
+        public uint CoreVersion { get; set; }
+        public bool Enabled { get; set; }
+        public uint Protocol { get; set; }
+        public uint Gnss { get; set; }
+        public uint Baud { get; set; }
+        public bool Inverted { get; set; }
+        public int CorrectionSeconds { get; set; }
+        public uint MessageDisableMask { get; set; }
+    }
+
+    [Serializable]
+    public sealed class SignalGeneratorProfileSetting
+    {
+        public uint Generator { get; set; }
+        public uint CoreVersion { get; set; }
+        public bool Enabled { get; set; }
+        public bool ActiveHigh { get; set; }
+        [XmlElement("Inverted")]
+        public bool Inverted
+        {
+            get { return ActiveHigh; }
+            set { ActiveHigh = value; }
+        }
+        public bool ShouldSerializeInverted()
+        {
+            return false;
+        }
+        public ulong PeriodNanoseconds { get; set; }
+        public ulong PulseNanoseconds { get; set; }
+        public ulong PhaseNanoseconds { get; set; }
+        public uint RepeatCount { get; set; }
+        public uint CableDelayNanoseconds { get; set; }
+    }
+
+    [Serializable]
     public sealed class ConfigurationProfile
     {
+        public const uint CurrentSchemaVersion = 2;
+
+        public uint SchemaVersion { get; set; }
+        public uint CapturedAbiVersion { get; set; }
+        public uint RequiredAbiVersion { get; set; }
+        public uint RequiredFpgaCoreMask { get; set; }
         public string Name { get; set; }
         public string Description { get; set; }
         public bool HasClockSource { get; set; }
@@ -280,12 +357,32 @@ namespace TimeCardControlCenter
         public bool NmeaEnabled { get; set; }
         public uint NmeaBaud { get; set; }
         public bool NmeaInverted { get; set; }
+        public bool HasNmeaAdvanced { get; set; }
+        public uint NmeaCoreVersion { get; set; }
+        public int NmeaCorrectionSeconds { get; set; }
+        public int NmeaLocalOffsetMinutes { get; set; }
+        public uint NmeaGnss { get; set; }
+        public uint NmeaMessageDisableMask { get; set; }
+        public bool HasFpgaImageIdentity { get; set; }
+        public uint FpgaImageRawVersion { get; set; }
+        public uint FpgaImageTag { get; set; }
+        public uint FpgaImageVersion { get; set; }
+        public uint FpgaImageLayout { get; set; }
+        public uint FpgaImageBoardProfile { get; set; }
+        public bool FpgaImageLoaderEncoding { get; set; }
         public List<SmaProfileSetting> Sma { get; set; }
+        public List<PpsProfileSetting> PpsEngines { get; set; }
+        public List<TimecodeProfileSetting> TimecodeEngines { get; set; }
+        public TodParserProfileSetting TodParser { get; set; }
+        public List<SignalGeneratorProfileSetting> SignalGenerators { get; set; }
         public bool IsBuiltIn { get; set; }
 
         public ConfigurationProfile()
         {
             Sma = new List<SmaProfileSetting>();
+            PpsEngines = new List<PpsProfileSetting>();
+            TimecodeEngines = new List<TimecodeProfileSetting>();
+            SignalGenerators = new List<SignalGeneratorProfileSetting>();
         }
 
         public override string ToString() { return Name; }

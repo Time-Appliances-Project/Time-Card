@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildToolsPath)\Microsoft.Common.props" Condition="Exists('$(MSBuildToolsPath)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A12D7C97-25AB-4770-9A1C-CB632AB19658}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>TimeCardControlCenter</RootNamespace>
+    <AssemblyName>TimeCardOscillatord</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <WarningLevel>4</WarningLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <Deterministic>true</Deterministic>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <ApplicationIcon>..\assets\timecard-app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.ServiceProcess" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="OscillatordWindowsService.cs" />
+    <Compile Include="OscillatordConfiguration.cs" />
+    <Compile Include="OscillatordRuntime.cs" />
+    <Compile Include="MonitoringServer.cs" />
+    <Compile Include="ServiceLog.cs" />
+    <Compile Include="WindowsTimeSamplePublisher.cs" />
+    <Compile Include="NativeGnssSession.cs" />
+    <Compile Include="NativeRtcmPublisher.cs" />
+    <Compile Include="Sa5xOscillatorManager.cs" />
+    <Compile Include="Sa3xOscillatorMonitor.cs" />
+    <Compile Include="TimeCardAtomicTransports.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="..\TimeCardControlCenter\Models.cs"><Link>Shared\Models.cs</Link></Compile>
+    <Compile Include="CelesticaSensorMath.cs" />
+    <Compile Include="..\TimeCardControlCenter\TimeCardClient.cs"><Link>Shared\TimeCardClient.cs</Link></Compile>
+    <Compile Include="..\TimeCardControlCenter\TimeCardDeviceSelection.cs"><Link>Shared\TimeCardDeviceSelection.cs</Link></Compile>
+    <Compile Include="..\TimeCardControlCenter\NativeDiscipline.cs"><Link>Shared\NativeDiscipline.cs</Link></Compile>
+    <Compile Include="..\TimeCardControlCenter\OscillatordClient.cs"><Link>Shared\OscillatordClient.cs</Link></Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+    <Content Include="oscillatord.example.json"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
+    <Content Include="..\TimeCardDiscipline\bin\Release\TimeCardDiscipline.dll"><Link>TimeCardDiscipline.dll</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
+    <Content Include="..\TimeCardDiscipline\THIRD_PARTY_NOTICES.md"><Link>THIRD_PARTY_NOTICES.md</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
+    <Content Include="..\..\..\Software\oscillatord\third_party\disciplining-minipod\LICENSE"><Link>MINICOD-LICENSE.txt</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>

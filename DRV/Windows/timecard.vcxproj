@@ -64,6 +64,7 @@
     <ClCompile Include="discipline.c" />
     <ClCompile Include="flash.c" />
     <ClCompile Include="flash_altera.c" />
+    <ClCompile Include="fpga.c" />
     <ClCompile Include="i2c.c" />
     <ClCompile Include="i2c_ocores.c" />
     <ClCompile Include="ioctl.c" />
@@ -72,6 +73,7 @@
     <ClCompile Include="ptp.c" />
     <ClCompile Include="serial.c" />
     <ClCompile Include="sma.c" />
+    <ClCompile Include="timestamp.c" />
     <ClCompile Include="timing.c" />
   </ItemGroup>
   <ItemGroup>

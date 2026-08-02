@@ -108,7 +108,12 @@ TimeCardEvtUartInterruptIsr(WDFINTERRUPT interrupt, ULONG messageId)
     ULONG globalMessageId = interruptContext->MessageBase + messageId;
     ULONG port = TimeCardUartPortForMessage(context, globalMessageId);
     ULONG drained = 0;
+    BOOLEAN handled;
     UCHAR lsr;
+
+    handled = TimeCardHandleTimestampInterrupt(context, globalMessageId);
+    handled = TimeCardHandleSignalInterrupt(context, globalMessageId) ||
+        handled;
 
     /*
      * A few PCI stacks report a global MSI-X message number even when the
@@ -116,8 +121,13 @@ TimeCardEvtUartInterruptIsr(WDFINTERRUPT interrupt, ULONG messageId)
      */
     if (port == TIMECARD_UART_NO_PORT && messageId != globalMessageId)
         port = TimeCardUartPortForMessage(context, messageId);
+    if (!handled && messageId != globalMessageId)
+        handled = TimeCardHandleTimestampInterrupt(context, messageId);
+    if (messageId != globalMessageId)
+        handled = TimeCardHandleSignalInterrupt(context, messageId) ||
+            handled;
     if (port == TIMECARD_UART_NO_PORT || !TimeCardUartValid(context, port))
-        return FALSE;
+        return handled;
     lsr = TimeCardUartReadRegister(context, port, UART_LSR);
     InterlockedOr(&context->UartRxLineStatus[port], lsr);
     while ((lsr & UART_LSR_DR) != 0 && drained < 1024u) {
@@ -127,7 +137,7 @@ TimeCardEvtUartInterruptIsr(WDFINTERRUPT interrupt, ULONG messageId)
         lsr = TimeCardUartReadRegister(context, port, UART_LSR);
         InterlockedOr(&context->UartRxLineStatus[port], lsr);
     }
-    return drained != 0;
+    return handled || drained != 0;
 }
 
 static UCHAR
@@ -164,6 +174,63 @@ TimeCardUartPause(VOID)
 
     interval.QuadPart = -10000; /* one millisecond, relative */
     KeDelayExecutionThread(KernelMode, FALSE, &interval);
+}
+
+NTSTATUS
+TimeCardUartSnapshotHardware(
+    PDEVICE_CONTEXT context, ULONG port,
+    PTIMECARD_UART_HARDWARE_STATE state)
+{
+    if (!TimeCardUartValid(context, port) || state == NULL)
+        return STATUS_INVALID_DEVICE_STATE;
+
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    state->LineControl = TimeCardUartReadRegister(context, port, UART_LCR);
+    TimeCardUartWriteRegister(context, port, UART_LCR,
+                              state->LineControl & ~UART_LCR_DLAB);
+    state->InterruptEnable = TimeCardUartReadRegister(
+        context, port, UART_IER);
+    TimeCardUartWriteRegister(context, port, UART_IER, 0u);
+    state->ModemControl = TimeCardUartReadRegister(context, port, UART_MCR);
+    TimeCardUartWriteRegister(context, port, UART_LCR,
+                              state->LineControl | UART_LCR_DLAB);
+    state->DivisorLow = TimeCardUartReadRegister(context, port, UART_DLL);
+    state->DivisorHigh = TimeCardUartReadRegister(context, port, UART_DLM);
+    TimeCardUartWriteRegister(context, port, UART_LCR,
+                              state->LineControl & ~UART_LCR_DLAB);
+    TimeCardUartWriteRegister(context, port, UART_IER,
+                              state->InterruptEnable);
+    TimeCardUartWriteRegister(context, port, UART_LCR,
+                              state->LineControl);
+    WdfWaitLockRelease(context->RegisterLock);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+TimeCardUartRestoreHardware(
+    PDEVICE_CONTEXT context, ULONG port,
+    const TIMECARD_UART_HARDWARE_STATE *state)
+{
+    if (!TimeCardUartValid(context, port) || state == NULL)
+        return STATUS_INVALID_DEVICE_STATE;
+
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    TimeCardUartWriteRegister(context, port, UART_LCR,
+                              state->LineControl & ~UART_LCR_DLAB);
+    TimeCardUartWriteRegister(context, port, UART_IER, 0u);
+    TimeCardUartWriteRegister(context, port, UART_MCR, state->ModemControl);
+    TimeCardUartWriteRegister(context, port, UART_LCR,
+                              state->LineControl | UART_LCR_DLAB);
+    TimeCardUartWriteRegister(context, port, UART_DLL, state->DivisorLow);
+    TimeCardUartWriteRegister(context, port, UART_DLM, state->DivisorHigh);
+    TimeCardUartWriteRegister(context, port, UART_LCR,
+                              state->LineControl & ~UART_LCR_DLAB);
+    TimeCardUartWriteRegister(context, port, UART_IER,
+                              state->InterruptEnable);
+    TimeCardUartWriteRegister(context, port, UART_LCR,
+                              state->LineControl);
+    WdfWaitLockRelease(context->RegisterLock);
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS

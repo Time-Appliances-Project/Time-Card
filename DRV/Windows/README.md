@@ -15,10 +15,18 @@ applications use the versioned IOCTL ABI through `timecardctl.exe`.
 - PHC read, set, and system-bracketed cross-timestamp operations.
 - Direct Orolia/Safran ART mRO-50 FPGA-bridge telemetry and guarded fine,
   coarse, and nonvolatile coarse-adjustment controls.
-- ABI 11 capability discovery and native ART oscillator discipline: consistent
+- ABI 12 capability discovery and native ART oscillator discipline: consistent
   paired GNSS/mRO PPS timestamps, bounded PHC phase steps, exact Orolia miniCOD
   steering and calibration, and validated, page-aligned 24c08 parameter
   persistence with full read-back verification.
+- ABI 13 read-only FPGA image identity on the standard MSI/MSI-X maps: raw
+  word, loader encoding, decoded tag/version, layout, board profile, and exact
+  trusted register offset. ART returns `STATUS_NOT_SUPPORTED` without an MMIO
+  read because it does not publish that static image resource.
+- ABI 15 exact-image synthesis contracts and a typed static core inventory.
+  Optional registers are exposed only when the current raw image word,
+  board profile, layout, explicit acknowledgement, and requested capability
+  flags all match; the identity is revalidated before every optional access.
 - FPGA, TOD, synchronization, selectable clock source, UTC/leap, satellite,
   and GNSS status reporting.
 - Buffered access to the GNSS, GNSS2, atomic-clock, and NMEA 16550 UARTs. The
@@ -30,7 +38,24 @@ applications use the versioned IOCTL ABI through `timecardctl.exe`.
   input/output direction, named timing functions, fixed-direction detection,
   and immediate readback.
 - Bounded configuration and readback for four periodic signal generators and
-  four frequency counters, including direct SMA input/output routing.
+  four frequency counters, including repeat count, cable delay, sticky
+  error/time-jump status, direct SMA input/output routing, and interrupt-backed
+  completion/error/time-jump event queues.
+- Six Signal Timestamper channels (GNSS1, TS1-TS4, and PHC/PPS) with bounded
+  interrupt queues, overflow/drop accounting, polarity and enable control, and
+  the documented counters/cable-delay/payload surface where the trusted
+  register aperture supports it.
+- Profile-gated control and readback for the documented PPS, IRIG-B/G, DCF77,
+  and ToD input-parser FPGA cores, plus the adjustable clock's safe common
+  telemetry and smooth clock adjustments. Exact-image contracts unlock the
+  optional clock servo/log, holdover, outlier, limiter, aging, revert and
+  dynamic-control registers; ToD telemetry and Master UTC handshake; IRIG AM,
+  code and manual-year fields; and synthesized NTP, SyncE and dynamic clock
+  sources. Other synthesis parameters select protocol and feature logic inside
+  otherwise valid cores; register readback confirms the requested
+  configuration, not that the selected logic was compiled into the image.
+  IRIG/DCF cores follow aggregate SMA routing, so moving one connector cannot
+  disable a core still used by another connector.
 - Guarded Xilinx AXI IIC and OpenCores I2C controller access with status,
   address-only probes,
   7-bit bus discovery, bounded EEPROM/register reads, PCA9546A branch routing,
@@ -65,7 +90,7 @@ controller from starting.
 
 ## Hardware compatibility
 
-Driver 1.38 / ABI 11 selects the same three PCI profiles and resource maps as
+Driver 1.42 / ABI 15 selects the same three PCI profiles and resource maps as
 the Linux `ptp_ocp` driver while keeping their board-level sensor populations
 distinct. Meta/Facebook and Celestica share the rev1 and rev2 FPGA maps. Older
 PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or 32 interrupt
@@ -78,7 +103,7 @@ The Celestica R4006-G0001-03 Rev02 profile is identified by
 `PCI\VEN_18D4&DEV_1008`. Its TCA9546A at `0x70` uses fixed, isolated routes:
 channel 0 for three LM75B monitors at `0x48`/`0x49`/`0x4a`, channel 1 for the
 SHT3x at `0x44`, channel 2 for the ICP-10100 at `0x63`, and channel 3 for the
-BNO08x at `0x4a`. Driver 1.38 validates Sensirion/TDK CRC-8 frames, retrieves
+BNO08x at `0x4a`. Driver 1.39 validates Sensirion/TDK CRC-8 frames, retrieves
 and caches the pressure sensor's four OTP coefficients, and exposes raw values
 plus compensated environmental telemetry without confusing identical I2C
 addresses that live on different mux branches.
@@ -119,9 +144,66 @@ Subsystem availability still depends on the FPGA image and populated board
 options. Missing optional resources never prevent the controller and PHC from
 starting.
 
+## Documented FPGA timing cores
+
+ABI 15 covers every software-accessible core surface identified by the timing
+manual and UCM audits. Capabilities come from the trusted static board maps;
+`IOCTL_TIMECARD_CORE_INVENTORY_QUERY` reports typed offsets, spans, instances,
+versions and interrupt messages without using Configuration Slave discovery or
+probing guessed addresses. Each requested core then validates its common
+version register before any revision-dependent field is read.
+
+The general Signal Timestamper path exposes all six published channels with a
+bounded kernel event queue and D0-safe interrupt lifecycle. Standard MSI/MSI-X
+images expose the documented v1.3 counters, cable delay and payload aperture.
+ART exposes only its published basic enable, polarity, interrupt and timestamp
+surface; extended ART offsets stay inaccessible until an ART image identity and
+build manifest make them trustworthy. Signal generators similarly publish
+bounded completion/error/time-jump events on vectors 11-14 (MSI) or 43-46
+(MSI-X).
+
+Common Adjustable Clock registers provide smooth offset/drift updates,
+intervals, Q16 fractional drift from 2.0, and the in-sync threshold. Optional
+clock registers require a matching exact-image contract: servo/log from 1.6,
+holdover from 2.1, outlier filters from 2.2, rate limiters from 2.3, dynamic
+updates from 2.4, aging from 2.5, and revert from 2.6. NTP source selector 7
+requires Clock 1.8 plus a synthesized-NTP contract. SyncE selector 8 and dynamic
+selector 253 require Clock 2.7 plus their respective contracts.
+The advanced query also returns the base status word and decodes the documented
+holdover-ready and aging-ready state separately from the feature-presence bits.
+
+ToD Slave supports NMEA, UBX, TSIP, ESIP, and PFEC selector 4 with PFEC mask
+`0x7f`. UTC/leap/GNSS/satellite telemetry is protocol- and revision-gated and
+also requires the image contract. ToD Master `GxUTC` uses the bounded read
+request/done handshake and a bit-0-only write request. IRIG Master 1.5 AM,
+IRIG Slave 1.5 code/manual year, and IRIG Slave 1.6 AM are likewise contract-
+gated. PPS, timecode, ToD, NMEA, generator, smooth-clock, and advanced-clock
+sets snapshot the affected registers, verify exact readback, and restore the
+complete prior configuration on failure, including the corresponding UART
+baud where applicable.
+
+`IOCTL_TIMECARD_GET_FPGA_CAPABILITIES` reports the profile-advertised core
+mask, feature mask, and unresolved hardware limitations. The Control Center's
+**FPGA Engines** workspace presents only the fields confirmed by the kernel;
+it never interprets a core version as proof of a synthesis generic. The
+Orolia/Safran ART profile does not advertise absent Meta/Celestica cores.
+
+`IOCTL_TIMECARD_FPGA_IMAGE_QUERY` reads one 32-bit identity word from the
+Linux-defined static image resource at `0x00020000` (MSI) or `0x02020000`
+(MSI-X). Zero and `0xffffffff` are rejected. The result preserves the raw word
+and decodes the same loader form, image tag, and 15-bit major/minor version as
+Linux `ptp_ocp`. It is identity metadata, not a synthesis-feature manifest;
+optional core behavior still requires hardware or loopback validation. The
+Control Center includes it in FPGA diagnostics and captured profile
+compatibility metadata, and `timecardctl fpga-status` prints it.
+
+The complete manual-by-manual and UCM audit, including the features that require
+future bitstream work rather than host software, is in
+[FPGA_CORE_COVERAGE.md](FPGA_CORE_COVERAGE.md).
+
 ## Native oscillator discipline
 
-Driver 1.38 exposes a capability-first ABI instead of asking user mode to infer
+Driver 1.42 / ABI 15 exposes a capability-first ABI instead of asking user mode to infer
 hardware from a PCI ID or probe arbitrary MMIO. `IOCTL_TIMECARD_GET_CAPABILITIES`
 reports the board profile, oscillator type, safe steering ranges, paired-PPS
 indices, phase-step support, temperature telemetry, hardware-discipline support,
@@ -138,15 +220,70 @@ to the published miniCOD ranges (`0..4800` and `0..0x3fffff`).
 
 The native `TimeCardDiscipline.dll` is a small stable Windows C ABI around the
 vendored Orolia `disciplining-minipod` 3.6.0 implementation used by
-`oscillatord` 3.10.0. The Control Center feeds it the paired phase, GNSS-valid,
+`oscillatord` 3.10.0. The native runtime feeds it the paired phase, GNSS-valid,
 lock, temperature, fine/coarse, survey state, and the previous u-blox TIM-TP
-quantization error, then applies only the returned bounded action. GNSS fix and
-survey state come from passive NAV-PVT and TIM-SVIN messages without changing
-the ART UART divisor. Full calibration uses miniCOD's three-point plan and 50 valid
-paired PPS samples per point. Parameters are loaded from and saved to the ART
-24c08 layout (configuration at `0x000`, temperature table at `0x090`) and a
-host backup under `%ProgramData%\OCP Time Card`; writes require version-1
+quantization error, then applies only the returned bounded action. GNSS fix,
+leap, survey, and RF state come from a checksum-valid continuous UBX session
+that associates NAV-PVT, NAV-TIMELS, TIM-TP (normalized from its documented
+next-pulse iTOW), and TIM-SVIN and decodes MON-RF antenna power/status. It uses
+only fresh, unconsumed UART epochs paired with newly advanced, error-free FPGA
+GNSS/oscillator PPS counters. Full calibration uses miniCOD's three-point plan
+and 50 valid paired PPS samples per point. Parameters are loaded from and saved
+to the ART 24c08 layout (configuration at `0x000`, temperature table at `0x090`)
+and a host backup under `%ProgramData%\OCP Time Card`; writes require version-1
 headers and are verified byte for byte.
+
+u-blox receiver reconfiguration is deliberately separate from ordinary UART
+monitoring. It defaults off and requires the explicit
+`gnssReceiverReconfigure` service setting. When enabled, the service detects the
+live receiver baud, sends one bounded CFG-VALSET profile, and requires the
+receiver's ACK before continuing. Persistence is another opt-in:
+`gnssPersistConfiguration=false` changes RAM only, while true also selects
+battery-backed RAM and flash. The profile covers one-hertz navigation,
+NAV-PVT/NAV-TIMELS/TIM-TP/TIM-SVIN/MON-RF, TP1 time grid and cable delay, and
+optional RTCM/raw-observation output.
+
+`TimeCardOscillatord.exe` hosts that engine as a delayed-start native Windows
+Service. It uses the ABI 14 exclusive discipline lease and initializes the PHC
+only from a fresh, iTOW-coherent GPS-grid NAV-PVT/NAV-TIMELS/TIM-TP epoch. Each
+set is armed against exactly the next valid FPGA reference edge; missed or
+extra edges, unsafe phase magnitude, stale/reused epochs, a leap boundary,
+startup timeout, or failed post-write GNSS/PHC verification aborts alignment.
+The service survives card removal and reinsertion, keeps calibration state
+separate by card identity, and publishes telemetry over a protected local named
+pipe plus an optional compatible TCP endpoint. Read-EEPROM responses include
+presence/validity, length, SHA-256, and the exact binary image as JSON
+`data_base64` for read-only diagnostics.
+
+On a multi-card host, `oscillatord.json` can select the target by the preferred
+six-byte `deviceSerial`, by an exact enumerated `devicePath`, or by both for a
+fail-closed cross-check. `deviceIndex` remains a compatibility fallback only;
+its sorted position can change when the installed-card inventory changes.
+Per-card host calibration uses the serial when valid and otherwise a hash of the
+stable device-interface path, never a shared board-profile directory.
+
+With `gnssRtcmEnabled=true`, a separate protected local-only binary pipe,
+`\\.\pipe\OcpTimeCard.Rtcm.v1`, forwards only complete CRC-24Q-valid RTCM3 and
+checksum-valid UBX-RXM-RAWX/SFRBX frames. Its drop-oldest queue is bounded to
+256 frames and 1 MiB, so an absent or slow local reader cannot block the GNSS
+discipline path; remote pipe clients are rejected. With receiver reconfiguration
+also enabled, the service requests the matching u-blox output set. Otherwise it
+forwards matching frames only when the receiver is already configured to emit
+them.
+
+`TimeCardTimeProvider.dll` can be registered explicitly as a W32Time hardware
+input provider; it replaces the Linux NTP-SHM/chrony path without repeatedly
+stepping the Windows clock from the service. The service publishes only a
+synchronized PHC with a bounded cross-timestamp window and an eligible locked
+or holdover-ready discipline state. The provider independently rejects stale,
+malformed, changing, unsynchronized, excessive-offset, delay, or dispersion
+samples before offering one to W32Time. Freshness is measured from the
+monotonic instant of the driver cross-timestamp capture rather than its later
+publication. A W32Time `TPC_TimeJumped` notification rejects all prior and
+in-flight associations until a new capture arrives beyond a one-second
+monotonic settling barrier. See
+[TimeCardOscillatord/README.md](TimeCardOscillatord/README.md) for build,
+installation, configuration, and safety details.
 
 Meta/Facebook boards with a MAC-SA53 use the existing atomic-clock hardware
 discipline workspace. Celestica and future Linux-listed variants are detected
@@ -193,6 +330,20 @@ Build output is written to:
   `timecard.cat`, the controller icon, and subsystem icons).
 - `out\timecardctl.exe` - command-line control tool.
 
+Run the hardware-independent FPGA and product checks from this directory:
+
+```powershell
+.\tools\test-fpga-abi.ps1
+.\tools\test-fpga-advanced.ps1
+.\tools\test-board-profiles.ps1
+.\tools\test-multi-card-control-center.ps1
+```
+
+`test-fpga-advanced.ps1` verifies ABI 15 layouts, revision and synthesis gates,
+interrupt maps, trusted static inventory, transactional rollback, and 1.42
+metadata without opening the device. It does not replace real signal loopback
+or interrupt-load testing.
+
 ## Time Card Control Center
 
 The repository also includes a polished native Windows dashboard covering live
@@ -225,7 +376,7 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-Driver **1.38 / ABI 11** is required for the complete feature set shown below.
+Driver **1.42 / ABI 15** is required for the complete feature set shown below.
 
 ![Control Center overview](assets/timecard-control-center.png)
 
@@ -296,11 +447,35 @@ Run the tool from an Administrator prompt:
 ```text
 timecardctl status
 timecardctl get
+timecardctl fpga-status
+timecardctl fpga-inventory
+timecardctl fpga-contract-status
+timecardctl fpga-contract-set 0x12345678 clock-advanced,tod-telemetry acknowledge
+timecardctl clock-telemetry
+timecardctl clock-adjust-status
+timecardctl clock-adjust-set offset 100 1000000 threshold 250
+timecardctl clock-advanced-status
+timecardctl pps-status
+timecardctl pps-set master on active-high 0 500
+timecardctl timecode-status
+timecardctl timecode-set irig master on -37 0 1 7
+timecardctl timecode-set irig master on -37 0 1 7 0x12345 --am on
+timecardctl timecode-set irig slave on 37 250 1 2 --year 2026
+timecardctl tod-status
+timecardctl tod-set on pfec 1 115200 normal 0 0x00
+timecardctl signal-status
+timecardctl signal-clear 1
+timecardctl signal-events 1 16
+timecardctl timestamp-status
+timecardctl timestamp-set ts1 on rising 25 clear-error clear-queue
+timecardctl timestamp-read ts1 16
 timecardctl set-system
-timecardctl clock-source tod
+timecardctl clock-source synce
 timecardctl serial
 timecardctl nmea-status
 timecardctl nmea-set on 9600 normal
+timecardctl nmea-utc-status
+timecardctl nmea-utc-set 37 valid none
 timecardctl uart-read 3 256 1000
 timecardctl uart-config 0 115200
 timecardctl uart-read 0 256 1000
@@ -330,6 +505,16 @@ timecardctl led-test
 
 UART ports are `0=GNSS`, `1=GNSS2`, `2=atomic clock`, and `3=NMEA`.
 
+Do not copy the example `0x12345678` contract word. Read the installed card's
+raw word with `fpga-contract-status`, verify the exact bitstream build manifest,
+then activate only the capabilities that manifest guarantees. The contract is
+session-scoped, must match the board and layout, and is invalidated by an image
+change. `clock-servo-log`, `clock-advanced`, `tod-telemetry`, `tod-utc-read`,
+`tod-utc-write`, `irig-master-am`, `irig-slave-am`, `irig-slave-year`,
+`ntp-source`, `synce-source`, and `dynamic-source` are independently selectable;
+UTC write also requires UTC read. ART extended timestamp support remains
+unavailable until ART has a trusted image identity and aperture manifest.
+
 SMA selectors use the same values as Linux `ptp_ocp`. Common input values are
 `0x0000=10 MHz`, `0x0001=PPS1`, `0x0002=PPS2`, `0x0004=TS1`,
 `0x0010=IRIG-B`, and `0x0020=DCF77`. Common output values are `0x0000=10 MHz`,
@@ -358,11 +543,35 @@ failed transient transaction is reset and retried once within the requested
 bounded timeout. Driver 1.12 also reports controller transport failures as I/O
 device errors instead of the misleading Windows "CRC data error" translation.
 
-The NMEA generator is separate from the UART receiver. Driver 1.9 enables it
-at 9,600 baud on first use when firmware left it disabled, and keeps the UART 3
-receiver divisor synchronized whenever `nmea-set` changes the generator baud.
-Supported rates are 1,200 through 2,000,000 baud using the selector table from
-Linux `ptp_ocp`.
+The NMEA generator is separate from the UART receiver. The driver deliberately
+does not probe or initialize the optional ToD Master during D0 entry: a register
+address fitting inside BAR0 does not prove that an older FPGA image decodes that
+AXI slave, and an automatic boot-time access could prevent the card from
+starting. `nmea-status` and `nmea-set` remain explicit operator-initiated IOCTL
+paths; they validate the core version before accessing revision-dependent
+fields. `nmea-set` also keeps the UART 3 receiver divisor synchronized with the
+generator baud. Supported rates are 1,200 through 2,000,000 baud using the
+selector table from Linux `ptp_ocp`. The FPGA's existing generator state is
+left untouched during device start.
+
+Driver 1.40 / ABI 13 extends the same fixed-size `TIMECARD_NMEA_CONTROL`
+record with the documented ToD Master correction, local-zone offset, GNSS
+talker and message gates. `nmea-set` accepts the extended form
+`<on|off> <baud> <polarity> <correction-s> <local-minutes> <gnss> <mask>`.
+The mask uses bit 0 for RMC (core 1.4+), bit 1 for ZDA, and bit 2 for the
+optional proprietary UTC sentence (core 1.6+). Writes preserve unknown bits,
+disable the core while changing configuration and verify every setting by
+readback. The synthesis-optional UTC-info registers remain inaccessible by
+default; ABI 15 can use them only after an exact-image UTC read/write contract
+has been activated for the current card session.
+
+ToD Master 1.1 and newer also expose a sticky transmitter-error status bit.
+`nmea-status` reports it as `transmitter ERROR`; ordinary queries and settings
+never acknowledge it. After correcting the configuration, append `clear` to
+either `nmea-set` form to issue the documented write-one-to-clear operation,
+for example `timecardctl nmea-set on 9600 normal clear`. The clear request is
+revision-gated and preserves the enable, baud, polarity, correction, local
+offset, GNSS talker, sentence gates, and unknown control bits.
 
 Driver 1.10 / ABI 5 adds dedicated controls for all four periodic signal
 generators and frequency counters. Generator configuration follows the Linux
@@ -370,6 +579,31 @@ generators and frequency counters. Generator configuration follows the Linux
 pulse width and polarity, then assert valid plus enable. Frequency counters
 accept an integration window of 0 (disabled) or 1–255 seconds and report the
 FPGA valid, error, overrun, and 24-bit frequency-result fields.
+
+The existing 64-byte generator request also supports an opt-in absolute start
+without an ABI or structure-size change. `signal-set` retains phase-aligned
+scheduling. `signal-set-at` instead supplies the exact 32-bit PHC/TAI seconds
+and 0-999,999,999 nanosecond registers. The request is rejected unless the
+target is more than 1 ms ahead of a fresh PHC sample; all validation and time
+calculation precede MMIO mutation, exact start readback is required, and a
+failed transaction restores every prior generator register. The absolute flag
+is request-only and is never returned by `signal-status`.
+
+The signal-generator manual section 3.2.1.3 defines polarity bit 0 as `1`
+active-high and `0` active-low. The public flag and UI now use those names
+without changing the raw bit. `timecardctl` continues accepting the legacy
+`inverted`/`normal` spellings as source and script compatibility aliases.
+
+PHC acquisition and all start-time overflow checks complete before the driver
+disables a generator. If final register readback fails, the driver restores the
+previous polarity, cable delay, repeat count, start, period, pulse, enable, and
+interrupt-mask words so a failed request cannot alter an output that was
+already configured or running.
+
+Signal-generator Error and TimeJump status bits are sticky. `signal-status`
+reports them without acknowledging them; `signal-clear <generator>` issues the
+documented write-one-to-clear mask through a clear-only ABI 13 request. That
+path does not disable, reschedule, or otherwise reconfigure a running output.
 
 Driver 1.12 / ABI 6 adds the guarded FPGA flash interface and UART activity
 observation. The SPI controller offsets, Xilinx FIFO sequence, FPGA image
@@ -480,6 +714,41 @@ The same profile maps the IS32FL3207 at `0x34` to the schematic's single GPS
 indicator and four SMA indicators, swaps its green/red output order, masks the
 unconnected OUT16-18 fault bits, and reports the second GNSS indicator as not
 fitted rather than driving an unconnected output group.
+
+Driver 1.39 / ABI 12 audits all twelve FPGA manuals in `SOM/FPGA/Doc` and
+adds capability-first PPS, IRIG-B/G, DCF77, ToD-parser, clock-telemetry, and
+extended signal-generator controls. Register layouts are selected from the
+trusted Linux board profiles; each explicitly requested core is checked at its
+common version register before revision-specific fields are accessed. Writes
+use documented bounds, reserved-bit preservation, disable/configure/restore
+sequencing, explicit W1C actions, and value-by-value readback verification.
+The same audit corrects logical ToD polarity, signed delays/corrections, IRIG
+mode handling, SMA route ownership, and generator interrupt/status handling.
+It deliberately does not probe the uninstantiated Configuration Slave or
+synthesis-optional clock/ToD registers that lack a published capability bit.
+It also does not infer synthesis-enabled behavior from a core version: the
+current bitstreams publish no capability word for dynamic PPS features,
+signal-generator cable delay, IRIG-B/G variants, or ToD protocol/message
+parsers. Register readback must be followed by hardware signal, loopback, or
+known-stream validation for those functions.
+
+Driver 1.40 / ABI 13 additionally exposes the Linux-compatible FPGA image
+identity through a fixed-size, read-only IOCTL. It reads only the two trusted
+static MSI/MSI-X image offsets, rejects invalid bus-fill values, and never
+attempts this access on ART. The identity makes diagnostics and exported
+profiles traceable to a board layout and bitstream version without pretending
+to know synthesis generics that the image does not publish.
+
+Driver 1.42 / ABI 15 completes the software-feasible FPGA/UCM audit gaps. It
+adds six-channel interrupt-backed Signal Timestamper capture, generator
+completion events, smooth and advanced Adjustable Clock control, PFEC and
+protocol-specific ToD telemetry, ToD Master UTC handshakes, IRIG AM/code/year,
+and the read-only static core inventory. Optional accesses require the
+session-scoped exact-image contract and are revalidated against the live raw
+image word. Clock source selection also covers contract-gated NTP on Clock
+1.8+ and SyncE/dynamic sources on Clock 2.7+. Configuration paths use complete
+snapshot/readback/rollback transactions. The Windows client and Control Center
+enumerate every device interface and keep selected-card settings separate.
 
 The schematic's U26 TMUX1072 is not software-controlled. Its `MACSER` select
 comes only from the physical DIP switch: 0 routes MAC I2C and 1 routes the FPGA

@@ -19,6 +19,18 @@ namespace TimeCardControlCenter
 {
     public partial class MainWindow
     {
+        private const uint ProfileEngineAbi = 12;
+        private const uint ProfileNmeaAdvancedAbi = 13;
+        private const uint ProfileCorePpsMaster = 1u << 0;
+        private const uint ProfileCorePpsSlave = 1u << 1;
+        private const uint ProfileCoreIrigMaster = 1u << 2;
+        private const uint ProfileCoreIrigSlave = 1u << 3;
+        private const uint ProfileCoreDcfMaster = 1u << 4;
+        private const uint ProfileCoreDcfSlave = 1u << 5;
+        private const uint ProfileCoreTodSlave = 1u << 6;
+        private const uint ProfileCoreTodMaster = 1u << 7;
+        private const uint ProfileCoreSignalGenerators = 1u << 8;
+
         private ControlCenterSettings productSettings;
         private TelemetrySession telemetrySession;
         private SensorTelemetrySnapshot lastSensorSnapshot;
@@ -232,6 +244,7 @@ namespace TimeCardControlCenter
                 workspace == "Uart" ? UartNav :
                 workspace == "Sma" ? SmaNav :
                 workspace == "Timing" ? TimingNav :
+                workspace == "Fpga" ? FpgaNav :
                 workspace == "Sensors" ? SensorsNav :
                 workspace == "I2c" ? I2cNav :
                 workspace == "Telemetry" ? TelemetryNav :
@@ -250,8 +263,37 @@ namespace TimeCardControlCenter
             if (ProfileDescriptionText == null)
                 return;
             ConfigurationProfile profile = ProfileCombo.SelectedItem as ConfigurationProfile;
-            ProfileDescriptionText.Text = profile == null ?
-                "Choose a profile to preview its effect." : profile.Description;
+            if (profile == null)
+            {
+                ProfileDescriptionText.Text =
+                    "Choose a profile to preview its effect.";
+            }
+            else if (profile.HasFpgaImageIdentity)
+            {
+                ProfileDescriptionText.Text = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}\nCompatibility: board profile {1}, layout {2}, {3} image {4}.{5} (tag {6}, raw 0x{7:X8}).",
+                    profile.Description,
+                    profile.FpgaImageBoardProfile,
+                    profile.FpgaImageLayout,
+                    profile.FpgaImageLoaderEncoding ? "loader-encoded" : "application",
+                    profile.FpgaImageVersion >> 8,
+                    profile.FpgaImageVersion & 0xffu,
+                    profile.FpgaImageTag,
+                    profile.FpgaImageRawVersion);
+            }
+            else
+            {
+                ProfileDescriptionText.Text = profile.Description;
+            }
+            if (profile != null && profile.SchemaVersion != 0)
+                ProfileDescriptionText.Text += string.Format(
+                    CultureInfo.InvariantCulture,
+                    "\nProfile schema {0}; captured with ABI {1}; requires ABI {2} " +
+                    "and FPGA core mask 0x{3:X8}.",
+                    profile.SchemaVersion, profile.CapturedAbiVersion,
+                    GetProfileRequiredAbi(profile),
+                    GetProfileRequiredCoreMask(profile));
             ProfileDiffText.Text = profile == null ? "No profile selected." :
                 "Select Preview changes to compare this profile with the live card.";
         }
@@ -280,6 +322,8 @@ namespace TimeCardControlCenter
             if (!EnsureProfileReady(profile))
                 return;
             ConfigurationProfile rollback = null;
+            criticalConfigurationWrite = true;
+            UpdateDeviceSelectionControls();
             try
             {
                 SetProfileBusy(true, "Capturing rollback state…");
@@ -324,6 +368,11 @@ namespace TimeCardControlCenter
                         MessageBoxImage.Error);
                 }
             }
+            finally
+            {
+                criticalConfigurationWrite = false;
+                UpdateDeviceSelectionControls();
+            }
         }
 
         private async void RestoreLastKnownGood_Click(object sender, RoutedEventArgs e)
@@ -337,6 +386,8 @@ namespace TimeCardControlCenter
             if (!EnsureProfileReady(target))
                 return;
             ConfigurationProfile current = null;
+            criticalConfigurationWrite = true;
+            UpdateDeviceSelectionControls();
             try
             {
                 current = await Task.Run(() => CaptureConfigurationCore("Pre-restore"));
@@ -365,6 +416,11 @@ namespace TimeCardControlCenter
                 AddConfigurationHistory("RESTORE FAILED", target.Name, ex.Message);
                 SetProfileBusy(false, "Restore failed; the pre-restore state was retained when possible: " + ex.Message);
             }
+            finally
+            {
+                criticalConfigurationWrite = false;
+                UpdateDeviceSelectionControls();
+            }
         }
 
         private bool EnsureProfileReady(ConfigurationProfile profile)
@@ -384,26 +440,195 @@ namespace TimeCardControlCenter
                 SetProfileBusy(false, "Connect to the Time Card before using profiles.");
                 return false;
             }
+            if (profile.SchemaVersion > ConfigurationProfile.CurrentSchemaVersion)
+            {
+                SetProfileBusy(false, string.Format(CultureInfo.InvariantCulture,
+                    "Profile schema {0} is newer than the supported schema {1}.",
+                    profile.SchemaVersion,
+                    ConfigurationProfile.CurrentSchemaVersion));
+                return false;
+            }
+            uint requiredAbi = GetProfileRequiredAbi(profile);
+            if (lastSnapshot.AbiVersion < requiredAbi)
+            {
+                SetProfileBusy(false, string.Format(CultureInfo.InvariantCulture,
+                    "This profile requires driver ABI {0}; the connected card exposes ABI {1}.",
+                    requiredAbi, lastSnapshot.AbiVersion));
+                return false;
+            }
+            uint requiredCores = GetProfileRequiredCoreMask(profile);
+            if (requiredCores != 0)
+            {
+                try
+                {
+                    FpgaCapabilities capabilities = client.GetFpgaCapabilities();
+                    uint missing = requiredCores & ~capabilities.CoreMask;
+                    if (missing != 0)
+                    {
+                        SetProfileBusy(false, string.Format(
+                            CultureInfo.InvariantCulture,
+                            "The live FPGA image is missing required core mask 0x{0:X8} " +
+                            "(required 0x{1:X8}, present 0x{2:X8}).",
+                            missing, requiredCores, capabilities.CoreMask));
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log("Profile FPGA capability validation failed: " + ex.Message);
+                    SetProfileBusy(false,
+                        "Unable to validate the profile's required FPGA cores: " +
+                        ex.Message);
+                    return false;
+                }
+            }
+            if (profile.HasFpgaImageIdentity)
+            {
+                if (lastSnapshot.AbiVersion < FpgaImageRequiredAbi)
+                {
+                    SetProfileBusy(false,
+                        "This profile contains image compatibility metadata. Install ABI 13 or newer before applying it.");
+                    return false;
+                }
+                try
+                {
+                    FpgaImageInfo image = client.GetFpgaImageInfo();
+                    if (!image.IsPresent ||
+                        image.BoardProfile != profile.FpgaImageBoardProfile ||
+                        image.Layout != profile.FpgaImageLayout ||
+                        image.RawVersion != profile.FpgaImageRawVersion ||
+                        image.ImageTag != profile.FpgaImageTag ||
+                        image.ImageVersion != profile.FpgaImageVersion ||
+                        image.IsLoader != profile.FpgaImageLoaderEncoding)
+                    {
+                        SetProfileBusy(false, string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Profile FPGA image mismatch: expected board/layout {0}/{1}, " +
+                            "{2} image {3}.{4}, tag {5}, raw 0x{6:X8}; live card is " +
+                            "board/layout {7}/{8}, {9} image {10}.{11}, tag {12}, " +
+                            "raw 0x{13:X8}. No configuration was written.",
+                            profile.FpgaImageBoardProfile,
+                            profile.FpgaImageLayout,
+                            profile.FpgaImageLoaderEncoding ? "loader-encoded" :
+                                "application",
+                            profile.FpgaImageVersion >> 8,
+                            profile.FpgaImageVersion & 0xffu,
+                            profile.FpgaImageTag,
+                            profile.FpgaImageRawVersion,
+                            image.BoardProfile,
+                            image.Layout,
+                            image.IsLoader ? "loader-encoded" : "application",
+                            image.ImageVersion >> 8,
+                            image.ImageVersion & 0xffu,
+                            image.ImageTag,
+                            image.RawVersion));
+                        return false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    SetProfileBusy(false,
+                        "Unable to validate the profile's FPGA image compatibility: " +
+                        ex.Message);
+                    return false;
+                }
+            }
             return true;
+        }
+
+        private static uint GetProfileRequiredAbi(ConfigurationProfile profile)
+        {
+            uint required = profile.RequiredAbiVersion;
+            if ((profile.PpsEngines != null && profile.PpsEngines.Count != 0) ||
+                (profile.TimecodeEngines != null &&
+                 profile.TimecodeEngines.Count != 0) ||
+                profile.TodParser != null ||
+                (profile.SignalGenerators != null &&
+                 profile.SignalGenerators.Count != 0))
+                required = Math.Max(required, ProfileEngineAbi);
+            if (profile.HasNmeaAdvanced)
+                required = Math.Max(required, ProfileNmeaAdvancedAbi);
+            return required;
+        }
+
+        private static uint GetProfileRequiredCoreMask(
+            ConfigurationProfile profile)
+        {
+            uint mask = profile.RequiredFpgaCoreMask;
+            if (profile.SchemaVersion == 0)
+                return mask;
+            if (profile.HasNmea)
+                mask |= ProfileCoreTodMaster;
+            if (profile.PpsEngines != null)
+                foreach (PpsProfileSetting setting in profile.PpsEngines)
+                    mask |= setting.Core == 1 ? ProfileCorePpsMaster :
+                        setting.Core == 2 ? ProfileCorePpsSlave : 0u;
+            if (profile.TimecodeEngines != null)
+                foreach (TimecodeProfileSetting setting in
+                         profile.TimecodeEngines)
+                    mask |= TimecodeCoreMask(setting.Format, setting.Role);
+            if (profile.TodParser != null)
+                mask |= ProfileCoreTodSlave;
+            if (profile.SignalGenerators != null &&
+                profile.SignalGenerators.Count != 0)
+                mask |= ProfileCoreSignalGenerators;
+            return mask;
+        }
+
+        private static uint TimecodeCoreMask(uint format, uint role)
+        {
+            if (format == 1 && role == 1) return ProfileCoreIrigMaster;
+            if (format == 1 && role == 2) return ProfileCoreIrigSlave;
+            if (format == 2 && role == 1) return ProfileCoreDcfMaster;
+            if (format == 2 && role == 2) return ProfileCoreDcfSlave;
+            return 0;
         }
 
         private ConfigurationProfile CaptureConfigurationCore(string name)
         {
             TimeCardSnapshot snapshot = client.GetSnapshot();
+            FpgaCapabilities capabilities = null;
             ConfigurationProfile profile = new ConfigurationProfile
             {
+                SchemaVersion = ConfigurationProfile.CurrentSchemaVersion,
+                CapturedAbiVersion = snapshot.AbiVersion,
                 Name = name,
                 Description = "Configuration captured at " + DateTime.Now.ToString("G", CultureInfo.CurrentCulture),
                 HasClockSource = snapshot.AbiVersion >= 4,
                 ClockSource = snapshot.ClockSource
             };
+            if (snapshot.AbiVersion >= ProfileEngineAbi)
+                capabilities = client.GetFpgaCapabilities();
+            if (snapshot.AbiVersion >= FpgaImageRequiredAbi &&
+                !string.Equals(snapshot.Layout, "Orolia ART",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    FpgaImageInfo image = client.GetFpgaImageInfo();
+                    profile.HasFpgaImageIdentity = image.IsPresent;
+                    profile.FpgaImageRawVersion = image.RawVersion;
+                    profile.FpgaImageTag = image.ImageTag;
+                    profile.FpgaImageVersion = image.ImageVersion;
+                    profile.FpgaImageLayout = image.Layout;
+                    profile.FpgaImageBoardProfile = image.BoardProfile;
+                    profile.FpgaImageLoaderEncoding = image.IsLoader;
+                }
+                catch
+                {
+                    /* Image metadata is additive; configuration capture remains usable. */
+                }
+            }
+            /*
+             * Do not query the optional ToD Master while capturing a profile.
+             * The generic Meta/Celestica resource map reserves its address but
+             * does not prove that every deployed bitstream decodes the slave.
+             * A future, signed image-specific synthesis manifest may opt this
+             * block into capture. Explicit NMEA query/set operations remain
+             * available in the NMEA workspace and for declared profiles.
+             */
             if (snapshot.AbiVersion >= 4)
             {
-                NmeaOutputState nmea = client.GetNmeaOutput();
-                profile.HasNmea = nmea.IsPresent;
-                profile.NmeaEnabled = nmea.IsEnabled;
-                profile.NmeaBaud = nmea.Baud;
-                profile.NmeaInverted = nmea.IsInverted;
                 for (uint connector = 1; connector <= 4; connector++)
                 {
                     SmaConnectorState state = client.GetSmaConnector(connector);
@@ -416,6 +641,105 @@ namespace TimeCardControlCenter
                         });
                 }
             }
+            if (capabilities != null)
+            {
+                for (uint core = 1; core <= 2; core++)
+                {
+                    uint coreMask = core == 1 ? ProfileCorePpsMaster :
+                        ProfileCorePpsSlave;
+                    if ((capabilities.CoreMask & coreMask) == 0)
+                        continue;
+                    PpsEngineState state = client.GetPpsEngine(core);
+                    if (state.IsPresent)
+                        profile.PpsEngines.Add(new PpsProfileSetting
+                        {
+                            Core = core,
+                            CoreVersion = state.Version,
+                            Enabled = state.IsEnabled,
+                            ActiveHigh = state.IsActiveHigh,
+                            HasPulseWidth = state.IsPulseWidthWritable,
+                            PulseWidthMilliseconds =
+                                state.PulseWidthMilliseconds,
+                            CableDelayNanoseconds =
+                                state.CableDelayNanoseconds
+                        });
+                }
+                for (uint format = 1; format <= 2; format++)
+                    for (uint role = 1; role <= 2; role++)
+                    {
+                        uint coreMask = TimecodeCoreMask(format, role);
+                        if ((capabilities.CoreMask & coreMask) == 0)
+                            continue;
+                        TimecodeEngineState state =
+                            client.GetTimecodeEngine(format, role);
+                        if (state.IsPresent)
+                            profile.TimecodeEngines.Add(
+                                new TimecodeProfileSetting
+                                {
+                                    Format = format,
+                                    Role = role,
+                                    CoreVersion = state.Version,
+                                    Enabled = state.IsEnabled,
+                                    Mode = state.Mode,
+                                    Code = state.Code,
+                                    CorrectionSeconds =
+                                        state.CorrectionSeconds,
+                                    HasDelay = state.IsDelayWritable,
+                                    DelayNanoseconds = state.DelayNanoseconds,
+                                    HasControlBits =
+                                        state.IsControlBitsWritable,
+                                    ControlBits = state.ControlBits
+                                });
+                    }
+                if ((capabilities.CoreMask & ProfileCoreTodSlave) != 0)
+                {
+                    TodParserState state = client.GetTodParser();
+                    if (state.IsPresent)
+                        profile.TodParser = new TodParserProfileSetting
+                        {
+                            CoreVersion = state.Version,
+                            Enabled = state.IsEnabled,
+                            Protocol = state.Protocol,
+                            Gnss = state.Gnss,
+                            Baud = state.Baud,
+                            Inverted = state.IsInverted,
+                            CorrectionSeconds = state.CorrectionSeconds,
+                            MessageDisableMask = state.MessageDisableMask
+                        };
+                }
+                if ((capabilities.CoreMask &
+                     ProfileCoreSignalGenerators) != 0)
+                    for (uint generator = 1; generator <= 4; generator++)
+                    {
+                        SignalGeneratorState state =
+                            client.GetSignalGenerator(generator);
+                        if (state.IsPresent)
+                            profile.SignalGenerators.Add(
+                                new SignalGeneratorProfileSetting
+                                {
+                                    Generator = generator,
+                                    CoreVersion = state.Version,
+                                    Enabled = state.IsEnabled,
+                                    ActiveHigh = state.IsActiveHigh,
+                                    PeriodNanoseconds =
+                                        state.PeriodNanoseconds,
+                                    PulseNanoseconds = state.PulseNanoseconds,
+                                    PhaseNanoseconds = state.PhaseNanoseconds,
+                                    RepeatCount = state.RepeatCount,
+                                    CableDelayNanoseconds =
+                                        state.CableDelayNanoseconds
+                                });
+                    }
+            }
+            if (profile.HasClockSource || profile.HasNmea ||
+                profile.Sma.Count != 0)
+                profile.RequiredAbiVersion = 4;
+            if (profile.HasFpgaImageIdentity)
+                profile.RequiredAbiVersion = Math.Max(
+                    profile.RequiredAbiVersion, FpgaImageRequiredAbi);
+            profile.RequiredAbiVersion = GetProfileRequiredAbi(profile);
+            profile.RequiredFpgaCoreMask =
+                GetProfileRequiredCoreMask(profile);
             return profile;
         }
 
@@ -429,13 +753,149 @@ namespace TimeCardControlCenter
             }
             if (profile.HasNmea)
             {
-                NmeaOutputState state = client.SetNmeaOutput(profile.NmeaEnabled,
-                    profile.NmeaBaud, profile.NmeaInverted);
+                NmeaOutputState current = client.GetNmeaOutput();
+                RequireCoreRevision("NMEA master", current.Version,
+                    profile.NmeaCoreVersion);
+                NmeaOutputState state = profile.HasNmeaAdvanced ?
+                    client.SetNmeaOutput(profile.NmeaEnabled,
+                        profile.NmeaBaud, profile.NmeaInverted,
+                        profile.NmeaCorrectionSeconds,
+                        profile.NmeaLocalOffsetMinutes, profile.NmeaGnss,
+                        profile.NmeaMessageDisableMask) :
+                    client.SetNmeaOutput(profile.NmeaEnabled,
+                        profile.NmeaBaud, profile.NmeaInverted);
                 if (verify && (state.IsEnabled != profile.NmeaEnabled ||
                     state.IsInverted != profile.NmeaInverted ||
-                    (profile.NmeaEnabled && state.Baud != profile.NmeaBaud)))
+                    (profile.NmeaEnabled && state.Baud != profile.NmeaBaud) ||
+                    (profile.HasNmeaAdvanced &&
+                     (state.CorrectionSeconds != profile.NmeaCorrectionSeconds ||
+                      state.LocalOffsetMinutes != profile.NmeaLocalOffsetMinutes ||
+                      state.Gnss != profile.NmeaGnss ||
+                      state.MessageDisableMask !=
+                          profile.NmeaMessageDisableMask))))
                     throw new InvalidOperationException("NMEA generator read-back verification failed.");
             }
+            if (profile.PpsEngines != null)
+                foreach (PpsProfileSetting setting in profile.PpsEngines)
+                {
+                    PpsEngineState current = client.GetPpsEngine(setting.Core);
+                    if (!current.IsPresent)
+                        throw new InvalidOperationException(
+                            "PPS " + PpsRoleName(setting.Core) +
+                            " is not present.");
+                    RequireCoreRevision("PPS " + PpsRoleName(setting.Core),
+                        current.Version, setting.CoreVersion);
+                    uint pulseWidth = setting.HasPulseWidth ?
+                        setting.PulseWidthMilliseconds :
+                        current.PulseWidthMilliseconds;
+                    PpsEngineState state = client.SetPpsEngine(setting.Core,
+                        setting.Enabled, setting.ActiveHigh, pulseWidth,
+                        setting.CableDelayNanoseconds, false);
+                    if (verify &&
+                        (state.IsEnabled != setting.Enabled ||
+                         state.IsActiveHigh != setting.ActiveHigh ||
+                         state.CableDelayNanoseconds !=
+                            setting.CableDelayNanoseconds ||
+                         (setting.HasPulseWidth &&
+                          state.PulseWidthMilliseconds !=
+                            setting.PulseWidthMilliseconds)))
+                        throw new InvalidOperationException(
+                            "PPS " + PpsRoleName(setting.Core) +
+                            " read-back verification failed.");
+                }
+            if (profile.TimecodeEngines != null)
+                foreach (TimecodeProfileSetting setting in
+                         profile.TimecodeEngines)
+                {
+                    TimecodeEngineState current = client.GetTimecodeEngine(
+                        setting.Format, setting.Role);
+                    if (!current.IsPresent)
+                        throw new InvalidOperationException(
+                            TimecodeName(setting.Format, setting.Role) +
+                            " is not present.");
+                    RequireCoreRevision(
+                        TimecodeName(setting.Format, setting.Role),
+                        current.Version, setting.CoreVersion);
+                    int delay = setting.HasDelay ? setting.DelayNanoseconds :
+                        current.DelayNanoseconds;
+                    uint controlBits = setting.HasControlBits ?
+                        setting.ControlBits : current.ControlBits;
+                    TimecodeEngineState state = client.SetTimecodeEngine(
+                        setting.Format, setting.Role, setting.Enabled,
+                        setting.Mode, setting.Code,
+                        setting.CorrectionSeconds, delay, controlBits, false);
+                    if (verify &&
+                        (state.IsEnabled != setting.Enabled ||
+                         state.Mode != setting.Mode ||
+                         state.Code != setting.Code ||
+                         state.CorrectionSeconds !=
+                            setting.CorrectionSeconds ||
+                         (setting.HasDelay &&
+                          state.DelayNanoseconds != setting.DelayNanoseconds) ||
+                         (setting.HasControlBits &&
+                          state.ControlBits != setting.ControlBits)))
+                        throw new InvalidOperationException(
+                            TimecodeName(setting.Format, setting.Role) +
+                            " read-back verification failed.");
+                }
+            if (profile.TodParser != null)
+            {
+                TodParserProfileSetting setting = profile.TodParser;
+                TodParserState current = client.GetTodParser();
+                if (!current.IsPresent)
+                    throw new InvalidOperationException(
+                        "ToD parser is not present.");
+                RequireCoreRevision("ToD parser", current.Version,
+                    setting.CoreVersion);
+                TodParserState state = client.SetTodParser(setting.Enabled,
+                    setting.Protocol, setting.Gnss, setting.Baud,
+                    setting.Inverted, setting.CorrectionSeconds,
+                    setting.MessageDisableMask, false);
+                if (verify &&
+                    (state.IsEnabled != setting.Enabled ||
+                     state.Protocol != setting.Protocol ||
+                     state.Gnss != setting.Gnss ||
+                     state.Baud != setting.Baud ||
+                     state.IsInverted != setting.Inverted ||
+                     state.CorrectionSeconds != setting.CorrectionSeconds ||
+                     state.MessageDisableMask !=
+                        setting.MessageDisableMask))
+                    throw new InvalidOperationException(
+                        "ToD parser read-back verification failed.");
+            }
+            if (profile.SignalGenerators != null)
+                foreach (SignalGeneratorProfileSetting setting in
+                         profile.SignalGenerators)
+                {
+                    SignalGeneratorState current =
+                        client.GetSignalGenerator(setting.Generator);
+                    if (!current.IsPresent)
+                        throw new InvalidOperationException(string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Signal generator {0} is not present.",
+                            setting.Generator));
+                    RequireCoreRevision("Signal generator " +
+                        setting.Generator.ToString(CultureInfo.InvariantCulture),
+                        current.Version, setting.CoreVersion);
+                    SignalGeneratorState state = client.SetSignalGenerator(
+                        setting.Generator, setting.Enabled,
+                        setting.PeriodNanoseconds, setting.PulseNanoseconds,
+                        setting.PhaseNanoseconds, setting.ActiveHigh,
+                        setting.RepeatCount, setting.CableDelayNanoseconds);
+                    if (verify &&
+                        (state.IsEnabled != setting.Enabled ||
+                         state.IsActiveHigh != setting.ActiveHigh ||
+                         state.PeriodNanoseconds != setting.PeriodNanoseconds ||
+                         state.PulseNanoseconds != setting.PulseNanoseconds ||
+                         state.PhaseNanoseconds != setting.PhaseNanoseconds ||
+                         state.RepeatCount != setting.RepeatCount ||
+                         state.CableDelayNanoseconds !=
+                            setting.CableDelayNanoseconds))
+                        throw new InvalidOperationException(string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Signal generator {0} read-back verification failed.",
+                            setting.Generator));
+                }
             foreach (SmaProfileSetting setting in profile.Sma)
             {
                 SmaConnectorState state = client.SetSmaConnector(setting.Connector,
@@ -459,10 +919,128 @@ namespace TimeCardControlCenter
             if (target.HasNmea && (!current.HasNmea ||
                 target.NmeaEnabled != current.NmeaEnabled ||
                 target.NmeaBaud != current.NmeaBaud ||
-                target.NmeaInverted != current.NmeaInverted))
+                target.NmeaInverted != current.NmeaInverted ||
+                (target.HasNmeaAdvanced &&
+                 (!current.HasNmeaAdvanced ||
+                  target.NmeaCorrectionSeconds != current.NmeaCorrectionSeconds ||
+                  target.NmeaLocalOffsetMinutes != current.NmeaLocalOffsetMinutes ||
+                  target.NmeaGnss != current.NmeaGnss ||
+                  target.NmeaMessageDisableMask !=
+                      current.NmeaMessageDisableMask))))
                 changes.Add(string.Format(CultureInfo.InvariantCulture,
-                    "• NMEA: {0} {1} baud {2}", target.NmeaEnabled ? "enabled" : "disabled",
-                    target.NmeaBaud, target.NmeaInverted ? "inverted" : "normal polarity"));
+                    "• NMEA: {0} {1} baud {2}{3}",
+                    target.NmeaEnabled ? "enabled" : "disabled",
+                    target.NmeaBaud,
+                    target.NmeaInverted ? "inverted" : "normal polarity",
+                    target.HasNmeaAdvanced ? string.Format(
+                        CultureInfo.InvariantCulture,
+                        ", correction {0} s, local {1} min, GNSS {2}, mask 0x{3:X2}",
+                        target.NmeaCorrectionSeconds,
+                        target.NmeaLocalOffsetMinutes, target.NmeaGnss,
+                        target.NmeaMessageDisableMask) : string.Empty));
+            if (target.PpsEngines != null)
+                foreach (PpsProfileSetting setting in target.PpsEngines)
+                {
+                    PpsProfileSetting old = current.PpsEngines == null ? null :
+                        current.PpsEngines.FirstOrDefault(item =>
+                            item.Core == setting.Core);
+                    if (old == null || old.Enabled != setting.Enabled ||
+                        old.ActiveHigh != setting.ActiveHigh ||
+                        old.CableDelayNanoseconds !=
+                            setting.CableDelayNanoseconds ||
+                        (setting.HasPulseWidth &&
+                         (!old.HasPulseWidth || old.PulseWidthMilliseconds !=
+                            setting.PulseWidthMilliseconds)))
+                        changes.Add(string.Format(CultureInfo.InvariantCulture,
+                            "• PPS {0}: {1}, {2}, cable {3} ns{4}",
+                            PpsRoleName(setting.Core),
+                            setting.Enabled ? "enabled" : "disabled",
+                            setting.ActiveHigh ? "active-high" : "active-low",
+                            setting.CableDelayNanoseconds,
+                            setting.HasPulseWidth ? ", pulse " +
+                                setting.PulseWidthMilliseconds.ToString(
+                                    CultureInfo.InvariantCulture) + " ms" :
+                                string.Empty));
+                }
+            if (target.TimecodeEngines != null)
+                foreach (TimecodeProfileSetting setting in
+                         target.TimecodeEngines)
+                {
+                    TimecodeProfileSetting old =
+                        current.TimecodeEngines == null ? null :
+                        current.TimecodeEngines.FirstOrDefault(item =>
+                            item.Format == setting.Format &&
+                            item.Role == setting.Role);
+                    if (old == null || old.Enabled != setting.Enabled ||
+                        old.Mode != setting.Mode || old.Code != setting.Code ||
+                        old.CorrectionSeconds != setting.CorrectionSeconds ||
+                        (setting.HasDelay && (!old.HasDelay ||
+                         old.DelayNanoseconds != setting.DelayNanoseconds)) ||
+                        (setting.HasControlBits && (!old.HasControlBits ||
+                         old.ControlBits != setting.ControlBits)))
+                        changes.Add(string.Format(CultureInfo.InvariantCulture,
+                            "• {0}: {1}, mode {2}, code {3}, correction {4} s{5}{6}",
+                            TimecodeName(setting.Format, setting.Role),
+                            setting.Enabled ? "enabled" : "disabled",
+                            setting.Mode, setting.Code,
+                            setting.CorrectionSeconds,
+                            setting.HasDelay ? ", delay " +
+                                setting.DelayNanoseconds.ToString(
+                                    CultureInfo.InvariantCulture) + " ns" :
+                                string.Empty,
+                            setting.HasControlBits ? ", control 0x" +
+                                setting.ControlBits.ToString("X8",
+                                    CultureInfo.InvariantCulture) :
+                                string.Empty));
+                }
+            if (target.TodParser != null)
+            {
+                TodParserProfileSetting setting = target.TodParser;
+                TodParserProfileSetting old = current.TodParser;
+                if (old == null || old.Enabled != setting.Enabled ||
+                    old.Protocol != setting.Protocol ||
+                    old.Gnss != setting.Gnss || old.Baud != setting.Baud ||
+                    old.Inverted != setting.Inverted ||
+                    old.CorrectionSeconds != setting.CorrectionSeconds ||
+                    old.MessageDisableMask != setting.MessageDisableMask)
+                    changes.Add(string.Format(CultureInfo.InvariantCulture,
+                        "• ToD parser: {0}, {1}, GNSS {2}, {3} baud, {4}, " +
+                        "correction {5} s, mask 0x{6:X2}",
+                        setting.Enabled ? "enabled" : "disabled",
+                        TodProtocolName(setting.Protocol), setting.Gnss,
+                        setting.Baud,
+                        setting.Inverted ? "inverted" : "normal",
+                        setting.CorrectionSeconds,
+                        setting.MessageDisableMask));
+            }
+            if (target.SignalGenerators != null)
+                foreach (SignalGeneratorProfileSetting setting in
+                         target.SignalGenerators)
+                {
+                    SignalGeneratorProfileSetting old =
+                        current.SignalGenerators == null ? null :
+                        current.SignalGenerators.FirstOrDefault(item =>
+                            item.Generator == setting.Generator);
+                    if (old == null || old.Enabled != setting.Enabled ||
+                        old.ActiveHigh != setting.ActiveHigh ||
+                        old.PeriodNanoseconds != setting.PeriodNanoseconds ||
+                        old.PulseNanoseconds != setting.PulseNanoseconds ||
+                        old.PhaseNanoseconds != setting.PhaseNanoseconds ||
+                        old.RepeatCount != setting.RepeatCount ||
+                        old.CableDelayNanoseconds !=
+                            setting.CableDelayNanoseconds)
+                        changes.Add(string.Format(CultureInfo.InvariantCulture,
+                            "• Signal generator {0}: {1}, period {2} ns, " +
+                            "pulse {3} ns, phase {4} ns, {5}, repeat {6}, cable {7} ns",
+                            setting.Generator,
+                            setting.Enabled ? "enabled" : "disabled",
+                            setting.PeriodNanoseconds,
+                            setting.PulseNanoseconds,
+                            setting.PhaseNanoseconds,
+                            setting.ActiveHigh ? "active high" : "active low",
+                            setting.RepeatCount,
+                            setting.CableDelayNanoseconds));
+                }
             foreach (SmaProfileSetting setting in target.Sma)
             {
                 SmaProfileSetting old = current.Sma.FirstOrDefault(item =>
@@ -475,6 +1053,45 @@ namespace TimeCardControlCenter
             }
             return changes.Count == 0 ? "No changes. The live card already matches this profile." :
                 string.Join(Environment.NewLine, changes);
+        }
+
+        private static string PpsRoleName(uint core)
+        {
+            return core == 1 ? "master" : core == 2 ? "slave" :
+                "core " + core.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static string TimecodeName(uint format, uint role)
+        {
+            string formatName = format == 1 ? "IRIG" :
+                format == 2 ? "DCF77" : "timecode " +
+                format.ToString(CultureInfo.InvariantCulture);
+            return formatName + " " + (role == 1 ? "master" :
+                role == 2 ? "slave" : "role " +
+                role.ToString(CultureInfo.InvariantCulture));
+        }
+
+        private static string TodProtocolName(uint protocol)
+        {
+            return protocol == 0 ? "NMEA" : protocol == 1 ? "UBX" :
+                protocol == 2 ? "TSIP" : protocol == 3 ? "ESIP" :
+                protocol == 4 ? "PFEC" :
+                "protocol " + protocol.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static void RequireCoreRevision(string name, uint actual,
+                                                uint required)
+        {
+            if (required == 0)
+                return;
+            uint actualRevision = actual & 0xffff0000u;
+            uint requiredRevision = required & 0xffff0000u;
+            if (actualRevision < requiredRevision)
+                throw new InvalidOperationException(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0} core {1}.{2} is older than profile requirement {3}.{4}.",
+                    name, actual >> 24, (actual >> 16) & 0xffu,
+                    required >> 24, (required >> 16) & 0xffu));
         }
 
         private async void ProfileCapture_Click(object sender, RoutedEventArgs e)
@@ -963,7 +1580,8 @@ namespace TimeCardControlCenter
                 CompatibilityLine("Extended management controls", abi >= 7, "ABI 7") + "\n" +
                 CompatibilityLine("Environment / rails / IMU", abi >= 8, "ABI 8") + "\n" +
                 CompatibilityLine("Orolia ART mRO-50 bridge", abi >= 9, "ABI 9") + "\n" +
-                CompatibilityLine("Celestica R4006 sensors", abi >= 10, "ABI 10");
+                CompatibilityLine("Celestica R4006 sensors", abi >= 10, "ABI 10") + "\n" +
+                CompatibilityLine("Trusted FPGA image identity", abi >= 13, "ABI 13");
         }
 
         private static string CompatibilityLine(string feature, bool available, string requirement)
@@ -998,12 +1616,15 @@ namespace TimeCardControlCenter
         {
             if (enabled)
             {
+                CardSelector.Text = "Demo telemetry (no hardware)";
+                UpdateDeviceSelectionControls();
                 SetConnectionState(true, "Demo telemetry", false);
                 UpdateDemoProduct();
                 ProfileApplyButton.IsEnabled = false;
             }
             else
             {
+                UpdateDeviceSelectionControls();
                 ProfileApplyButton.IsEnabled = true;
                 if (client == null)
                     await ConnectAsync();
@@ -1052,7 +1673,7 @@ namespace TimeCardControlCenter
             ClockChipText.Text = "SIMULATED · IN SYNC";
             ClockChipText.Foreground = healthy;
             HierarchyOverviewText.Text = "DEMO";
-            SidebarDriverText.Text = "Demo data · ABI 11";
+            SidebarDriverText.Text = "Demo data · ABI 12";
             SidebarSerialText.Text = "DEMO-TIMECARD-0001";
             if (!telemetryPaused)
             {

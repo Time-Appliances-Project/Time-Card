@@ -3,6 +3,8 @@
 
 #include <windows.h>
 #include <winioctl.h>
+#include <errno.h>
+#include <float.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +13,69 @@
 #include "timecard_ioctl.h"
 
 #define FILETIME_UNIX_EPOCH_100NS 116444736000000000ull
+
+static long parse_signed_long(const char *text, const char *name);
+
+static unsigned __int32
+parse_u32_bounded(const char *text, const char *name,
+                  unsigned __int32 minimum, unsigned __int32 maximum)
+{
+    char *end;
+    unsigned __int64 value;
+
+    errno = 0;
+    value = _strtoui64(text, &end, 0);
+    if (*text == '\0' || *end != '\0' || errno == ERANGE ||
+        value < minimum || value > maximum) {
+        fprintf(stderr,
+                "timecardctl: %s must be in the range %lu..%lu: %s\n",
+                name, (unsigned long)minimum, (unsigned long)maximum, text);
+        exit(2);
+    }
+    return (unsigned __int32)value;
+}
+
+static signed __int32
+parse_i32_bounded(const char *text, const char *name,
+                  signed __int32 minimum, signed __int32 maximum)
+{
+    char *end;
+    signed __int64 value;
+
+    errno = 0;
+    value = _strtoi64(text, &end, 0);
+    if (*text == '\0' || *end != '\0' || errno == ERANGE ||
+        value < minimum || value > maximum) {
+        fprintf(stderr,
+                "timecardctl: %s must be in the range %ld..%ld: %s\n",
+                name, (long)minimum, (long)maximum, text);
+        exit(2);
+    }
+    return (signed __int32)value;
+}
+
+static signed __int64
+parse_ppb_q16(const char *text)
+{
+    char *end;
+    double value;
+    double scaled;
+    const double maximum = (double)TIMECARD_CLOCK_ADJUST_MAX_DRIFT_PPB;
+
+    errno = 0;
+    value = strtod(text, &end);
+    if (*text == '\0' || *end != '\0' || errno == ERANGE ||
+        !_finite(value) || value < -maximum || value > maximum) {
+        fprintf(stderr,
+                "timecardctl: drift must be a finite value between "
+                "-%d and %d ppb: %s\n",
+                TIMECARD_CLOCK_ADJUST_MAX_DRIFT_PPB,
+                TIMECARD_CLOCK_ADJUST_MAX_DRIFT_PPB, text);
+        exit(2);
+    }
+    scaled = value * 65536.0;
+    return (signed __int64)(scaled < 0.0 ? scaled - 0.5 : scaled + 0.5);
+}
 
 static HANDLE
 timecard_open(void)
@@ -42,6 +107,25 @@ timecard_ioctl(HANDLE handle, DWORD code, void *input, DWORD inputLength,
     }
     if (returned != NULL)
         *returned = localReturned;
+    return 0;
+}
+
+static int
+timecard_ioctl_exact(HANDLE handle, DWORD code, void *input,
+                     DWORD inputLength, void *output, DWORD outputLength)
+{
+    DWORD returned = 0;
+
+    if (timecard_ioctl(handle, code, input, inputLength, output,
+                       outputLength, &returned))
+        return 1;
+    if (returned != outputLength) {
+        fprintf(stderr,
+                "timecardctl: IOCTL 0x%08lx returned %lu bytes; expected "
+                "%lu\n", code, (unsigned long)returned,
+                (unsigned long)outputLength);
+        return 1;
+    }
     return 0;
 }
 
@@ -86,17 +170,22 @@ cmd_status(HANDLE handle)
            (unsigned long)((info.ClockVersion >> 16) & 0xff),
            (unsigned long)(info.ClockVersion & 0xffff),
            (unsigned long)info.ClockVersion);
-    printf("Clock status:     0x%08lx (%s)\n",
-           (unsigned long)info.ClockStatus,
-           (info.ClockStatus & 1u) ? "in sync" : "not in sync");
+    if (info.ClockStatus == 0xffffffffu)
+        printf("Clock status:     unavailable (requires core v1.2+)\n");
+    else
+        printf("Clock status:     0x%08lx (%s)\n",
+               (unsigned long)info.ClockStatus,
+               (info.ClockStatus & 1u) ? "in sync" : "not in sync");
     printf("Clock source:     0x%04lx\n",
            (unsigned long)(info.ClockSelect >> 16));
     printf("TOD version:      0x%08lx\n", (unsigned long)info.TodVersion);
-    printf("TOD/GNSS status:  0x%08lx / 0x%08lx\n",
-           (unsigned long)info.TodStatus, (unsigned long)info.GnssStatus);
-    printf("UTC/leap:         0x%08lx / 0x%08lx\n",
-           (unsigned long)info.UtcStatus, (unsigned long)info.Leap);
-    printf("Satellites:       0x%08lx\n", (unsigned long)info.Satellites);
+    if (info.TodStatus == 0xffffffffu)
+        printf("TOD status:       unavailable (requires core v1.2+)\n");
+    else
+        printf("TOD status:       0x%08lx\n",
+               (unsigned long)info.TodStatus);
+    printf("GNSS/UTC/leap/sat: unavailable "
+           "(synthesis-optional; no capability word)\n");
     return 0;
 }
 
@@ -173,6 +262,9 @@ parse_clock_source(const char *text)
         { "ptp", TIMECARD_CLOCK_SOURCE_PTP },
         { "rtc", TIMECARD_CLOCK_SOURCE_RTC },
         { "dcf", TIMECARD_CLOCK_SOURCE_DCF },
+        { "ntp", TIMECARD_CLOCK_SOURCE_NTP },
+        { "synce", TIMECARD_CLOCK_SOURCE_SYNCE },
+        { "dyn", TIMECARD_CLOCK_SOURCE_DYN },
         { "regs", TIMECARD_CLOCK_SOURCE_REGS },
         { "ext", TIMECARD_CLOCK_SOURCE_EXT }
     };
@@ -208,16 +300,28 @@ cmd_clock_source(HANDLE handle, int argc, char **argv)
 static void
 print_nmea(const TIMECARD_NMEA_CONTROL *control)
 {
-    printf("NMEA generator: %s, %lu baud, %s polarity\n",
+    printf("NMEA generator: %s, %lu baud, %s polarity, transmitter %s\n",
            (control->Flags & TIMECARD_NMEA_FLAG_ENABLED) ?
                "enabled" : "disabled",
            (unsigned long)control->Baud,
-           control->Polarity ? "inverted" : "normal");
+           control->Polarity ? "inverted" : "normal",
+           (control->Flags & TIMECARD_NMEA_FLAG_ERROR) ?
+               "ERROR" : "OK");
     printf("Selector/control/status/version: %lu / 0x%08lx / 0x%08lx / 0x%08lx\n",
            (unsigned long)control->BaudSelector,
            (unsigned long)control->Control,
            (unsigned long)control->Status,
            (unsigned long)control->Version);
+    if ((control->Flags & TIMECARD_NMEA_FLAG_ADVANCED_VALID) != 0u) {
+        printf("Correction/local offset/GNSS/disable mask: "
+               "%ld s / %ld min / %lu / 0x%02lx\n",
+               (long)control->CorrectionSeconds,
+               (long)control->LocalOffsetMinutes,
+               (unsigned long)control->Gnss,
+               (unsigned long)control->MessageDisableMask);
+        printf("Message disable bits: RMC=0x01 (core 1.4+), "
+               "ZDA=0x02, UTC=0x04 (core 1.6+)\n");
+    }
 }
 
 static int
@@ -237,8 +341,10 @@ static int
 cmd_nmea_set(HANDLE handle, int argc, char **argv)
 {
     TIMECARD_NMEA_CONTROL control;
+    int index;
+    int remaining;
 
-    if (argc < 4 || argc > 5)
+    if (argc < 4 || argc > 10)
         return 2;
     RtlZeroMemory(&control, sizeof(control));
     control.Size = sizeof(control);
@@ -250,17 +356,125 @@ cmd_nmea_set(HANDLE handle, int argc, char **argv)
         return 2;
     }
     control.Baud = (unsigned __int32)parse_ulong(argv[3], "NMEA baud");
-    if (argc == 5) {
-        if (_stricmp(argv[4], "inverted") == 0)
+    index = 4;
+    if (index < argc) {
+        if (_stricmp(argv[index], "inverted") == 0) {
             control.Polarity = 1;
-        else if (_stricmp(argv[4], "normal") != 0)
+            ++index;
+        } else if (_stricmp(argv[index], "normal") == 0) {
+            ++index;
+        } else if (_stricmp(argv[index], "clear") == 0) {
+            control.Flags |= TIMECARD_NMEA_FLAG_CLEAR_ERROR;
+            ++index;
+        } else {
             return 2;
+        }
+    }
+    remaining = argc - index;
+    if ((control.Flags & TIMECARD_NMEA_FLAG_CLEAR_ERROR) != 0u) {
+        if (remaining != 0)
+            return 2;
+    } else if (remaining == 1) {
+        if (_stricmp(argv[index], "clear") != 0)
+            return 2;
+        control.Flags |= TIMECARD_NMEA_FLAG_CLEAR_ERROR;
+    } else if (remaining == 4 || remaining == 5) {
+        control.Flags |= TIMECARD_NMEA_FLAG_ADVANCED_VALID;
+        control.CorrectionSeconds = (signed __int32)parse_signed_long(
+            argv[index], "NMEA correction seconds");
+        control.LocalOffsetMinutes = (signed __int32)parse_signed_long(
+            argv[index + 1], "NMEA local offset minutes");
+        control.Gnss = (unsigned __int32)parse_ulong(
+            argv[index + 2], "NMEA GNSS selector");
+        control.MessageDisableMask = (unsigned __int32)parse_ulong(
+            argv[index + 3], "NMEA message disable mask");
+        if (remaining == 5) {
+            if (_stricmp(argv[index + 4], "clear") != 0)
+                return 2;
+            control.Flags |= TIMECARD_NMEA_FLAG_CLEAR_ERROR;
+        }
+    } else if (remaining != 0) {
+        return 2;
     }
     if (timecard_ioctl(handle, IOCTL_TIMECARD_NMEA_SET,
                        &control, sizeof(control), &control,
                        sizeof(control), NULL))
         return 1;
     print_nmea(&control);
+    return 0;
+}
+
+static void
+print_nmea_utc(const TIMECARD_NMEA_UTC_CONTROL *control)
+{
+    printf("NMEA UTC information: version 0x%08lx, flags 0x%08lx\n",
+           (unsigned long)control->Version,
+           (unsigned long)control->Flags);
+    printf("  UTC offset: %lu seconds (%s)\n",
+           (unsigned long)control->UtcOffsetSeconds,
+           (control->Flags & TIMECARD_NMEA_UTC_FLAG_OFFSET_VALID) != 0u ?
+               "valid" : "invalid");
+    printf("  leap indication: %s\n",
+           (control->Flags & (TIMECARD_NMEA_UTC_FLAG_LEAP61 |
+                              TIMECARD_NMEA_UTC_FLAG_LEAP59)) ==
+                   (TIMECARD_NMEA_UTC_FLAG_LEAP61 |
+                    TIMECARD_NMEA_UTC_FLAG_LEAP59) ?
+               "invalid (both leap61 and leap59 set)" :
+           (control->Flags & TIMECARD_NMEA_UTC_FLAG_LEAP61) != 0u ?
+               "+1 second (61)" :
+           (control->Flags & TIMECARD_NMEA_UTC_FLAG_LEAP59) != 0u ?
+               "-1 second (59)" : "none");
+    printf("  read/write contract: %s / %s\n",
+           (control->Flags &
+            TIMECARD_NMEA_UTC_FLAG_READ_SUPPORTED) != 0u ? "yes" : "no",
+           (control->Flags &
+            TIMECARD_NMEA_UTC_FLAG_WRITE_SUPPORTED) != 0u ? "yes" : "no");
+    printf("  raw UTC/handshake: 0x%08lx / 0x%08lx\n",
+           (unsigned long)control->RawUtcInfo,
+           (unsigned long)control->HandshakeControl);
+}
+
+static int
+cmd_nmea_utc_status(HANDLE handle)
+{
+    TIMECARD_NMEA_UTC_CONTROL control;
+
+    RtlZeroMemory(&control, sizeof(control));
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_NMEA_UTC_QUERY,
+                             NULL, 0, &control, sizeof(control)))
+        return 1;
+    print_nmea_utc(&control);
+    return 0;
+}
+
+static int
+cmd_nmea_utc_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_NMEA_UTC_CONTROL control;
+
+    if (argc != 5)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.UtcOffsetSeconds = parse_u32_bounded(
+        argv[2], "UTC offset", 0u, 0xffffu);
+    if (_stricmp(argv[3], "valid") == 0) {
+        control.Flags |= TIMECARD_NMEA_UTC_FLAG_OFFSET_VALID;
+    } else if (_stricmp(argv[3], "invalid") != 0) {
+        return 2;
+    }
+    if (_stricmp(argv[4], "leap61") == 0) {
+        control.Flags |= TIMECARD_NMEA_UTC_FLAG_LEAP61;
+    } else if (_stricmp(argv[4], "leap59") == 0) {
+        control.Flags |= TIMECARD_NMEA_UTC_FLAG_LEAP59;
+    } else if (_stricmp(argv[4], "none") != 0) {
+        return 2;
+    }
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_NMEA_UTC_SET,
+                             &control, sizeof(control), &control,
+                             sizeof(control)))
+        return 1;
+    print_nmea_utc(&control);
     return 0;
 }
 
@@ -1415,6 +1629,1578 @@ Restore:
     return failed;
 }
 
+static long
+parse_signed_long(const char *text, const char *name)
+{
+    char *end;
+    long value = strtol(text, &end, 0);
+
+    if (*text == '\0' || *end != '\0') {
+        fprintf(stderr, "timecardctl: invalid %s: %s\n", name, text);
+        exit(2);
+    }
+    return value;
+}
+
+static unsigned __int64
+parse_unsigned64(const char *text, const char *name)
+{
+    char *end;
+    unsigned __int64 value = _strtoui64(text, &end, 0);
+
+    if (*text == '\0' || *end != '\0') {
+        fprintf(stderr, "timecardctl: invalid %s: %s\n", name, text);
+        exit(2);
+    }
+    return value;
+}
+
+static int
+parse_on_off(const char *text, unsigned __int32 enabledFlag,
+             unsigned __int32 *flags)
+{
+    if (_stricmp(text, "on") == 0 || _stricmp(text, "enable") == 0) {
+        *flags |= enabledFlag;
+        return 0;
+    }
+    return _stricmp(text, "off") == 0 ||
+           _stricmp(text, "disable") == 0 ? 0 : 1;
+}
+
+static unsigned long
+parse_pps_core(const char *text)
+{
+    if (_stricmp(text, "master") == 0 || _stricmp(text, "output") == 0)
+        return TIMECARD_PPS_CORE_MASTER;
+    if (_stricmp(text, "slave") == 0 || _stricmp(text, "input") == 0)
+        return TIMECARD_PPS_CORE_SLAVE;
+    return parse_ulong(text, "PPS core");
+}
+
+static unsigned long
+parse_timecode_format(const char *text)
+{
+    if (_stricmp(text, "irig") == 0)
+        return TIMECARD_TIMECODE_FORMAT_IRIG;
+    if (_stricmp(text, "dcf") == 0)
+        return TIMECARD_TIMECODE_FORMAT_DCF;
+    return parse_ulong(text, "timecode format");
+}
+
+static unsigned long
+parse_timecode_role(const char *text)
+{
+    if (_stricmp(text, "master") == 0 || _stricmp(text, "output") == 0)
+        return TIMECARD_TIMECODE_ROLE_MASTER;
+    if (_stricmp(text, "slave") == 0 || _stricmp(text, "input") == 0)
+        return TIMECARD_TIMECODE_ROLE_SLAVE;
+    return parse_ulong(text, "timecode role");
+}
+
+static int
+cmd_fpga_status(HANDLE handle)
+{
+    TIMECARD_FPGA_CAPABILITIES capabilities;
+    TIMECARD_FPGA_IMAGE_INFO image;
+    BOOL imageQueryOk;
+    DWORD returned;
+
+    RtlZeroMemory(&capabilities, sizeof(capabilities));
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_GET_FPGA_CAPABILITIES,
+                       NULL, 0, &capabilities, sizeof(capabilities), NULL))
+        return 1;
+    printf("FPGA ABI/core/features: %lu / 0x%08lx / 0x%08lx\n",
+           (unsigned long)capabilities.AbiVersion,
+           (unsigned long)capabilities.CoreMask,
+           (unsigned long)capabilities.FeatureFlags);
+    printf("Known gaps:             0x%08lx\n",
+           (unsigned long)capabilities.KnownGaps);
+    if ((capabilities.KnownGaps &
+         TIMECARD_FPGA_GAP_TIMESTAMP_INTERRUPTS) != 0)
+        printf("  - Windows signal-timestamper interrupt path\n");
+    if ((capabilities.KnownGaps &
+         TIMECARD_FPGA_GAP_CONFIGURATION_SLAVE) != 0)
+        printf("  - Configuration Slave discovery ROM\n");
+    if ((capabilities.KnownGaps &
+         TIMECARD_FPGA_GAP_OPTIONAL_CLOCK_REGISTERS) != 0)
+        printf("  - synthesis-optional Clock telemetry registers\n");
+    if ((capabilities.KnownGaps &
+         TIMECARD_FPGA_GAP_TOD_MASTER_UTC_HANDSHAKE) != 0)
+        printf("  - synthesis-optional ToD Master UTC handshake\n");
+    if ((capabilities.KnownGaps &
+         TIMECARD_FPGA_GAP_SYNTHESIS_FEATURE_REPORTING) != 0)
+        printf("  - per-bitstream synthesis feature reporting\n");
+    printf("Layout / board profile: %lu / %lu\n",
+           (unsigned long)capabilities.Layout,
+           (unsigned long)capabilities.BoardProfile);
+    if (capabilities.AbiVersion < 13u) {
+        printf("FPGA image identity:    requires ABI 13 or newer\n");
+    } else if (capabilities.Layout == TIMECARD_LAYOUT_ART) {
+        printf("FPGA image identity:    unsupported on ART (no standard static register)\n");
+    } else {
+        RtlZeroMemory(&image, sizeof(image));
+        returned = 0;
+        imageQueryOk = DeviceIoControl(
+            handle, IOCTL_TIMECARD_FPGA_IMAGE_QUERY, NULL, 0,
+            &image, sizeof(image), &returned, NULL);
+        if (imageQueryOk && returned == sizeof(image)) {
+            printf("FPGA image identity:    %s %lu.%lu%s\n",
+                   (image.Flags &
+                    TIMECARD_FPGA_IMAGE_FLAG_FPGA_FIRMWARE) != 0 ?
+                       "FPGA" : "SOM",
+                   (unsigned long)(image.ImageVersion >> 8),
+                   (unsigned long)(image.ImageVersion & 0xffu),
+                   (image.Flags & TIMECARD_FPGA_IMAGE_FLAG_LOADER) != 0 ?
+                       " (loader encoding)" : "");
+            printf("Image raw/tag/register: 0x%08lx / %lu / 0x%08lx\n",
+                   (unsigned long)image.RawVersion,
+                   (unsigned long)image.ImageTag,
+                   (unsigned long)image.RegisterOffset);
+        } else if (!imageQueryOk) {
+            printf("FPGA image identity:    unavailable (error %lu)\n",
+                   GetLastError());
+        } else {
+            printf("FPGA image identity:    invalid response size %lu\n",
+                   (unsigned long)returned);
+        }
+    }
+    return 0;
+}
+
+static int
+cmd_clock_telemetry(HANDLE handle)
+{
+    TIMECARD_CLOCK_TELEMETRY telemetry;
+
+    RtlZeroMemory(&telemetry, sizeof(telemetry));
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_CLOCK_TELEMETRY_QUERY,
+                       NULL, 0, &telemetry, sizeof(telemetry), NULL))
+        return 1;
+    printf("Clock flags/version:    0x%08lx / 0x%08lx\n",
+           (unsigned long)telemetry.Flags,
+           (unsigned long)telemetry.Version);
+    printf("Control/status/select:  0x%08lx / 0x%08lx / 0x%08lx\n",
+           (unsigned long)telemetry.Control,
+           (unsigned long)telemetry.Status,
+           (unsigned long)telemetry.Select);
+    printf("In-sync threshold:      %lu ns\n",
+           (unsigned long)telemetry.InSyncThreshold);
+    if ((telemetry.Flags &
+         TIMECARD_CLOCK_TELEMETRY_FLAG_SERVO_AVAILABLE) != 0) {
+        printf("Servo offset P/I:       %lu / %lu\n",
+               (unsigned long)telemetry.ServoOffsetP,
+               (unsigned long)telemetry.ServoOffsetI);
+        printf("Servo drift P/I:        %lu / %lu\n",
+               (unsigned long)telemetry.ServoDriftP,
+               (unsigned long)telemetry.ServoDriftI);
+    }
+    if ((telemetry.Flags & TIMECARD_CLOCK_TELEMETRY_FLAG_LOG_AVAILABLE) != 0) {
+        printf("Last offset/drift:      %ld ns / %ld ppb\n",
+               (long)telemetry.StatusOffsetNanoseconds,
+               (long)telemetry.StatusDriftPpb);
+    }
+    if ((telemetry.Flags &
+         TIMECARD_CLOCK_TELEMETRY_FLAG_FRACTIONAL_LOG) != 0) {
+        printf("Offset/drift fraction:  0x%04lx / 0x%04lx\n",
+               (unsigned long)telemetry.StatusOffsetFraction,
+               (unsigned long)telemetry.StatusDriftFraction);
+    }
+    return 0;
+}
+
+static void
+print_pps(const TIMECARD_PPS_CONTROL *control)
+{
+    printf("PPS %s: %s, %s, delay %ld ns, width %lu ms\n",
+           control->Core == TIMECARD_PPS_CORE_MASTER ? "master" : "slave",
+           (control->Flags & TIMECARD_PPS_FLAG_ENABLED) != 0 ?
+               "enabled" : "disabled",
+           control->Polarity == TIMECARD_PPS_POLARITY_ACTIVE_HIGH ?
+               "active-high" : "active-low",
+           (long)control->CableDelayNanoseconds,
+           (unsigned long)control->PulseWidthMilliseconds);
+    printf("  flags/control/status/version: 0x%08lx / 0x%08lx / 0x%08lx / 0x%08lx\n",
+           (unsigned long)control->Flags,
+           (unsigned long)control->Control,
+           (unsigned long)control->Status,
+           (unsigned long)control->Version);
+}
+
+static int
+query_pps(HANDLE handle, unsigned long core)
+{
+    TIMECARD_PPS_CONTROL control;
+
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Core = (unsigned __int32)core;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_PPS_QUERY,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_pps(&control);
+    return 0;
+}
+
+static int
+cmd_pps_status(HANDLE handle, int argc, char **argv)
+{
+    if (argc == 3)
+        return query_pps(handle, parse_pps_core(argv[2]));
+    if (argc != 2)
+        return 2;
+    return query_pps(handle, TIMECARD_PPS_CORE_MASTER) |
+           query_pps(handle, TIMECARD_PPS_CORE_SLAVE);
+}
+
+static int
+cmd_pps_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_PPS_CONTROL control;
+
+    if (argc < 7 || argc > 8)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Core = (unsigned __int32)parse_pps_core(argv[2]);
+    if (parse_on_off(argv[3], TIMECARD_PPS_FLAG_ENABLED, &control.Flags))
+        return 2;
+    if (_stricmp(argv[4], "active-high") == 0)
+        control.Polarity = TIMECARD_PPS_POLARITY_ACTIVE_HIGH;
+    else if (_stricmp(argv[4], "active-low") != 0)
+        return 2;
+    control.CableDelayNanoseconds =
+        (signed __int32)parse_signed_long(argv[5], "PPS cable delay");
+    control.PulseWidthMilliseconds =
+        (unsigned __int32)parse_ulong(argv[6], "PPS pulse width");
+    if (argc == 8) {
+        if (_stricmp(argv[7], "clear") != 0)
+            return 2;
+        control.Flags |= TIMECARD_PPS_FLAG_CLEAR_ERRORS;
+    }
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_PPS_SET,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_pps(&control);
+    return 0;
+}
+
+static void
+print_timecode(const TIMECARD_TIMECODE_CONTROL *control)
+{
+    printf("%s %s: %s, correction %ld s, delay %ld ns\n",
+           control->Format == TIMECARD_TIMECODE_FORMAT_IRIG ? "IRIG" : "DCF",
+           control->Role == TIMECARD_TIMECODE_ROLE_MASTER ? "master" : "slave",
+           (control->Flags & TIMECARD_TIMECODE_FLAG_ENABLED) != 0 ?
+               "enabled" : "disabled",
+           (long)control->CorrectionSeconds,
+           (long)control->DelayNanoseconds);
+    printf("  mode/code/control-bits/bit-position: %lu / %lu / 0x%08lx / %lu\n",
+           (unsigned long)control->Mode, (unsigned long)control->Code,
+           (unsigned long)control->ControlBits,
+           (unsigned long)control->BitPosition);
+    if (control->Format == TIMECARD_TIMECODE_FORMAT_IRIG) {
+        printf("  amplitude modulation: ");
+        if ((control->Flags & TIMECARD_TIMECODE_FLAG_AM_WRITABLE) != 0u)
+            printf("%s\n", control->AmplitudeModulation != 0u ?
+                   "enabled" : "disabled");
+        else
+            printf("unavailable (exact-image contract/core revision)\n");
+        printf("  manual year: ");
+        if ((control->Flags & TIMECARD_TIMECODE_FLAG_YEAR_WRITABLE) != 0u)
+            printf("%lu\n", (unsigned long)control->ManualYear);
+        else
+            printf("unavailable (IRIG slave exact-image contract/core revision)\n");
+    }
+    printf("  flags/control/status/version: 0x%08lx / 0x%08lx / 0x%08lx / 0x%08lx\n",
+           (unsigned long)control->Flags,
+           (unsigned long)control->Control,
+           (unsigned long)control->Status,
+           (unsigned long)control->Version);
+}
+
+static int
+query_timecode(HANDLE handle, unsigned long format, unsigned long role)
+{
+    TIMECARD_TIMECODE_CONTROL control;
+
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Format = (unsigned __int32)format;
+    control.Role = (unsigned __int32)role;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_TIMECODE_QUERY,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_timecode(&control);
+    return 0;
+}
+
+static int
+cmd_timecode_status(HANDLE handle, int argc, char **argv)
+{
+    if (argc == 4) {
+        return query_timecode(handle, parse_timecode_format(argv[2]),
+                              parse_timecode_role(argv[3]));
+    }
+    if (argc != 2)
+        return 2;
+    return query_timecode(handle, TIMECARD_TIMECODE_FORMAT_IRIG,
+                          TIMECARD_TIMECODE_ROLE_MASTER) |
+           query_timecode(handle, TIMECARD_TIMECODE_FORMAT_IRIG,
+                          TIMECARD_TIMECODE_ROLE_SLAVE) |
+           query_timecode(handle, TIMECARD_TIMECODE_FORMAT_DCF,
+                          TIMECARD_TIMECODE_ROLE_MASTER) |
+           query_timecode(handle, TIMECARD_TIMECODE_FORMAT_DCF,
+                          TIMECARD_TIMECODE_ROLE_SLAVE);
+}
+
+static int
+cmd_timecode_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_TIMECODE_CONTROL control;
+    TIMECARD_TIMECODE_CONTROL current;
+    int optional;
+    int controlBitsSeen = 0;
+    int amplitudeSeen = 0;
+    int yearSeen = 0;
+    int clearSeen = 0;
+
+    if (argc < 9 || argc > 15)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Format = (unsigned __int32)parse_timecode_format(argv[2]);
+    control.Role = (unsigned __int32)parse_timecode_role(argv[3]);
+
+    /* Preserve the IRIG control field unless the caller replaces it. */
+    RtlZeroMemory(&current, sizeof(current));
+    current.Size = sizeof(current);
+    current.Format = control.Format;
+    current.Role = control.Role;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_TIMECODE_QUERY,
+                       &current, sizeof(current), &current,
+                       sizeof(current), NULL))
+        return 1;
+    control.ControlBits = current.ControlBits;
+    control.AmplitudeModulation = current.AmplitudeModulation;
+    control.ManualYear = current.ManualYear;
+
+    if (parse_on_off(argv[4], TIMECARD_TIMECODE_FLAG_ENABLED,
+                     &control.Flags))
+        return 2;
+    control.CorrectionSeconds =
+        (signed __int32)parse_signed_long(argv[5], "time correction");
+    control.DelayNanoseconds =
+        (signed __int32)parse_signed_long(argv[6], "propagation delay");
+    control.Mode = (unsigned __int32)parse_ulong(argv[7], "IRIG mode");
+    control.Code = (unsigned __int32)parse_ulong(argv[8], "IRIG code");
+
+    optional = 9;
+    while (optional < argc) {
+        if (_stricmp(argv[optional], "--am") == 0) {
+            if (amplitudeSeen || optional + 1 >= argc ||
+                control.Format != TIMECARD_TIMECODE_FORMAT_IRIG ||
+                (current.Flags &
+                 TIMECARD_TIMECODE_FLAG_AM_WRITABLE) == 0u)
+                return 2;
+            if (_stricmp(argv[optional + 1], "on") == 0 ||
+                _stricmp(argv[optional + 1], "enable") == 0) {
+                control.AmplitudeModulation = 1u;
+            } else if (_stricmp(argv[optional + 1], "off") == 0 ||
+                       _stricmp(argv[optional + 1], "disable") == 0) {
+                control.AmplitudeModulation = 0u;
+            } else {
+                return 2;
+            }
+            amplitudeSeen = 1;
+            optional += 2;
+        } else if (_stricmp(argv[optional], "--year") == 0) {
+            if (yearSeen || optional + 1 >= argc ||
+                control.Format != TIMECARD_TIMECODE_FORMAT_IRIG ||
+                control.Role != TIMECARD_TIMECODE_ROLE_SLAVE ||
+                (current.Flags &
+                 TIMECARD_TIMECODE_FLAG_YEAR_WRITABLE) == 0u)
+                return 2;
+            control.ManualYear = parse_u32_bounded(
+                argv[optional + 1], "IRIG manual year", 1970u, 2069u);
+            yearSeen = 1;
+            optional += 2;
+        } else if (_stricmp(argv[optional], "clear") == 0) {
+            if (clearSeen)
+                return 2;
+            control.Flags |= TIMECARD_TIMECODE_FLAG_CLEAR_ERRORS;
+            clearSeen = 1;
+            ++optional;
+        } else {
+            if (controlBitsSeen ||
+                control.Format != TIMECARD_TIMECODE_FORMAT_IRIG ||
+                control.Role != TIMECARD_TIMECODE_ROLE_MASTER)
+                return 2;
+            control.ControlBits = parse_u32_bounded(
+                argv[optional], "IRIG control bits", 0u, 0x07ffffffu);
+            controlBitsSeen = 1;
+            ++optional;
+        }
+    }
+    if (control.Format != TIMECARD_TIMECODE_FORMAT_IRIG &&
+        (amplitudeSeen || yearSeen || controlBitsSeen))
+            return 2;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_TIMECODE_SET,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_timecode(&control);
+    return 0;
+}
+
+static void
+print_tod(const TIMECARD_TOD_CONTROL *control)
+{
+    static const char *protocols[] = {
+        "NMEA", "UBX", "TSIP", "ESIP", "PFEC"
+    };
+    const char *protocol = control->Protocol < ARRAYSIZE(protocols) ?
+        protocols[control->Protocol] : "invalid";
+
+    printf("TOD slave: %s, %s, GNSS %lu, %lu baud, %s polarity\n",
+           (control->Flags & TIMECARD_TOD_FLAG_ENABLED) != 0 ?
+               "enabled" : "disabled",
+           protocol, (unsigned long)control->Gnss,
+           (unsigned long)control->Baud,
+           control->Polarity != 0 ? "inverted" : "normal");
+    printf("  correction/disable mask: %ld s / 0x%02lx\n",
+           (long)control->CorrectionSeconds,
+           (unsigned long)control->MessageDisableMask);
+    printf("  flags/control/status/version: 0x%08lx / 0x%08lx / 0x%08lx / 0x%08lx\n",
+           (unsigned long)control->Flags,
+           (unsigned long)control->Control,
+           (unsigned long)control->Status,
+           (unsigned long)control->Version);
+    if ((control->Flags & TIMECARD_TOD_FLAG_UTC_TELEMETRY_VALID) != 0u) {
+        printf("  UTC status/time-to-leap: 0x%08lx / %ld s\n",
+               (unsigned long)control->UtcStatus,
+               (long)control->TimeToLeapSeconds);
+    } else {
+        printf("  UTC telemetry: not read "
+               "(exact-image contract or protocol revision does not permit access)\n");
+    }
+    if ((control->Flags & TIMECARD_TOD_FLAG_GNSS_TELEMETRY_VALID) != 0u) {
+        printf("  GNSS status/satellites: 0x%08lx / 0x%08lx\n",
+               (unsigned long)control->GnssStatus,
+               (unsigned long)control->Satellites);
+    } else {
+        printf("  GNSS telemetry: not read "
+               "(exact-image contract or protocol revision does not permit access)\n");
+    }
+}
+
+static int
+cmd_tod_status(HANDLE handle)
+{
+    TIMECARD_TOD_CONTROL control;
+
+    RtlZeroMemory(&control, sizeof(control));
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_TOD_QUERY,
+                       NULL, 0, &control, sizeof(control), NULL))
+        return 1;
+    print_tod(&control);
+    return 0;
+}
+
+static unsigned long
+parse_tod_protocol(const char *text)
+{
+    if (_stricmp(text, "nmea") == 0)
+        return TIMECARD_TOD_PROTOCOL_NMEA;
+    if (_stricmp(text, "ubx") == 0)
+        return TIMECARD_TOD_PROTOCOL_UBX;
+    if (_stricmp(text, "tsip") == 0)
+        return TIMECARD_TOD_PROTOCOL_TSIP;
+    if (_stricmp(text, "esip") == 0)
+        return TIMECARD_TOD_PROTOCOL_ESIP;
+    if (_stricmp(text, "pfec") == 0)
+        return TIMECARD_TOD_PROTOCOL_PFEC;
+    return parse_ulong(text, "TOD protocol");
+}
+
+static int
+cmd_tod_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_TOD_CONTROL control;
+
+    if (argc < 9 || argc > 10)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    if (parse_on_off(argv[2], TIMECARD_TOD_FLAG_ENABLED, &control.Flags))
+        return 2;
+    control.Protocol = (unsigned __int32)parse_tod_protocol(argv[3]);
+    control.Gnss = (unsigned __int32)parse_ulong(argv[4], "GNSS selector");
+    control.Baud = (unsigned __int32)parse_ulong(argv[5], "TOD baud");
+    if (_stricmp(argv[6], "inverted") == 0)
+        control.Polarity = 1u;
+    else if (_stricmp(argv[6], "normal") != 0)
+        return 2;
+    control.CorrectionSeconds =
+        (signed __int32)parse_signed_long(argv[7], "TOD correction");
+    control.MessageDisableMask =
+        (unsigned __int32)parse_ulong(argv[8], "message disable mask");
+    if (argc == 10) {
+        if (_stricmp(argv[9], "clear") != 0)
+            return 2;
+        control.Flags |= TIMECARD_TOD_FLAG_CLEAR_ERRORS;
+    }
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_TOD_SET,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_tod(&control);
+    return 0;
+}
+
+static void
+print_signal(const TIMECARD_SIGNAL_CONTROL *control)
+{
+    printf("Signal generator %lu: %s, period %llu ns, pulse %llu ns, phase %llu ns\n",
+           (unsigned long)control->Generator,
+           (control->Flags & TIMECARD_SIGNAL_FLAG_ENABLED) != 0 ?
+               "enabled" : "disabled",
+           (unsigned long long)control->PeriodNanoseconds,
+           (unsigned long long)control->PulseNanoseconds,
+           (unsigned long long)control->PhaseNanoseconds);
+    printf("  polarity/repeat/cable/status/version: %s / %lu / %lu ns / 0x%08lx / 0x%08lx%s%s\n",
+           (control->Flags & TIMECARD_SIGNAL_FLAG_ACTIVE_HIGH) != 0 ?
+               "active-high" : "active-low",
+           (unsigned long)control->RepeatCount,
+           (unsigned long)control->CableDelayNanoseconds,
+           (unsigned long)control->Status,
+           (unsigned long)control->Version,
+           (control->Flags & TIMECARD_SIGNAL_FLAG_ERROR) != 0 ?
+               " ERROR" : "",
+           (control->Flags & TIMECARD_SIGNAL_FLAG_TIME_JUMP) != 0 ?
+               " TIME_JUMP" : "");
+    printf("  start: %llu.%09lu PHC seconds\n",
+           (unsigned long long)control->StartSeconds,
+           (unsigned long)control->StartNanoseconds);
+}
+
+static int
+parse_signal_polarity(const char *text, unsigned __int32 *flags)
+{
+    if (_stricmp(text, "active-high") == 0 ||
+        _stricmp(text, "inverted") == 0) {
+        *flags |= TIMECARD_SIGNAL_FLAG_ACTIVE_HIGH;
+        return 0;
+    }
+    if (_stricmp(text, "active-low") == 0 ||
+        _stricmp(text, "normal") == 0)
+        return 0;
+    return 1;
+}
+
+static int
+query_signal(HANDLE handle, unsigned long generator)
+{
+    TIMECARD_SIGNAL_CONTROL control;
+
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Generator = (unsigned __int32)generator;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_SIGNAL_QUERY,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_signal(&control);
+    return 0;
+}
+
+static int
+cmd_signal_status(HANDLE handle, int argc, char **argv)
+{
+    unsigned long generator;
+    int result = 0;
+
+    if (argc == 3)
+        return query_signal(handle, parse_ulong(argv[2], "generator"));
+    if (argc != 2)
+        return 2;
+    for (generator = 1; generator <= TIMECARD_SIGNAL_COUNT; ++generator)
+        result |= query_signal(handle, generator);
+    return result;
+}
+
+static int
+cmd_signal_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_SIGNAL_CONTROL control;
+
+    if (argc != 10)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Generator =
+        (unsigned __int32)parse_ulong(argv[2], "generator");
+    if (parse_on_off(argv[3], TIMECARD_SIGNAL_FLAG_ENABLED, &control.Flags))
+        return 2;
+    control.PeriodNanoseconds = parse_unsigned64(argv[4], "period");
+    control.PulseNanoseconds = parse_unsigned64(argv[5], "pulse width");
+    control.PhaseNanoseconds = parse_unsigned64(argv[6], "phase");
+    if (parse_signal_polarity(argv[7], &control.Flags))
+        return 2;
+    control.RepeatCount =
+        (unsigned __int32)parse_ulong(argv[8], "repeat count");
+    control.CableDelayNanoseconds =
+        (unsigned __int32)parse_ulong(argv[9], "cable delay");
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_SIGNAL_SET,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_signal(&control);
+    return 0;
+}
+
+static int
+cmd_signal_set_at(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_SIGNAL_CONTROL control;
+
+    if (argc != 11)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Generator =
+        (unsigned __int32)parse_ulong(argv[2], "generator");
+    if (parse_on_off(argv[3], TIMECARD_SIGNAL_FLAG_ENABLED, &control.Flags))
+        return 2;
+    control.Flags |= TIMECARD_SIGNAL_FLAG_ABSOLUTE_START;
+    control.PeriodNanoseconds = parse_unsigned64(argv[4], "period");
+    control.PulseNanoseconds = parse_unsigned64(argv[5], "pulse width");
+    control.StartSeconds = parse_unsigned64(argv[6], "start PHC seconds");
+    control.StartNanoseconds =
+        (unsigned __int32)parse_ulong(argv[7], "start nanoseconds");
+    if (parse_signal_polarity(argv[8], &control.Flags))
+        return 2;
+    control.RepeatCount =
+        (unsigned __int32)parse_ulong(argv[9], "repeat count");
+    control.CableDelayNanoseconds =
+        (unsigned __int32)parse_ulong(argv[10], "cable delay");
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_SIGNAL_SET,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_signal(&control);
+    return 0;
+}
+
+static int
+cmd_signal_clear(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_SIGNAL_CONTROL control;
+
+    if (argc != 3)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Generator =
+        (unsigned __int32)parse_ulong(argv[2], "generator");
+    control.Flags = TIMECARD_SIGNAL_FLAG_CLEAR_STATUS;
+    if (timecard_ioctl(handle, IOCTL_TIMECARD_SIGNAL_SET,
+                       &control, sizeof(control), &control,
+                       sizeof(control), NULL))
+        return 1;
+    print_signal(&control);
+    return 0;
+}
+
+static const char *
+timestamp_channel_name(unsigned long channel)
+{
+    static const char *names[TIMECARD_TIMESTAMP_COUNT] = {
+        "GNSS1", "TS1", "TS2", "TS3", "TS4", "PHC/PPS"
+    };
+
+    return channel < TIMECARD_TIMESTAMP_COUNT ? names[channel] : "invalid";
+}
+
+static unsigned long
+parse_timestamp_channel(const char *text)
+{
+    if (_stricmp(text, "gnss") == 0 || _stricmp(text, "gnss1") == 0)
+        return TIMECARD_TIMESTAMP_GNSS1;
+    if (_stricmp(text, "ts1") == 0)
+        return TIMECARD_TIMESTAMP_TS1;
+    if (_stricmp(text, "ts2") == 0)
+        return TIMECARD_TIMESTAMP_TS2;
+    if (_stricmp(text, "ts3") == 0)
+        return TIMECARD_TIMESTAMP_TS3;
+    if (_stricmp(text, "ts4") == 0)
+        return TIMECARD_TIMESTAMP_TS4;
+    if (_stricmp(text, "phc") == 0 || _stricmp(text, "pps") == 0)
+        return TIMECARD_TIMESTAMP_PHC;
+    return parse_u32_bounded(text, "timestamp channel", 0u,
+                             TIMECARD_TIMESTAMP_COUNT - 1u);
+}
+
+static void
+print_timestamp_control(const TIMECARD_TIMESTAMP_CONTROL *control)
+{
+    printf("Timestamp %lu (%s): %s, %s edge",
+           (unsigned long)control->Channel,
+           timestamp_channel_name(control->Channel),
+           (control->Flags & TIMECARD_TIMESTAMP_FLAG_ENABLED) != 0u ?
+               "enabled" : "disabled",
+           control->Polarity == TIMECARD_TIMESTAMP_POLARITY_RISING ?
+               "rising" : "falling");
+    if ((control->Flags &
+         TIMECARD_TIMESTAMP_FLAG_CABLE_DELAY_WRITABLE) != 0u)
+        printf(", cable delay %lu ns\n",
+               (unsigned long)control->CableDelayNanoseconds);
+    else
+        printf(", cable delay unavailable on this core layout\n");
+    printf("  version/status/flags: 0x%08lx / 0x%08lx / 0x%08lx\n",
+           (unsigned long)control->Version,
+           (unsigned long)control->Status,
+           (unsigned long)control->Flags);
+    printf("  IRQ available/mask/pending: %s / %lu / %lu\n",
+           (control->Flags & TIMECARD_TIMESTAMP_FLAG_IRQ_AVAILABLE) != 0u ?
+               "yes" : "no",
+           (unsigned long)control->InterruptMask,
+           (unsigned long)control->Interrupt);
+    printf("  queue depth/dropped: %lu / %lu; event/timestamp count: %lu / %lu\n",
+           (unsigned long)control->QueueDepth,
+           (unsigned long)control->DroppedEvents,
+           (unsigned long)control->EventCount,
+           (unsigned long)control->TimestampCount);
+    if ((control->Flags & TIMECARD_TIMESTAMP_FLAG_EVENT_VALID) != 0u) {
+        printf("  latest: ");
+        print_card_time(&control->Time);
+        printf("\n");
+    } else {
+        printf("  latest: no valid timestamp captured\n");
+    }
+    if ((control->Flags & TIMECARD_TIMESTAMP_FLAG_DATA_AVAILABLE) != 0u) {
+        printf("  payload width/value: %lu bits / 0x%08lx%s\n",
+               (unsigned long)control->DataWidth,
+               (unsigned long)control->Data,
+               (control->Flags &
+                TIMECARD_TIMESTAMP_FLAG_DATA_TRUNCATED) != 0u ?
+                   " (display truncated)" : "");
+    }
+}
+
+static int
+query_timestamp(HANDLE handle, unsigned long channel)
+{
+    TIMECARD_TIMESTAMP_CONTROL control;
+
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Channel = (unsigned __int32)channel;
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_TIMESTAMP_QUERY,
+                             &control, sizeof(control), &control,
+                             sizeof(control)))
+        return 1;
+    print_timestamp_control(&control);
+    return 0;
+}
+
+static int
+cmd_timestamp_status(HANDLE handle, int argc, char **argv)
+{
+    unsigned long channel;
+    int result = 0;
+
+    if (argc == 3)
+        return query_timestamp(handle, parse_timestamp_channel(argv[2]));
+    if (argc != 2)
+        return 2;
+    for (channel = 0; channel < TIMECARD_TIMESTAMP_COUNT; ++channel)
+        result |= query_timestamp(handle, channel);
+    return result;
+}
+
+static int
+cmd_timestamp_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_TIMESTAMP_CONTROL control;
+    int index;
+
+    if (argc < 6 || argc > 8)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    control.Size = sizeof(control);
+    control.Channel =
+        (unsigned __int32)parse_timestamp_channel(argv[2]);
+    if (parse_on_off(argv[3], TIMECARD_TIMESTAMP_FLAG_ENABLED,
+                     &control.Flags))
+        return 2;
+    if (_stricmp(argv[4], "rising") == 0 ||
+        _stricmp(argv[4], "normal") == 0) {
+        control.Polarity = TIMECARD_TIMESTAMP_POLARITY_RISING;
+    } else if (_stricmp(argv[4], "falling") == 0 ||
+               _stricmp(argv[4], "inverted") == 0) {
+        control.Polarity = TIMECARD_TIMESTAMP_POLARITY_FALLING;
+    } else {
+        return 2;
+    }
+    control.CableDelayNanoseconds = parse_u32_bounded(
+        argv[5], "timestamp cable delay", 0u, 0xffffu);
+    for (index = 6; index < argc; ++index) {
+        if (_stricmp(argv[index], "clear-error") == 0 &&
+            (control.Flags & TIMECARD_TIMESTAMP_FLAG_CLEAR_ERROR) == 0u) {
+            control.Flags |= TIMECARD_TIMESTAMP_FLAG_CLEAR_ERROR;
+        } else if (_stricmp(argv[index], "clear-queue") == 0 &&
+                   (control.Flags &
+                    TIMECARD_TIMESTAMP_FLAG_CLEAR_QUEUE) == 0u) {
+            control.Flags |= TIMECARD_TIMESTAMP_FLAG_CLEAR_QUEUE;
+        } else {
+            return 2;
+        }
+    }
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_TIMESTAMP_SET,
+                             &control, sizeof(control), &control,
+                             sizeof(control)))
+        return 1;
+    print_timestamp_control(&control);
+    return 0;
+}
+
+static void
+print_timestamp_event(const TIMECARD_TIMESTAMP_EVENT *event,
+                      unsigned long index)
+{
+    unsigned long dataWords;
+    unsigned long word;
+
+    printf("  [%lu] ", index);
+    if ((event->Flags & TIMECARD_TIMESTAMP_FLAG_EVENT_VALID) != 0u)
+        print_card_time(&event->Time);
+    else
+        printf("invalid time");
+    printf("; event/count/error/flags %lu / %lu / 0x%08lx / 0x%08lx\n",
+           (unsigned long)event->EventCount,
+           (unsigned long)event->TimestampCount,
+           (unsigned long)event->Error,
+           (unsigned long)event->Flags);
+    if ((event->Flags & TIMECARD_TIMESTAMP_FLAG_DATA_VALID) == 0u)
+        return;
+    if (event->DataWidth > TIMECARD_TIMESTAMP_MAX_DATA_BYTES * 8u)
+        dataWords = TIMECARD_TIMESTAMP_MAX_DATA_BYTES / 4u;
+    else
+        dataWords = (event->DataWidth + 31u) / 32u;
+    printf("       payload %lu bits, least-significant word first:",
+           (unsigned long)event->DataWidth);
+    for (word = 0; word < dataWords; ++word)
+        printf(" %08lX", (unsigned long)event->Data[word]);
+    if ((event->Flags & TIMECARD_TIMESTAMP_FLAG_DATA_TRUNCATED) != 0u)
+        printf(" (truncated to %u bits)",
+               TIMECARD_TIMESTAMP_MAX_DATA_BYTES * 8u);
+    printf("\n");
+}
+
+static int
+cmd_timestamp_read(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_TIMESTAMP_BATCH batch;
+    unsigned long index;
+
+    if (argc < 3 || argc > 4)
+        return 2;
+    RtlZeroMemory(&batch, sizeof(batch));
+    batch.Size = sizeof(batch);
+    batch.Channel =
+        (unsigned __int32)parse_timestamp_channel(argv[2]);
+    batch.MaximumEvents = argc == 4 ?
+        parse_u32_bounded(argv[3], "event count", 1u,
+                          TIMECARD_TIMESTAMP_MAX_BATCH) :
+        TIMECARD_TIMESTAMP_MAX_BATCH;
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_TIMESTAMP_READ,
+                             &batch, sizeof(batch), &batch, sizeof(batch)))
+        return 1;
+    if (batch.Count > TIMECARD_TIMESTAMP_MAX_BATCH) {
+        fprintf(stderr,
+                "timecardctl: driver returned an invalid timestamp event "
+                "count (%lu)\n", (unsigned long)batch.Count);
+        return 1;
+    }
+    printf("Timestamp %lu (%s): drained %lu event(s), %lu dropped\n",
+           (unsigned long)batch.Channel,
+           timestamp_channel_name(batch.Channel),
+           (unsigned long)batch.Count,
+           (unsigned long)batch.DroppedEvents);
+    for (index = 0; index < batch.Count; ++index)
+        print_timestamp_event(&batch.Events[index], index);
+    return 0;
+}
+
+static void
+print_q16_ppb(signed __int64 value)
+{
+    unsigned __int64 magnitude;
+    unsigned __int64 whole;
+    unsigned __int64 fraction;
+
+    magnitude = value < 0 ? (unsigned __int64)(-value) :
+                            (unsigned __int64)value;
+    whole = magnitude >> 16;
+    fraction = ((magnitude & 0xffffu) * 1000000u + 32768u) >> 16;
+    if (fraction == 1000000u) {
+        ++whole;
+        fraction = 0u;
+    }
+    printf("%s%llu.%06llu", value < 0 ? "-" : "",
+           (unsigned long long)whole, (unsigned long long)fraction);
+}
+
+static void
+print_clock_adjustment(const TIMECARD_CLOCK_ADJUSTMENT *adjustment)
+{
+    printf("Clock adjustment: version 0x%08lx, flags 0x%08lx\n",
+           (unsigned long)adjustment->Version,
+           (unsigned long)adjustment->Flags);
+    printf("  control/select: 0x%08lx / 0x%08lx\n",
+           (unsigned long)adjustment->Control,
+           (unsigned long)adjustment->Select);
+    printf("  smooth offset: %ld ns over %lu ns\n",
+           (long)adjustment->OffsetNanoseconds,
+           (unsigned long)adjustment->OffsetIntervalNanoseconds);
+    printf("  smooth drift:  ");
+    print_q16_ppb(adjustment->DriftPpbQ16);
+    printf(" ppb over %lu ns%s\n",
+           (unsigned long)adjustment->DriftIntervalNanoseconds,
+           (adjustment->Flags &
+            TIMECARD_CLOCK_ADJUST_FLAG_FRACTIONAL_DRIFT) != 0u ?
+               " (Q16.16 supported)" : " (integer core)");
+    printf("  in-sync threshold: %lu ns; applied flags: 0x%08lx\n",
+           (unsigned long)adjustment->InSyncThresholdNanoseconds,
+           (unsigned long)adjustment->AppliedFlags);
+}
+
+static int
+cmd_clock_adjust_status(HANDLE handle)
+{
+    TIMECARD_CLOCK_ADJUSTMENT adjustment;
+
+    RtlZeroMemory(&adjustment, sizeof(adjustment));
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_CLOCK_ADJUST_QUERY,
+                             NULL, 0, &adjustment, sizeof(adjustment)))
+        return 1;
+    print_clock_adjustment(&adjustment);
+    return 0;
+}
+
+static int
+cmd_clock_adjust_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_CLOCK_ADJUSTMENT adjustment;
+    int index = 2;
+
+    if (argc < 4 || argc > 10)
+        return 2;
+    RtlZeroMemory(&adjustment, sizeof(adjustment));
+    adjustment.Size = sizeof(adjustment);
+    while (index < argc) {
+        if (_stricmp(argv[index], "offset") == 0 &&
+            (adjustment.Flags &
+             TIMECARD_CLOCK_ADJUST_FLAG_APPLY_OFFSET) == 0u) {
+            if (index + 2 >= argc)
+                return 2;
+            adjustment.OffsetNanoseconds = parse_i32_bounded(
+                argv[index + 1], "smooth offset",
+                -TIMECARD_CLOCK_ADJUST_MAX_OFFSET_NS,
+                TIMECARD_CLOCK_ADJUST_MAX_OFFSET_NS);
+            adjustment.OffsetIntervalNanoseconds = parse_u32_bounded(
+                argv[index + 2], "offset interval", 1u, 0xffffffffu);
+            adjustment.Flags |= TIMECARD_CLOCK_ADJUST_FLAG_APPLY_OFFSET;
+            index += 3;
+        } else if (_stricmp(argv[index], "drift") == 0 &&
+                   (adjustment.Flags &
+                    TIMECARD_CLOCK_ADJUST_FLAG_APPLY_DRIFT) == 0u) {
+            if (index + 2 >= argc)
+                return 2;
+            adjustment.DriftPpbQ16 = parse_ppb_q16(argv[index + 1]);
+            adjustment.DriftIntervalNanoseconds = parse_u32_bounded(
+                argv[index + 2], "drift interval", 1u, 0xffffffffu);
+            adjustment.Flags |= TIMECARD_CLOCK_ADJUST_FLAG_APPLY_DRIFT;
+            index += 3;
+        } else if (_stricmp(argv[index], "threshold") == 0 &&
+                   (adjustment.Flags &
+                    TIMECARD_CLOCK_ADJUST_FLAG_APPLY_THRESHOLD) == 0u) {
+            if (index + 1 >= argc)
+                return 2;
+            adjustment.InSyncThresholdNanoseconds = parse_u32_bounded(
+                argv[index + 1], "in-sync threshold", 0u, 1000000000u);
+            adjustment.Flags |= TIMECARD_CLOCK_ADJUST_FLAG_APPLY_THRESHOLD;
+            index += 2;
+        } else {
+            return 2;
+        }
+    }
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_CLOCK_ADJUST_SET,
+                             &adjustment, sizeof(adjustment), &adjustment,
+                             sizeof(adjustment)))
+        return 1;
+    print_clock_adjustment(&adjustment);
+    return 0;
+}
+
+static void
+print_limiter(const char *name, unsigned __int32 raw, int fractional)
+{
+    unsigned __int32 magnitude =
+        raw & TIMECARD_CLOCK_LIMITER_VALUE_MASK;
+
+    printf("  %-22s 0x%08lx (%s, ", name, (unsigned long)raw,
+           (raw & TIMECARD_CLOCK_LIMITER_ENABLE) != 0u ?
+               "enabled" : "disabled");
+    if (fractional) {
+        print_q16_ppb((signed __int64)magnitude);
+        printf(" ppb magnitude)\n");
+    } else {
+        printf("%lu ns magnitude)\n", (unsigned long)magnitude);
+    }
+}
+
+static void
+print_clock_advanced(const TIMECARD_CLOCK_ADVANCED_CONTROL *control)
+{
+    printf("Advanced Clock: version 0x%08lx, flags 0x%08lx\n",
+           (unsigned long)control->Version,
+           (unsigned long)control->Flags);
+    printf("  control/status/apply: 0x%08lx / 0x%08lx / 0x%08lx\n",
+           (unsigned long)control->Control,
+           (unsigned long)control->Status,
+           (unsigned long)control->ApplyFlags);
+    printf("  holdover/aging ready: %s / %s\n",
+           (control->Flags &
+            TIMECARD_CLOCK_ADVANCED_FLAG_HOLDOVER_READY) != 0u ?
+               "yes" : "no",
+           (control->Flags &
+            TIMECARD_CLOCK_ADVANCED_FLAG_AGING_READY) != 0u ?
+               "yes" : "no");
+    if ((control->Flags &
+         TIMECARD_CLOCK_ADVANCED_FLAG_RATE_LIMITERS) != 0u) {
+        print_limiter("offset rate limiter", control->OffsetRateLimiter, 0);
+        print_limiter("drift rate limiter", control->DriftRateLimiterQ16, 1);
+    }
+    if ((control->Flags & TIMECARD_CLOCK_ADVANCED_FLAG_HOLDOVER) != 0u) {
+        printf("  holdover config:      0x%08lx\n",
+               (unsigned long)control->HoldoverConfiguration);
+        printf("  holdover status:      0x%08lx + 0x%08lx; %lu samples\n",
+               (unsigned long)control->StatusHoldover,
+               (unsigned long)control->StatusHoldoverFraction,
+               (unsigned long)control->StatusHoldoverSamples);
+    }
+    if ((control->Flags &
+         TIMECARD_CLOCK_ADVANCED_FLAG_OUTLIER_FILTERS) != 0u) {
+        print_limiter("offset outlier filter",
+                      control->OffsetOutlierFilter, 0);
+        print_limiter("drift outlier filter",
+                      control->DriftOutlierFilter, 0);
+        printf("  rejected offset/drift samples: %lu / %lu\n",
+               (unsigned long)control->StatusOffsetOutliers,
+               (unsigned long)control->StatusDriftOutliers);
+    }
+    if ((control->Flags &
+         TIMECARD_CLOCK_ADVANCED_FLAG_SERVO_FACTORS) != 0u) {
+        printf("  servo offset P/I:     0x%04lx / 0x%04lx\n",
+               (unsigned long)control->ServoOffsetP,
+               (unsigned long)control->ServoOffsetI);
+        printf("  servo drift P/I:      0x%04lx / 0x%04lx\n",
+               (unsigned long)control->ServoDriftP,
+               (unsigned long)control->ServoDriftI);
+    }
+    if ((control->Flags & TIMECARD_CLOCK_ADVANCED_FLAG_SERVO_LOG) != 0u) {
+        printf("  servo offset log:     0x%08lx + 0x%08lx\n",
+               (unsigned long)control->StatusOffset,
+               (unsigned long)control->StatusOffsetFraction);
+        printf("  servo drift log:      0x%08lx + 0x%08lx\n",
+               (unsigned long)control->StatusDrift,
+               (unsigned long)control->StatusDriftFraction);
+    }
+    if ((control->Flags & TIMECARD_CLOCK_ADVANCED_FLAG_AGING) != 0u) {
+        printf("  aging config:         0x%08lx\n",
+               (unsigned long)control->AgingConfiguration);
+        printf("  aging status:         0x%08lx%08lx; %lu samples\n",
+               (unsigned long)control->StatusAgingHigh,
+               (unsigned long)control->StatusAgingLow,
+               (unsigned long)control->StatusAgingSamples);
+    }
+    if ((control->Flags &
+         TIMECARD_CLOCK_ADVANCED_FLAG_DYNAMIC_CONTROL) != 0u) {
+        printf("  dynamic control:      0x%08lx\n",
+               (unsigned long)control->DynamicControl);
+    }
+    printf("  control modes:        holdover=%s, aging=%s, revert=%s\n",
+           (control->Control &
+            TIMECARD_CLOCK_ADVANCED_CONTROL_HOLDOVER) != 0u ? "on" : "off",
+           (control->Control &
+            TIMECARD_CLOCK_ADVANCED_CONTROL_AGING) != 0u ? "on" : "off",
+           (control->Control &
+            TIMECARD_CLOCK_ADVANCED_CONTROL_REVERT) != 0u ? "on" : "off");
+}
+
+static int
+cmd_clock_advanced_status(HANDLE handle)
+{
+    TIMECARD_CLOCK_ADVANCED_CONTROL control;
+
+    RtlZeroMemory(&control, sizeof(control));
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_CLOCK_ADVANCED_QUERY,
+                             NULL, 0, &control, sizeof(control)))
+        return 1;
+    print_clock_advanced(&control);
+    return 0;
+}
+
+static unsigned __int32
+parse_clock_advanced_modes(const char *text)
+{
+    char buffer[128];
+    char *context;
+    char *token;
+    unsigned __int32 value = 0u;
+
+    if (_stricmp(text, "none") == 0)
+        return 0u;
+    if (strlen(text) >= sizeof(buffer)) {
+        fprintf(stderr, "timecardctl: advanced Clock mode list is too long\n");
+        exit(2);
+    }
+    strcpy_s(buffer, sizeof(buffer), text);
+    token = strtok_s(buffer, ",", &context);
+    while (token != NULL) {
+        unsigned __int32 flag;
+
+        if (_stricmp(token, "holdover") == 0)
+            flag = TIMECARD_CLOCK_ADVANCED_CONTROL_HOLDOVER;
+        else if (_stricmp(token, "aging") == 0)
+            flag = TIMECARD_CLOCK_ADVANCED_CONTROL_AGING;
+        else if (_stricmp(token, "revert") == 0)
+            flag = TIMECARD_CLOCK_ADVANCED_CONTROL_REVERT;
+        else {
+            fprintf(stderr,
+                    "timecardctl: unknown advanced Clock mode: %s\n",
+                    token);
+            exit(2);
+        }
+        if ((value & flag) != 0u) {
+            fprintf(stderr,
+                    "timecardctl: duplicate advanced Clock mode: %s\n",
+                    token);
+            exit(2);
+        }
+        value |= flag;
+        token = strtok_s(NULL, ",", &context);
+    }
+    if (value == 0u) {
+        fprintf(stderr, "timecardctl: empty advanced Clock mode list\n");
+        exit(2);
+    }
+    return value;
+}
+
+static int
+cmd_clock_advanced_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_CLOCK_ADVANCED_CONTROL control;
+    int index = 2;
+
+    if (argc < 4 || argc > 19)
+        return 2;
+    RtlZeroMemory(&control, sizeof(control));
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_CLOCK_ADVANCED_QUERY,
+                             NULL, 0, &control, sizeof(control)))
+        return 1;
+    control.Size = sizeof(control);
+    control.ApplyFlags = 0u;
+    while (index < argc) {
+        if (_stricmp(argv[index], "rate-limiters") == 0 &&
+            (control.ApplyFlags &
+             TIMECARD_CLOCK_ADVANCED_APPLY_RATE_LIMITERS) == 0u) {
+            if (index + 2 >= argc)
+                return 2;
+            control.OffsetRateLimiter = parse_u32_bounded(
+                argv[index + 1], "offset rate-limiter register", 0u,
+                0xffffffffu);
+            control.DriftRateLimiterQ16 = parse_u32_bounded(
+                argv[index + 2], "drift rate-limiter register", 0u,
+                0xffffffffu);
+            control.ApplyFlags |=
+                TIMECARD_CLOCK_ADVANCED_APPLY_RATE_LIMITERS;
+            index += 3;
+        } else if (_stricmp(argv[index], "holdover") == 0 &&
+                   (control.ApplyFlags &
+                    TIMECARD_CLOCK_ADVANCED_APPLY_HOLDOVER) == 0u) {
+            if (index + 1 >= argc)
+                return 2;
+            control.HoldoverConfiguration = parse_u32_bounded(
+                argv[index + 1], "holdover configuration", 0u,
+                0xffffffffu);
+            control.ApplyFlags |= TIMECARD_CLOCK_ADVANCED_APPLY_HOLDOVER;
+            index += 2;
+        } else if (_stricmp(argv[index], "outlier-filters") == 0 &&
+                   (control.ApplyFlags &
+                    TIMECARD_CLOCK_ADVANCED_APPLY_OUTLIER_FILTERS) == 0u) {
+            if (index + 2 >= argc)
+                return 2;
+            control.OffsetOutlierFilter = parse_u32_bounded(
+                argv[index + 1], "offset outlier-filter register", 0u,
+                0xffffffffu);
+            control.DriftOutlierFilter = parse_u32_bounded(
+                argv[index + 2], "drift outlier-filter register", 0u,
+                0xffffffffu);
+            control.ApplyFlags |=
+                TIMECARD_CLOCK_ADVANCED_APPLY_OUTLIER_FILTERS;
+            index += 3;
+        } else if (_stricmp(argv[index], "servo") == 0 &&
+                   (control.ApplyFlags &
+                    TIMECARD_CLOCK_ADVANCED_APPLY_SERVO_FACTORS) == 0u) {
+            if (index + 4 >= argc)
+                return 2;
+            control.ServoOffsetP = parse_u32_bounded(
+                argv[index + 1], "servo offset P", 0u, 0xffffu);
+            control.ServoOffsetI = parse_u32_bounded(
+                argv[index + 2], "servo offset I", 0u, 0xffffu);
+            control.ServoDriftP = parse_u32_bounded(
+                argv[index + 3], "servo drift P", 0u, 0xffffu);
+            control.ServoDriftI = parse_u32_bounded(
+                argv[index + 4], "servo drift I", 0u, 0xffffu);
+            control.ApplyFlags |=
+                TIMECARD_CLOCK_ADVANCED_APPLY_SERVO_FACTORS;
+            index += 5;
+        } else if (_stricmp(argv[index], "aging") == 0 &&
+                   (control.ApplyFlags &
+                    TIMECARD_CLOCK_ADVANCED_APPLY_AGING) == 0u) {
+            if (index + 1 >= argc)
+                return 2;
+            control.AgingConfiguration = parse_u32_bounded(
+                argv[index + 1], "aging configuration", 0u, 0xffffffffu);
+            control.ApplyFlags |= TIMECARD_CLOCK_ADVANCED_APPLY_AGING;
+            index += 2;
+        } else if (_stricmp(argv[index], "control") == 0 &&
+                   (control.ApplyFlags &
+                    TIMECARD_CLOCK_ADVANCED_APPLY_CONTROL) == 0u) {
+            unsigned __int32 modes;
+
+            if (index + 1 >= argc)
+                return 2;
+            modes = parse_clock_advanced_modes(argv[index + 1]);
+            control.Control =
+                (control.Control & ~TIMECARD_CLOCK_ADVANCED_CONTROL_MASK) |
+                modes;
+            control.ApplyFlags |= TIMECARD_CLOCK_ADVANCED_APPLY_CONTROL;
+            index += 2;
+        } else {
+            return 2;
+        }
+    }
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_CLOCK_ADVANCED_SET,
+                             &control, sizeof(control), &control,
+                             sizeof(control)))
+        return 1;
+    print_clock_advanced(&control);
+    return 0;
+}
+
+static const char *
+core_type_name(unsigned long type)
+{
+    switch (type) {
+    case TIMECARD_CORE_TYPE_CLOCK: return "Clock";
+    case TIMECARD_CORE_TYPE_IMAGE_IDENTITY: return "Image identity";
+    case TIMECARD_CORE_TYPE_SIGNAL_TIMESTAMPER: return "Signal timestamper";
+    case TIMECARD_CORE_TYPE_PPS_MASTER: return "PPS master";
+    case TIMECARD_CORE_TYPE_PPS_SLAVE: return "PPS slave";
+    case TIMECARD_CORE_TYPE_TOD_SLAVE: return "ToD slave";
+    case TIMECARD_CORE_TYPE_TOD_MASTER: return "ToD master";
+    case TIMECARD_CORE_TYPE_IRIG_MASTER: return "IRIG master";
+    case TIMECARD_CORE_TYPE_IRIG_SLAVE: return "IRIG slave";
+    case TIMECARD_CORE_TYPE_DCF_MASTER: return "DCF master";
+    case TIMECARD_CORE_TYPE_DCF_SLAVE: return "DCF slave";
+    case TIMECARD_CORE_TYPE_SIGNAL_GENERATOR: return "Signal generator";
+    case TIMECARD_CORE_TYPE_FREQUENCY_INPUT: return "Frequency input";
+    default: return "Unknown";
+    }
+}
+
+static int
+cmd_fpga_inventory(HANDLE handle)
+{
+    TIMECARD_CORE_INVENTORY inventory;
+    unsigned long index;
+
+    RtlZeroMemory(&inventory, sizeof(inventory));
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_CORE_INVENTORY_QUERY,
+                             NULL, 0, &inventory, sizeof(inventory)))
+        return 1;
+    printf("Static FPGA inventory: ABI %lu, %lu core descriptor(s)\n",
+           (unsigned long)inventory.AbiVersion,
+           (unsigned long)inventory.Count);
+    printf("  board/layout/image/flags: %lu / %lu / 0x%08lx / 0x%08lx\n",
+           (unsigned long)inventory.BoardProfile,
+           (unsigned long)inventory.Layout,
+           (unsigned long)inventory.RawImageVersion,
+           (unsigned long)inventory.Flags);
+    printf("  This is the driver's trusted static board map; no guessed BAR "
+           "addresses were probed.\n");
+    for (index = 0; index < inventory.Count &&
+                    index < TIMECARD_CORE_INVENTORY_MAX; ++index) {
+        const TIMECARD_CORE_DESCRIPTOR *core = &inventory.Cores[index];
+
+        printf("  [%2lu] %-19s #%lu offset 0x%08lx span 0x%05lx ",
+               index, core_type_name(core->Type),
+               (unsigned long)core->Instance,
+               (unsigned long)core->RegisterOffset,
+               (unsigned long)core->RegisterSpan);
+        if (core->InterruptMessage == TIMECARD_CORE_INTERRUPT_NONE)
+            printf("IRQ - ");
+        else
+            printf("IRQ %lu ", (unsigned long)core->InterruptMessage);
+        printf("version 0x%08lx flags 0x%02lx\n",
+               (unsigned long)core->Version,
+               (unsigned long)core->Flags);
+    }
+    if (inventory.Count > TIMECARD_CORE_INVENTORY_MAX) {
+        fprintf(stderr, "timecardctl: driver returned an invalid inventory "
+                        "count (%lu)\n", (unsigned long)inventory.Count);
+        return 1;
+    }
+    return 0;
+}
+
+static int
+cmd_signal_events(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_SIGNAL_EVENT_BATCH batch;
+    unsigned long index;
+
+    if (argc < 3 || argc > 4)
+        return 2;
+    RtlZeroMemory(&batch, sizeof(batch));
+    batch.Size = sizeof(batch);
+    batch.Generator = parse_u32_bounded(
+        argv[2], "signal generator", 1u, TIMECARD_SIGNAL_COUNT);
+    batch.MaximumEvents = argc == 4 ?
+        parse_u32_bounded(argv[3], "event count", 1u,
+                          TIMECARD_SIGNAL_EVENT_MAX_BATCH) :
+        TIMECARD_SIGNAL_EVENT_MAX_BATCH;
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_SIGNAL_EVENT_READ,
+                             &batch, sizeof(batch), &batch, sizeof(batch)))
+        return 1;
+    if (batch.Count > TIMECARD_SIGNAL_EVENT_MAX_BATCH) {
+        fprintf(stderr,
+                "timecardctl: driver returned an invalid signal event "
+                "count (%lu)\n", (unsigned long)batch.Count);
+        return 1;
+    }
+    printf("Signal generator %lu: drained %lu completion event(s), "
+           "%lu dropped\n",
+           (unsigned long)batch.Generator,
+           (unsigned long)batch.Count,
+           (unsigned long)batch.DroppedEvents);
+    for (index = 0; index < batch.Count; ++index) {
+        const TIMECARD_SIGNAL_EVENT *event = &batch.Events[index];
+        unsigned __int64 seconds =
+            event->SystemInterruptTime100ns / 10000000u;
+        unsigned __int64 fraction =
+            event->SystemInterruptTime100ns % 10000000u;
+
+        printf("  [%lu] sequence %llu, interrupt time %llu.%07llu s, "
+               "flags/status 0x%08lx / 0x%08lx\n",
+               index, (unsigned long long)event->Sequence,
+               (unsigned long long)seconds,
+               (unsigned long long)fraction,
+               (unsigned long)event->Flags,
+               (unsigned long)event->Status);
+    }
+    return 0;
+}
+
+static const struct {
+    const char *Name;
+    unsigned __int32 Flag;
+} contract_capabilities[] = {
+    { "clock-servo-log", TIMECARD_FPGA_CONTRACT_CLOCK_SERVO_LOG },
+    { "clock-advanced", TIMECARD_FPGA_CONTRACT_CLOCK_ADVANCED },
+    { "tod-telemetry", TIMECARD_FPGA_CONTRACT_TOD_TELEMETRY },
+    { "tod-utc-read", TIMECARD_FPGA_CONTRACT_TOD_MASTER_UTC_READ },
+    { "tod-utc-write", TIMECARD_FPGA_CONTRACT_TOD_MASTER_UTC_WRITE },
+    { "irig-master-am", TIMECARD_FPGA_CONTRACT_IRIG_MASTER_AM },
+    { "irig-slave-am", TIMECARD_FPGA_CONTRACT_IRIG_SLAVE_AM },
+    { "irig-slave-year", TIMECARD_FPGA_CONTRACT_IRIG_SLAVE_YEAR },
+    { "ntp-source", TIMECARD_FPGA_CONTRACT_NTP_SOURCE },
+    { "art-timestamp-extended",
+      TIMECARD_FPGA_CONTRACT_ART_TIMESTAMP_EXTENDED },
+    { "synce-source", TIMECARD_FPGA_CONTRACT_SYNCE_SOURCE },
+    { "dynamic-source", TIMECARD_FPGA_CONTRACT_DYNAMIC_SOURCE }
+};
+
+static void
+print_contract_capabilities(unsigned __int32 flags, const char *prefix)
+{
+    size_t index;
+    int found = 0;
+
+    printf("%s", prefix);
+    for (index = 0; index < sizeof(contract_capabilities) /
+                              sizeof(contract_capabilities[0]); ++index) {
+        if ((flags & contract_capabilities[index].Flag) == 0u)
+            continue;
+        printf("%s%s", found ? "," : "",
+               contract_capabilities[index].Name);
+        found = 1;
+    }
+    if (!found)
+        printf("none");
+    printf("\n");
+}
+
+static unsigned __int32
+parse_contract_capabilities(const char *text)
+{
+    char buffer[512];
+    char *context;
+    char *token;
+    unsigned __int32 flags = 0u;
+
+    if (_stricmp(text, "none") == 0)
+        return 0u;
+    if (strlen(text) >= sizeof(buffer)) {
+        fprintf(stderr, "timecardctl: FPGA capability list is too long\n");
+        exit(2);
+    }
+    strcpy_s(buffer, sizeof(buffer), text);
+    token = strtok_s(buffer, ",", &context);
+    while (token != NULL) {
+        size_t index;
+        int found = 0;
+
+        for (index = 0; index < sizeof(contract_capabilities) /
+                                  sizeof(contract_capabilities[0]); ++index) {
+            if (_stricmp(token, contract_capabilities[index].Name) != 0)
+                continue;
+            if ((flags & contract_capabilities[index].Flag) != 0u) {
+                fprintf(stderr,
+                        "timecardctl: duplicate FPGA capability: %s\n",
+                        token);
+                exit(2);
+            }
+            flags |= contract_capabilities[index].Flag;
+            found = 1;
+            break;
+        }
+        if (!found) {
+            fprintf(stderr,
+                    "timecardctl: unknown FPGA capability: %s\n", token);
+            exit(2);
+        }
+        token = strtok_s(NULL, ",", &context);
+    }
+    if (flags == 0u) {
+        fprintf(stderr, "timecardctl: empty FPGA capability list\n");
+        exit(2);
+    }
+    return flags;
+}
+
+static void
+print_fpga_contract(const TIMECARD_FPGA_IMAGE_CONTRACT *contract)
+{
+    printf("FPGA exact-image contract: ABI %lu, raw image 0x%08lx\n",
+           (unsigned long)contract->AbiVersion,
+           (unsigned long)contract->RawImageVersion);
+    printf("  board/layout/status: %lu / %lu / 0x%08lx%s%s%s\n",
+           (unsigned long)contract->BoardProfile,
+           (unsigned long)contract->Layout,
+           (unsigned long)contract->StatusFlags,
+           (contract->StatusFlags &
+            TIMECARD_FPGA_CONTRACT_FLAG_IMAGE_PRESENT) != 0u ?
+               " image-present" : "",
+           (contract->StatusFlags &
+            TIMECARD_FPGA_CONTRACT_FLAG_EXACT_MATCH) != 0u ?
+               " exact-match" : "",
+           (contract->StatusFlags &
+            TIMECARD_FPGA_CONTRACT_FLAG_ACTIVE) != 0u ?
+               " active" : "");
+    printf("  declared/effective: 0x%08lx / 0x%08lx\n",
+           (unsigned long)contract->CapabilityFlags,
+           (unsigned long)contract->EffectiveFlags);
+    print_contract_capabilities(contract->CapabilityFlags,
+                                "  declared names: ");
+    print_contract_capabilities(contract->EffectiveFlags,
+                                "  effective names: ");
+}
+
+static int
+cmd_fpga_contract_status(HANDLE handle)
+{
+    TIMECARD_FPGA_IMAGE_CONTRACT contract;
+
+    RtlZeroMemory(&contract, sizeof(contract));
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_FPGA_CONTRACT_QUERY,
+                             NULL, 0, &contract, sizeof(contract)))
+        return 1;
+    print_fpga_contract(&contract);
+    return 0;
+}
+
+static int
+cmd_fpga_contract_set(HANDLE handle, int argc, char **argv)
+{
+    TIMECARD_FPGA_IMAGE_CONTRACT current;
+    TIMECARD_FPGA_IMAGE_CONTRACT request;
+    unsigned __int32 rawImage;
+    unsigned __int32 capabilities;
+
+    if (argc != 5 || _stricmp(argv[4], "acknowledge") != 0)
+        return 2;
+    rawImage = parse_u32_bounded(argv[2], "raw FPGA image", 1u,
+                                 0xffffffffu);
+    capabilities = parse_contract_capabilities(argv[3]);
+    if ((capabilities &
+         TIMECARD_FPGA_CONTRACT_TOD_MASTER_UTC_WRITE) != 0u &&
+        (capabilities &
+         TIMECARD_FPGA_CONTRACT_TOD_MASTER_UTC_READ) == 0u) {
+        fprintf(stderr, "timecardctl: tod-utc-write requires tod-utc-read\n");
+        return 2;
+    }
+    RtlZeroMemory(&current, sizeof(current));
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_FPGA_CONTRACT_QUERY,
+                             NULL, 0, &current, sizeof(current)))
+        return 1;
+    if ((current.StatusFlags &
+         TIMECARD_FPGA_CONTRACT_FLAG_IMAGE_PRESENT) == 0u) {
+        fprintf(stderr, "timecardctl: no trusted image identity is present; "
+                        "a contract cannot be activated\n");
+        return 1;
+    }
+    if (current.RawImageVersion != rawImage) {
+        fprintf(stderr,
+                "timecardctl: exact-image mismatch: hardware is 0x%08lx, "
+                "request named 0x%08lx\n",
+                (unsigned long)current.RawImageVersion,
+                (unsigned long)rawImage);
+        return 1;
+    }
+    RtlZeroMemory(&request, sizeof(request));
+    request.Size = sizeof(request);
+    request.AbiVersion = TIMECARD_ABI_VERSION;
+    request.RawImageVersion = rawImage;
+    request.CapabilityFlags = capabilities;
+    request.BoardProfile = current.BoardProfile;
+    request.Layout = current.Layout;
+    request.Acknowledgement = TIMECARD_FPGA_CONTRACT_ACKNOWLEDGEMENT;
+    if (timecard_ioctl_exact(handle, IOCTL_TIMECARD_FPGA_CONTRACT_SET,
+                             &request, sizeof(request), &request,
+                             sizeof(request)))
+        return 1;
+    print_fpga_contract(&request);
+    return 0;
+}
+
 static void
 usage(void)
 {
@@ -1422,6 +3208,32 @@ usage(void)
             "usage:\n"
             "  timecardctl status\n"
             "  timecardctl capabilities\n"
+            "  timecardctl fpga-status\n"
+            "  timecardctl clock-telemetry\n"
+            "  timecardctl pps-status [master|slave]\n"
+            "  timecardctl pps-set <master|slave> <on|off> <active-high|active-low> <cable-ns> <pulse-ms> [clear]\n"
+            "  timecardctl timecode-status [irig|dcf] [master|slave]\n"
+            "  timecardctl timecode-set <irig|dcf> <master|slave> <on|off> <correction-s> <delay-ns> <mode> <code> [control-bits] [--am <on|off>] [--year <1970..2069>] [clear]\n"
+            "  timecardctl tod-status\n"
+            "  timecardctl tod-set <on|off> <nmea|ubx|tsip|esip|pfec> <gnss 0..5> <baud> <normal|inverted> <correction-s> <disable-mask> [clear]\n"
+            "  timecardctl signal-status [generator 1..4]\n"
+            "  timecardctl signal-set <generator> <on|off> <period-ns> <pulse-ns> <phase-ns> <active-high|active-low> <repeat> <cable-ns>\n"
+            "  timecardctl signal-set-at <generator> <on|off> <period-ns> <pulse-ns> <start-phc-seconds> <start-ns> <active-high|active-low> <repeat> <cable-ns>\n"
+            "  timecardctl signal-clear <generator 1..4>\n"
+            "  timecardctl signal-events <generator 1..4> [events 1..16]\n"
+            "  timecardctl timestamp-status [gnss1|ts1|ts2|ts3|ts4|phc|0..5]\n"
+            "  timecardctl timestamp-set <channel> <on|off> <rising|falling> <cable-ns 0..65535> [clear-error] [clear-queue]\n"
+            "  timecardctl timestamp-read <channel> [events 1..16]\n"
+            "  timecardctl clock-adjust-status\n"
+            "  timecardctl clock-adjust-set <clause> [<clause> ...]\n"
+            "    clauses: offset <signed-ns> <window-ns>; drift <signed-ppb> <window-ns>; threshold <ns>\n"
+            "  timecardctl clock-advanced-status\n"
+            "  timecardctl clock-advanced-set <clause> [<clause> ...]\n"
+            "    clauses: rate-limiters <offset-raw> <drift-q16-raw>; holdover <raw>; outlier-filters <offset-raw> <drift-raw>\n"
+            "             servo <offset-p> <offset-i> <drift-p> <drift-i>; aging <raw>; control <none|holdover[,aging][,revert]>\n"
+            "  timecardctl fpga-inventory\n"
+            "  timecardctl fpga-contract-status\n"
+            "  timecardctl fpga-contract-set <raw-image-version> <none|capability[,capability...]> acknowledge\n"
             "  timecardctl get\n"
             "  timecardctl set-system\n"
             "  timecardctl phase-status\n"
@@ -1430,10 +3242,13 @@ usage(void)
             "  timecardctl phc-adjust <signed-nanoseconds>\n"
             "  timecardctl discipline-read <512-byte-image>\n"
             "  timecardctl discipline-write <512-byte-image>\n"
-            "  timecardctl clock-source <none|tod|irig|pps|ptp|rtc|dcf|regs|ext>\n"
+            "  timecardctl clock-source <none|tod|irig|pps|ptp|rtc|dcf|ntp|synce|dyn|regs|ext>\n"
             "  timecardctl serial\n"
             "  timecardctl nmea-status\n"
-            "  timecardctl nmea-set <on|off> <baud> [normal|inverted]\n"
+            "  timecardctl nmea-set <on|off> <baud> [normal|inverted] [clear]\n"
+            "  timecardctl nmea-set <on|off> <baud> <normal|inverted> <correction-s> <local-offset-minutes> <gnss 0..5|15> <disable-mask> [clear]\n"
+            "  timecardctl nmea-utc-status\n"
+            "  timecardctl nmea-utc-set <offset-seconds 0..65535> <valid|invalid> <none|leap61|leap59>\n"
             "  timecardctl uart-config <port 0..3> <baud>\n"
             "  timecardctl uart-read <port> [bytes] [timeout-ms]\n"
             "  timecardctl uart-read-hex <port> [bytes] [timeout-ms]\n"
@@ -1460,7 +3275,11 @@ usage(void)
             "  timecardctl led-status [LED 1..6]\n"
             "  timecardctl led-set <LED 1..6> <red> <green> <blue> [current 1..128]\n"
             "  timecardctl led-test\n"
-            "ports: 0=GNSS, 1=GNSS2, 2=MAC, 3=NMEA\n");
+            "ports: 0=GNSS, 1=GNSS2, 2=MAC, 3=NMEA\n"
+            "contract capabilities: clock-servo-log,clock-advanced,tod-telemetry,\n"
+            "  tod-utc-read,tod-utc-write,irig-master-am,irig-slave-am,\n"
+            "  irig-slave-year,ntp-source,art-timestamp-extended,synce-source,\n"
+            "  dynamic-source\n");
 }
 
 int
@@ -1478,6 +3297,52 @@ main(int argc, char **argv)
         result = cmd_status(handle);
     else if (strcmp(argv[1], "capabilities") == 0 && argc == 2)
         result = cmd_capabilities(handle);
+    else if (strcmp(argv[1], "fpga-status") == 0 && argc == 2)
+        result = cmd_fpga_status(handle);
+    else if (strcmp(argv[1], "clock-telemetry") == 0 && argc == 2)
+        result = cmd_clock_telemetry(handle);
+    else if (strcmp(argv[1], "pps-status") == 0)
+        result = cmd_pps_status(handle, argc, argv);
+    else if (strcmp(argv[1], "pps-set") == 0)
+        result = cmd_pps_set(handle, argc, argv);
+    else if (strcmp(argv[1], "timecode-status") == 0)
+        result = cmd_timecode_status(handle, argc, argv);
+    else if (strcmp(argv[1], "timecode-set") == 0)
+        result = cmd_timecode_set(handle, argc, argv);
+    else if (strcmp(argv[1], "tod-status") == 0 && argc == 2)
+        result = cmd_tod_status(handle);
+    else if (strcmp(argv[1], "tod-set") == 0)
+        result = cmd_tod_set(handle, argc, argv);
+    else if (strcmp(argv[1], "signal-status") == 0)
+        result = cmd_signal_status(handle, argc, argv);
+    else if (strcmp(argv[1], "signal-set") == 0)
+        result = cmd_signal_set(handle, argc, argv);
+    else if (strcmp(argv[1], "signal-set-at") == 0)
+        result = cmd_signal_set_at(handle, argc, argv);
+    else if (strcmp(argv[1], "signal-clear") == 0)
+        result = cmd_signal_clear(handle, argc, argv);
+    else if (strcmp(argv[1], "signal-events") == 0)
+        result = cmd_signal_events(handle, argc, argv);
+    else if (strcmp(argv[1], "timestamp-status") == 0)
+        result = cmd_timestamp_status(handle, argc, argv);
+    else if (strcmp(argv[1], "timestamp-set") == 0)
+        result = cmd_timestamp_set(handle, argc, argv);
+    else if (strcmp(argv[1], "timestamp-read") == 0)
+        result = cmd_timestamp_read(handle, argc, argv);
+    else if (strcmp(argv[1], "clock-adjust-status") == 0 && argc == 2)
+        result = cmd_clock_adjust_status(handle);
+    else if (strcmp(argv[1], "clock-adjust-set") == 0)
+        result = cmd_clock_adjust_set(handle, argc, argv);
+    else if (strcmp(argv[1], "clock-advanced-status") == 0 && argc == 2)
+        result = cmd_clock_advanced_status(handle);
+    else if (strcmp(argv[1], "clock-advanced-set") == 0)
+        result = cmd_clock_advanced_set(handle, argc, argv);
+    else if (strcmp(argv[1], "fpga-inventory") == 0 && argc == 2)
+        result = cmd_fpga_inventory(handle);
+    else if (strcmp(argv[1], "fpga-contract-status") == 0 && argc == 2)
+        result = cmd_fpga_contract_status(handle);
+    else if (strcmp(argv[1], "fpga-contract-set") == 0)
+        result = cmd_fpga_contract_set(handle, argc, argv);
     else if (strcmp(argv[1], "get") == 0 && argc == 2)
         result = cmd_get(handle);
     else if (strcmp(argv[1], "set-system") == 0 && argc == 2)
@@ -1502,6 +3367,10 @@ main(int argc, char **argv)
         result = cmd_nmea_status(handle);
     else if (strcmp(argv[1], "nmea-set") == 0)
         result = cmd_nmea_set(handle, argc, argv);
+    else if (strcmp(argv[1], "nmea-utc-status") == 0 && argc == 2)
+        result = cmd_nmea_utc_status(handle);
+    else if (strcmp(argv[1], "nmea-utc-set") == 0)
+        result = cmd_nmea_utc_set(handle, argc, argv);
     else if (strcmp(argv[1], "uart-config") == 0)
         result = cmd_uart_config(handle, argc, argv);
     else if (strcmp(argv[1], "uart-read") == 0)

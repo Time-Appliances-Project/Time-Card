@@ -64,13 +64,23 @@
     <Compile Include="MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="MainWindow.Devices.cs">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="MainWindow.Product.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="MainWindow.Oscillatord.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="MainWindow.Fpga.cs">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="MainWindow.FpgaGaps.cs">
+      <DependentUpon>MainWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="ControlCenterProduct.cs" />
+    <Compile Include="SessionLogging.cs" />
     <Compile Include="RollingTelemetryChart.cs" />
     <Compile Include="TimeCardTopologyView.cs" />
     <Compile Include="TelemetryHistogram.cs" />
@@ -79,9 +89,11 @@
     </Compile>
     <Compile Include="Models.cs" />
     <Compile Include="NativeDiscipline.cs" />
+    <Compile Include="..\TimeCardOscillatord\NativeGnssSession.cs"><Link>NativeGnssSession.cs</Link></Compile>
     <Compile Include="OscillatordClient.cs" />
     <Compile Include="Sa53Client.cs" />
     <Compile Include="TimeCardClient.cs" />
+    <Compile Include="TimeCardDeviceSelection.cs" />
     <Compile Include="UbloxClient.cs" />
     <Compile Include="UbloxStreamDecoder.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

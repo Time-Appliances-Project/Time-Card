@@ -174,7 +174,8 @@ TimeCardUartMessageRangeRelevant(PDEVICE_CONTEXT context, ULONG first,
             return TRUE;
         }
     }
-    return FALSE;
+    return TimeCardTimestampMessageRangeRelevant(context, first, count) ||
+           TimeCardSignalMessageRangeRelevant(context, first, count);
 }
 
 static VOID
@@ -189,6 +190,8 @@ TimeCardDeleteUartInterrupts(PDEVICE_CONTEXT context)
         }
     }
     context->UartInterruptCount = 0;
+    context->TimestampInterruptMask = 0u;
+    context->SignalInterruptMask = 0u;
 }
 
 static NTSTATUS
@@ -252,6 +255,10 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
         interruptContext->DeviceContext = context;
         interruptContext->MessageBase = messageBase;
         context->UartInterrupt[context->UartInterruptCount++] = interrupt;
+        TimeCardTimestampMarkInterruptRange(
+            context, messageBase, messageCount);
+        TimeCardSignalMarkInterruptRange(
+            context, messageBase, messageCount);
         messageBase += messageCount;
     }
     return context->UartInterruptCount != 0 ?
@@ -261,6 +268,14 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
 static NTSTATUS
 TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
 {
+    static const ULONG timestampOffsets[TIMECARD_TIMESTAMP_COUNT] = {
+        TIMECARD_TIMESTAMP0_OFFSET_ART,
+        TIMECARD_TIMESTAMP1_OFFSET_ART,
+        TIMECARD_TIMESTAMP2_OFFSET_ART,
+        TIMECARD_TIMESTAMP3_OFFSET_ART,
+        TIMECARD_TIMESTAMP4_OFFSET_ART,
+        TIMECARD_TIMESTAMP5_OFFSET_ART
+    };
     ULONG i;
 
     context->Layout = TIMECARD_LAYOUT_ART;
@@ -274,6 +289,18 @@ TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
     context->FlashController = TIMECARD_FLASH_CONTROLLER_ALTERA;
 
     context->Regs = NULL;
+    context->PpsMaster = NULL;
+    context->PpsSlave = NULL;
+    context->IrigMaster = NULL;
+    context->IrigSlave = NULL;
+    context->DcfMaster = NULL;
+    context->DcfSlave = NULL;
+    context->IrigMasterRouteManaged = FALSE;
+    context->IrigSlaveRouteManaged = FALSE;
+    context->DcfMasterRouteManaged = FALSE;
+    context->DcfSlaveRouteManaged = FALSE;
+    context->FpgaContractImageVersion = 0u;
+    context->FpgaContractCapabilities = 0u;
     context->Tod = NULL;
     context->NmeaOut = NULL;
     context->SmaMap1 = NULL;
@@ -283,6 +310,8 @@ TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
     context->Mro50 = NULL;
     context->PhaseReference = NULL;
     context->PhaseOscillator = NULL;
+    for (i = 0; i < TIMECARD_TIMESTAMP_COUNT; ++i)
+        context->Timestamp[i] = NULL;
     context->I2c = NULL;
     context->Flash = NULL;
     context->I2cKnownDeviceMask = 0;
@@ -347,6 +376,13 @@ TimeCardSelectArtLayout(PDEVICE_CONTEXT context)
         context->PhaseOscillator = (volatile TIMECARD_TIMESTAMP_REG *)(
             context->Bar0Base + TIMECARD_PHASE_OSCILLATOR_OFFSET_ART);
     }
+    for (i = 0; i < TIMECARD_TIMESTAMP_COUNT; ++i) {
+        if (TimeCardRangeFits(context->Bar0Length, timestampOffsets[i],
+                              sizeof(TIMECARD_TIMESTAMP_REG))) {
+            context->Timestamp[i] = (volatile TIMECARD_TIMESTAMP_REG *)(
+                context->Bar0Base + timestampOffsets[i]);
+        }
+    }
     if (TimeCardRangeFits(context->Bar0Length, context->I2cOffset, 0x100u))
         context->I2c = context->Bar0Base + context->I2cOffset;
     if (TimeCardRangeFits(context->Bar0Length, context->FlashOffset,
@@ -360,10 +396,17 @@ static NTSTATUS
 TimeCardSelectLayout(PDEVICE_CONTEXT context)
 {
     ULONG uartOffsets[TIMECARD_UART_COUNT];
+    ULONG timestampOffsets[TIMECARD_TIMESTAMP_COUNT];
     ULONG smaMap1Offset;
     ULONG smaMap2Offset;
     ULONG signalBaseOffset;
     ULONG frequencyBaseOffset;
+    ULONG ppsMasterOffset;
+    ULONG ppsSlaveOffset;
+    ULONG irigMasterOffset;
+    ULONG irigSlaveOffset;
+    ULONG dcfMasterOffset;
+    ULONG dcfSlaveOffset;
     BOOLEAN useMsix;
     ULONG i;
 
@@ -393,11 +436,13 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
         (!TimeCardRangeFits(context->Bar0Length,
                             TIMECARD_CLOCK_OFFSET_MSIX, sizeof(OCP_REG)) ||
          !TimeCardRangeFits(context->Bar0Length,
-                            TIMECARD_TOD_OFFSET_MSIX, sizeof(TOD_REG))) &&
+                            TIMECARD_TOD_OFFSET_MSIX,
+                            sizeof(TIMECARD_TOD_SLAVE_REG))) &&
         TimeCardRangeFits(context->Bar0Length,
                           TIMECARD_CLOCK_OFFSET_MSI, sizeof(OCP_REG)) &&
         TimeCardRangeFits(context->Bar0Length,
-                          TIMECARD_TOD_OFFSET_MSI, sizeof(TOD_REG))) {
+                          TIMECARD_TOD_OFFSET_MSI,
+                          sizeof(TIMECARD_TOD_SLAVE_REG))) {
         useMsix = FALSE;
     } else if (!useMsix &&
                (!TimeCardRangeFits(context->Bar0Length,
@@ -405,13 +450,13 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
                                    sizeof(OCP_REG)) ||
                 !TimeCardRangeFits(context->Bar0Length,
                                    TIMECARD_TOD_OFFSET_MSI,
-                                   sizeof(TOD_REG))) &&
+                                   sizeof(TIMECARD_TOD_SLAVE_REG))) &&
                TimeCardRangeFits(context->Bar0Length,
                                  TIMECARD_CLOCK_OFFSET_MSIX,
                                  sizeof(OCP_REG)) &&
                TimeCardRangeFits(context->Bar0Length,
                                  TIMECARD_TOD_OFFSET_MSIX,
-                                 sizeof(TOD_REG))) {
+                                 sizeof(TIMECARD_TOD_SLAVE_REG))) {
         useMsix = TRUE;
     }
 
@@ -420,6 +465,18 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
         context->ClockOffset = TIMECARD_CLOCK_OFFSET_MSIX;
         context->TodOffset = TIMECARD_TOD_OFFSET_MSIX;
         context->NmeaOutOffset = TIMECARD_NMEA_OUT_OFFSET_MSIX;
+        timestampOffsets[0] = TIMECARD_TIMESTAMP0_OFFSET_MSIX;
+        timestampOffsets[1] = TIMECARD_TIMESTAMP1_OFFSET_MSIX;
+        timestampOffsets[2] = TIMECARD_TIMESTAMP2_OFFSET_MSIX;
+        timestampOffsets[3] = TIMECARD_TIMESTAMP3_OFFSET_MSIX;
+        timestampOffsets[4] = TIMECARD_TIMESTAMP4_OFFSET_MSIX;
+        timestampOffsets[5] = TIMECARD_TIMESTAMP5_OFFSET_MSIX;
+        ppsMasterOffset = TIMECARD_PPS_MASTER_OFFSET_MSIX;
+        ppsSlaveOffset = TIMECARD_PPS_SLAVE_OFFSET_MSIX;
+        irigMasterOffset = TIMECARD_IRIG_MASTER_OFFSET_MSIX;
+        irigSlaveOffset = TIMECARD_IRIG_SLAVE_OFFSET_MSIX;
+        dcfMasterOffset = TIMECARD_DCF_MASTER_OFFSET_MSIX;
+        dcfSlaveOffset = TIMECARD_DCF_SLAVE_OFFSET_MSIX;
         uartOffsets[TIMECARD_UART_GNSS] = TIMECARD_UART_GNSS_OFFSET_MSIX;
         uartOffsets[TIMECARD_UART_GNSS2] = TIMECARD_UART_GNSS2_OFFSET_MSIX;
         uartOffsets[TIMECARD_UART_MAC] = TIMECARD_UART_MAC_OFFSET_MSIX;
@@ -435,6 +492,18 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
         context->ClockOffset = TIMECARD_CLOCK_OFFSET_MSI;
         context->TodOffset = TIMECARD_TOD_OFFSET_MSI;
         context->NmeaOutOffset = TIMECARD_NMEA_OUT_OFFSET_MSI;
+        timestampOffsets[0] = TIMECARD_TIMESTAMP0_OFFSET_MSI;
+        timestampOffsets[1] = TIMECARD_TIMESTAMP1_OFFSET_MSI;
+        timestampOffsets[2] = TIMECARD_TIMESTAMP2_OFFSET_MSI;
+        timestampOffsets[3] = TIMECARD_TIMESTAMP3_OFFSET_MSI;
+        timestampOffsets[4] = TIMECARD_TIMESTAMP4_OFFSET_MSI;
+        timestampOffsets[5] = TIMECARD_TIMESTAMP5_OFFSET_MSI;
+        ppsMasterOffset = TIMECARD_PPS_MASTER_OFFSET_MSI;
+        ppsSlaveOffset = TIMECARD_PPS_SLAVE_OFFSET_MSI;
+        irigMasterOffset = TIMECARD_IRIG_MASTER_OFFSET_MSI;
+        irigSlaveOffset = TIMECARD_IRIG_SLAVE_OFFSET_MSI;
+        dcfMasterOffset = TIMECARD_DCF_MASTER_OFFSET_MSI;
+        dcfSlaveOffset = TIMECARD_DCF_SLAVE_OFFSET_MSI;
         uartOffsets[TIMECARD_UART_GNSS] = TIMECARD_UART_GNSS_OFFSET_MSI;
         uartOffsets[TIMECARD_UART_GNSS2] = TIMECARD_UART_GNSS2_OFFSET_MSI;
         uartOffsets[TIMECARD_UART_MAC] = TIMECARD_UART_MAC_OFFSET_MSI;
@@ -453,14 +522,44 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
     if (!TimeCardRangeFits(context->Bar0Length, context->ClockOffset,
                            sizeof(OCP_REG)) ||
         !TimeCardRangeFits(context->Bar0Length, context->TodOffset,
-                           sizeof(TOD_REG))) {
+                           sizeof(TIMECARD_TOD_SLAVE_REG))) {
         return STATUS_DEVICE_CONFIGURATION_ERROR;
     }
 
     context->Regs = (volatile OCP_REG *)(context->Bar0Base +
                                          context->ClockOffset);
-    context->Tod = (volatile TOD_REG *)(context->Bar0Base +
-                                        context->TodOffset);
+    context->Tod = (volatile TIMECARD_TOD_SLAVE_REG *)(
+        context->Bar0Base + context->TodOffset);
+    context->PpsMaster = TimeCardRangeFits(
+        context->Bar0Length, ppsMasterOffset,
+        sizeof(TIMECARD_PPS_REG)) ?
+        (volatile TIMECARD_PPS_REG *)(context->Bar0Base +
+                                       ppsMasterOffset) : NULL;
+    context->PpsSlave = TimeCardRangeFits(
+        context->Bar0Length, ppsSlaveOffset,
+        sizeof(TIMECARD_PPS_REG)) ?
+        (volatile TIMECARD_PPS_REG *)(context->Bar0Base +
+                                       ppsSlaveOffset) : NULL;
+    context->IrigMaster = TimeCardRangeFits(
+        context->Bar0Length, irigMasterOffset,
+        sizeof(TIMECARD_IRIG_MASTER_REG)) ?
+        (volatile TIMECARD_IRIG_MASTER_REG *)(context->Bar0Base +
+                                               irigMasterOffset) : NULL;
+    context->IrigSlave = TimeCardRangeFits(
+        context->Bar0Length, irigSlaveOffset,
+        sizeof(TIMECARD_IRIG_SLAVE_REG)) ?
+        (volatile TIMECARD_IRIG_SLAVE_REG *)(context->Bar0Base +
+                                              irigSlaveOffset) : NULL;
+    context->DcfMaster = TimeCardRangeFits(
+        context->Bar0Length, dcfMasterOffset,
+        sizeof(TIMECARD_DCF_MASTER_REG)) ?
+        (volatile TIMECARD_DCF_MASTER_REG *)(context->Bar0Base +
+                                              dcfMasterOffset) : NULL;
+    context->DcfSlave = TimeCardRangeFits(
+        context->Bar0Length, dcfSlaveOffset,
+        sizeof(TIMECARD_DCF_SLAVE_REG)) ?
+        (volatile TIMECARD_DCF_SLAVE_REG *)(context->Bar0Base +
+                                             dcfSlaveOffset) : NULL;
 
     for (i = 0; i < TIMECARD_UART_COUNT; ++i) {
         if (!TimeCardRangeFits(context->Bar0Length, uartOffsets[i], 0x20u))
@@ -503,6 +602,13 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
             (volatile TIMECARD_FREQUENCY_REG *)(context->Bar0Base +
                                                  frequencyOffset) : NULL;
     }
+    for (i = 0; i < TIMECARD_TIMESTAMP_COUNT; ++i) {
+        context->Timestamp[i] = TimeCardRangeFits(
+            context->Bar0Length, timestampOffsets[i],
+            sizeof(TIMECARD_TIMESTAMP_REG)) ?
+            (volatile TIMECARD_TIMESTAMP_REG *)(context->Bar0Base +
+                                                 timestampOffsets[i]) : NULL;
+    }
     if (TimeCardRangeFits(context->Bar0Length, smaMap1Offset,
                           sizeof(TIMECARD_GPIO_REG)) &&
         TimeCardRangeFits(context->Bar0Length, smaMap2Offset,
@@ -513,10 +619,15 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
             context->Bar0Base + smaMap2Offset);
     }
 
-    /* The FPGA NMEA sentence generator is optional on older images. */
+    /*
+     * The FPGA ToD Master/NMEA generator is optional on older images. Keep
+     * its trusted static address for explicit NMEA IOCTLs, but do not read it
+     * while selecting the layout: BAR coverage does not prove that an AXI
+     * slave is decoded at this address.
+     */
     if (TimeCardRangeFits(context->Bar0Length, context->NmeaOutOffset,
-                          sizeof(TOD_REG))) {
-        context->NmeaOut = (volatile TOD_REG *)(
+                          sizeof(TIMECARD_TOD_MASTER_REG))) {
+        context->NmeaOut = (volatile TIMECARD_TOD_MASTER_REG *)(
             context->Bar0Base + context->NmeaOutOffset);
     }
 
@@ -551,6 +662,7 @@ TimeCardEvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT deviceInit)
     WDF_OBJECT_ATTRIBUTES attributes;
     WDF_PNPPOWER_EVENT_CALLBACKS powerCallbacks;
     WDF_IO_QUEUE_CONFIG queueConfig;
+    WDF_FILEOBJECT_CONFIG fileConfig;
     DECLARE_CONST_UNICODE_STRING(symbolicLink, TIMECARD_DOS_DEVICE_NAME);
     PDEVICE_CONTEXT context;
     BOOLEAN enableHierarchy = FALSE;
@@ -563,6 +675,11 @@ TimeCardEvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT deviceInit)
     WdfDeviceInitSetIoType(deviceInit, WdfDeviceIoBuffered);
     WdfDeviceInitSetCharacteristics(deviceInit, FILE_DEVICE_SECURE_OPEN,
                                     FALSE);
+    WDF_FILEOBJECT_CONFIG_INIT(&fileConfig, WDF_NO_EVENT_CALLBACK,
+                               WDF_NO_EVENT_CALLBACK,
+                               TimeCardEvtFileCleanup);
+    WdfDeviceInitSetFileObjectConfig(deviceInit, &fileConfig,
+                                     WDF_NO_OBJECT_ATTRIBUTES);
 
     WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&powerCallbacks);
     powerCallbacks.EvtDevicePrepareHardware = TimeCardEvtPrepareHardware;
@@ -599,8 +716,20 @@ TimeCardEvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT deviceInit)
     if (!NT_SUCCESS(status))
         return status;
 
-    status = WdfDeviceCreateSymbolicLink(device, &symbolicLink);
+    status = WdfDeviceCreateDeviceInterface(
+        device, &GUID_DEVINTERFACE_TIMECARD, NULL);
     if (!NT_SUCCESS(status))
+        return status;
+
+    /*
+     * Preserve the original single-card path for existing tools.  A second
+     * controller legitimately collides with that fixed name; it remains
+     * reachable through its unique device-interface path and must not fail
+     * AddDevice merely because the compatibility alias is already occupied.
+     */
+    status = WdfDeviceCreateSymbolicLink(device, &symbolicLink);
+    if (!NT_SUCCESS(status) && status != STATUS_OBJECT_NAME_COLLISION &&
+        status != STATUS_OBJECT_NAME_EXISTS)
         return status;
 
     status = TimeCardGetHierarchySetting(context, &enableHierarchy);
@@ -623,6 +752,79 @@ TimeCardEvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT deviceInit)
                  status));
     }
     return STATUS_SUCCESS;
+}
+
+BOOLEAN
+TimeCardDisciplineAccessAllowed(PDEVICE_CONTEXT context,
+                                WDFFILEOBJECT fileObject)
+{
+    BOOLEAN allowed;
+
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    allowed = context->DisciplineOwner == NULL ||
+              context->DisciplineOwner == fileObject;
+    WdfWaitLockRelease(context->RegisterLock);
+    return allowed;
+}
+
+NTSTATUS
+TimeCardDisciplineLeaseControl(
+    PDEVICE_CONTEXT context, WDFFILEOBJECT fileObject,
+    const TIMECARD_DISCIPLINE_LEASE *request,
+    TIMECARD_DISCIPLINE_LEASE *response)
+{
+    NTSTATUS status = STATUS_SUCCESS;
+
+    if (request->Size != sizeof(*request) || request->Reserved0 != 0u ||
+        request->Reserved[0] != 0u || request->Reserved[1] != 0u ||
+        request->Action > TIMECARD_DISCIPLINE_LEASE_RELEASE) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    if (request->Action == TIMECARD_DISCIPLINE_LEASE_ACQUIRE) {
+        if (context->DisciplineOwner != NULL &&
+            context->DisciplineOwner != fileObject) {
+            status = STATUS_DEVICE_BUSY;
+        } else {
+            context->DisciplineOwner = fileObject;
+        }
+    } else if (request->Action == TIMECARD_DISCIPLINE_LEASE_RELEASE) {
+        if (context->DisciplineOwner != fileObject) {
+            status = context->DisciplineOwner == NULL ?
+                STATUS_SUCCESS : STATUS_ACCESS_DENIED;
+        } else {
+            TimeCardPhaseDisableLocked(context);
+            context->DisciplineOwner = NULL;
+        }
+    }
+    RtlZeroMemory(response, sizeof(*response));
+    response->Size = sizeof(*response);
+    response->Action = request->Action;
+    if (context->DisciplineOwner != NULL)
+        response->Flags |= TIMECARD_DISCIPLINE_LEASE_ACTIVE;
+    if (context->DisciplineOwner == fileObject)
+        response->Flags |= TIMECARD_DISCIPLINE_LEASE_OWNER;
+    WdfWaitLockRelease(context->RegisterLock);
+    return status;
+}
+
+VOID
+TimeCardEvtFileCleanup(WDFFILEOBJECT fileObject)
+{
+    PDEVICE_CONTEXT context = DeviceGetContext(
+        WdfFileObjectGetDevice(fileObject));
+
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    if (context->DisciplineOwner == fileObject) {
+        /*
+         * Keep capture disarm and ownership release under the same lock.  A
+         * newly acquiring service can therefore never be disabled by cleanup
+         * from the previous (possibly crashed) owner.
+         */
+        TimeCardPhaseDisableLocked(context);
+        context->DisciplineOwner = NULL;
+    }
+    WdfWaitLockRelease(context->RegisterLock);
 }
 
 NTSTATUS
@@ -670,6 +872,10 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
         context->Bar0Length = 0;
         return status;
     }
+    /* Mask every trusted timestamp source before any MSI/MSI-X object is
+     * connected.  Operator-requested channels are restored on D0 entry. */
+    TimeCardTimestampInitialize(context);
+    TimeCardSignalInterruptInitialize(context);
     status = TimeCardCreateUartInterrupts(
         context, resourcesRaw, resourcesTranslated);
     if (!NT_SUCCESS(status)) {
@@ -698,9 +904,23 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
     ULONG i;
 
     UNREFERENCED_PARAMETER(resourcesTranslated);
+    TimeCardTimestampPowerDown(context);
+    TimeCardSignalInterruptPowerDown(context);
     context->HardwareReady = FALSE;
     TimeCardDeleteUartInterrupts(context);
     context->Regs = NULL;
+    context->PpsMaster = NULL;
+    context->PpsSlave = NULL;
+    context->IrigMaster = NULL;
+    context->IrigSlave = NULL;
+    context->DcfMaster = NULL;
+    context->DcfSlave = NULL;
+    context->IrigMasterRouteManaged = FALSE;
+    context->IrigSlaveRouteManaged = FALSE;
+    context->DcfMasterRouteManaged = FALSE;
+    context->DcfSlaveRouteManaged = FALSE;
+    context->FpgaContractImageVersion = 0u;
+    context->FpgaContractCapabilities = 0u;
     context->Tod = NULL;
     context->NmeaOut = NULL;
     context->SmaMap1 = NULL;
@@ -710,6 +930,8 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
     context->Mro50 = NULL;
     context->PhaseReference = NULL;
     context->PhaseOscillator = NULL;
+    for (i = 0; i < TIMECARD_TIMESTAMP_COUNT; ++i)
+        context->Timestamp[i] = NULL;
     context->I2c = NULL;
     context->Flash = NULL;
     context->FlashJedecId = 0;
@@ -765,12 +987,6 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
                      "status 0x%08lx\n", status));
         }
     }
-
-    status = TimeCardNmeaInitialize(context);
-    if (!NT_SUCCESS(status)) {
-        KdPrint(("timecard: NMEA output initialization unavailable, "
-                 "status 0x%08lx\n", status));
-    }
     if (context->PhaseCaptureEnabled) {
         RtlZeroMemory(&phaseRequest, sizeof(phaseRequest));
         phaseRequest.Size = sizeof(phaseRequest);
@@ -784,6 +1000,8 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
                      "status 0x%08lx\n", status));
         }
     }
+    TimeCardTimestampPowerUp(context);
+    TimeCardSignalInterruptPowerUp(context);
     return STATUS_SUCCESS;
 }
 
@@ -793,6 +1011,8 @@ TimeCardEvtD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
     PDEVICE_CONTEXT context = DeviceGetContext(device);
 
     TimeCardUartDisableInterrupts(context);
+    TimeCardTimestampPowerDown(context);
+    TimeCardSignalInterruptPowerDown(context);
     TimeCardPhaseSuspend(context);
     UNREFERENCED_PARAMETER(targetState);
     return STATUS_SUCCESS;

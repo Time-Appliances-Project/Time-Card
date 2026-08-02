@@ -22,6 +22,7 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
                            size_t inputBufferLength, ULONG ioControlCode)
 {
     PDEVICE_CONTEXT context = DeviceGetContext(WdfIoQueueGetDevice(queue));
+    WDFFILEOBJECT fileObject = WdfRequestGetFileObject(request);
     size_t information = 0;
     NTSTATUS status;
 
@@ -49,6 +50,10 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
 
         status = TimeCardGetInput(request, sizeof(*input),
                                   (PVOID *)&input, NULL);
+        if (NT_SUCCESS(status) &&
+            !TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+        }
         if (NT_SUCCESS(status)) {
             value = *input;
             status = TimeCardSetTime(context, &value);
@@ -93,6 +98,13 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
                                   (PVOID *)&input, NULL);
         if (NT_SUCCESS(status)) {
             config = *input;
+            if ((config.Port == TIMECARD_UART_GNSS ||
+                 config.Port == TIMECARD_UART_GNSS2 ||
+                 config.Port == TIMECARD_UART_MAC) &&
+                !TimeCardDisciplineAccessAllowed(context, fileObject)) {
+                status = STATUS_DEVICE_BUSY;
+                break;
+            }
             status = TimeCardUartConfigure(context, &config);
         }
         break;
@@ -109,6 +121,13 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         if (!NT_SUCCESS(status))
             break;
         readRequest = *input;
+        if ((readRequest.Port == TIMECARD_UART_GNSS ||
+             readRequest.Port == TIMECARD_UART_GNSS2 ||
+             readRequest.Port == TIMECARD_UART_MAC) &&
+            !TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
 
         status = TimeCardGetOutput(request, sizeof(*output),
                                    (PVOID *)&output);
@@ -138,6 +157,13 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
             actualInputLength = sizeof(transfer);
         RtlZeroMemory(&transfer, sizeof(transfer));
         RtlCopyMemory(&transfer, input, actualInputLength);
+        if ((transfer.Port == TIMECARD_UART_GNSS ||
+             transfer.Port == TIMECARD_UART_GNSS2 ||
+             transfer.Port == TIMECARD_UART_MAC) &&
+            !TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
 
         status = TimeCardGetOutput(request, sizeof(*output),
                                    (PVOID *)&output);
@@ -161,7 +187,6 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         if (!NT_SUCCESS(status))
             break;
         requestValue = *input;
-
         status = TimeCardGetOutput(request, sizeof(*output),
                                    (PVOID *)&output);
         if (NT_SUCCESS(status)) {
@@ -388,6 +413,10 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         if (!NT_SUCCESS(status))
             break;
         requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
 
         status = TimeCardGetOutput(request, sizeof(*output),
                                    (PVOID *)&output);
@@ -679,6 +708,10 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         if (!NT_SUCCESS(status))
             break;
         requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
         status = TimeCardGetOutput(request, sizeof(*output),
                                    (PVOID *)&output);
         if (NT_SUCCESS(status)) {
@@ -728,6 +761,10 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         if (!NT_SUCCESS(status))
             break;
         requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
         status = TimeCardGetOutput(request, sizeof(*output),
                                    (PVOID *)&output);
         if (NT_SUCCESS(status)) {
@@ -749,6 +786,10 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         if (!NT_SUCCESS(status))
             break;
         requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
         status = TimeCardGetOutput(request, sizeof(*output),
                                    (PVOID *)&output);
         if (NT_SUCCESS(status)) {
@@ -784,10 +825,494 @@ TimeCardEvtIoDeviceControl(WDFQUEUE queue, WDFREQUEST request,
         if (!NT_SUCCESS(status))
             break;
         requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
         status = TimeCardGetOutput(request, sizeof(*output),
                                    (PVOID *)&output);
         if (NT_SUCCESS(status)) {
             status = TimeCardDisciplineWrite(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_GET_FPGA_CAPABILITIES:
+    {
+        TIMECARD_FPGA_CAPABILITIES *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardGetFpgaCapabilities(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_FPGA_IMAGE_QUERY:
+    {
+        TIMECARD_FPGA_IMAGE_INFO *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardFpgaImageQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_DISCIPLINE_LEASE:
+    {
+        TIMECARD_DISCIPLINE_LEASE *input;
+        TIMECARD_DISCIPLINE_LEASE requestValue;
+        TIMECARD_DISCIPLINE_LEASE *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardDisciplineLeaseControl(
+                context, fileObject, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_CLOCK_TELEMETRY_QUERY:
+    {
+        TIMECARD_CLOCK_TELEMETRY *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardClockTelemetryQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_PPS_QUERY:
+    {
+        TIMECARD_PPS_CONTROL *input;
+        TIMECARD_PPS_CONTROL requestValue;
+        TIMECARD_PPS_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (requestValue.Size < sizeof(requestValue)) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardPpsQuery(context, requestValue.Core, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_PPS_SET:
+    {
+        TIMECARD_PPS_CONTROL *input;
+        TIMECARD_PPS_CONTROL requestValue;
+        TIMECARD_PPS_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (requestValue.Size < sizeof(requestValue)) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardPpsSet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_TIMECODE_QUERY:
+    {
+        TIMECARD_TIMECODE_CONTROL *input;
+        TIMECARD_TIMECODE_CONTROL requestValue;
+        TIMECARD_TIMECODE_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (requestValue.Size < sizeof(requestValue)) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardTimecodeQuery(
+                context, requestValue.Format, requestValue.Role, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_TIMECODE_SET:
+    {
+        TIMECARD_TIMECODE_CONTROL *input;
+        TIMECARD_TIMECODE_CONTROL requestValue;
+        TIMECARD_TIMECODE_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardTimecodeSet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_TOD_QUERY:
+    {
+        TIMECARD_TOD_CONTROL *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardTodQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_TOD_SET:
+    {
+        TIMECARD_TOD_CONTROL *input;
+        TIMECARD_TOD_CONTROL requestValue;
+        TIMECARD_TOD_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardTodSet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_TIMESTAMP_QUERY:
+    {
+        TIMECARD_TIMESTAMP_CONTROL *input;
+        TIMECARD_TIMESTAMP_CONTROL requestValue;
+        TIMECARD_TIMESTAMP_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (requestValue.Size < sizeof(requestValue)) {
+            status = STATUS_INVALID_PARAMETER;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardTimestampQuery(
+                context, requestValue.Channel, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_TIMESTAMP_SET:
+    {
+        TIMECARD_TIMESTAMP_CONTROL *input;
+        TIMECARD_TIMESTAMP_CONTROL requestValue;
+        TIMECARD_TIMESTAMP_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardTimestampSet(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_TIMESTAMP_READ:
+    {
+        TIMECARD_TIMESTAMP_BATCH *input;
+        TIMECARD_TIMESTAMP_BATCH requestValue;
+        TIMECARD_TIMESTAMP_BATCH *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardTimestampRead(context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_CLOCK_ADJUST_QUERY:
+    {
+        TIMECARD_CLOCK_ADJUSTMENT *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardClockAdjustmentQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_CLOCK_ADJUST_SET:
+    {
+        TIMECARD_CLOCK_ADJUSTMENT *input;
+        TIMECARD_CLOCK_ADJUSTMENT requestValue;
+        TIMECARD_CLOCK_ADJUSTMENT *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardClockAdjustmentSet(
+                context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_CORE_INVENTORY_QUERY:
+    {
+        TIMECARD_CORE_INVENTORY *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardCoreInventoryQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_SIGNAL_EVENT_READ:
+    {
+        TIMECARD_SIGNAL_EVENT_BATCH *input;
+        TIMECARD_SIGNAL_EVENT_BATCH requestValue;
+        TIMECARD_SIGNAL_EVENT_BATCH *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardSignalEventRead(
+                context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_FPGA_CONTRACT_QUERY:
+    {
+        TIMECARD_FPGA_IMAGE_CONTRACT *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardFpgaContractQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_FPGA_CONTRACT_SET:
+    {
+        TIMECARD_FPGA_IMAGE_CONTRACT *input;
+        TIMECARD_FPGA_IMAGE_CONTRACT requestValue;
+        TIMECARD_FPGA_IMAGE_CONTRACT *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardFpgaContractSet(
+                context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_NMEA_UTC_QUERY:
+    {
+        TIMECARD_NMEA_UTC_CONTROL *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardNmeaUtcQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_NMEA_UTC_SET:
+    {
+        TIMECARD_NMEA_UTC_CONTROL *input;
+        TIMECARD_NMEA_UTC_CONTROL requestValue;
+        TIMECARD_NMEA_UTC_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardNmeaUtcSet(
+                context, &requestValue, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_CLOCK_ADVANCED_QUERY:
+    {
+        TIMECARD_CLOCK_ADVANCED_CONTROL *output;
+
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardClockAdvancedQuery(context, output);
+            if (NT_SUCCESS(status))
+                information = sizeof(*output);
+        }
+        break;
+    }
+
+    case IOCTL_TIMECARD_CLOCK_ADVANCED_SET:
+    {
+        TIMECARD_CLOCK_ADVANCED_CONTROL *input;
+        TIMECARD_CLOCK_ADVANCED_CONTROL requestValue;
+        TIMECARD_CLOCK_ADVANCED_CONTROL *output;
+
+        status = TimeCardGetInput(request, sizeof(*input),
+                                  (PVOID *)&input, NULL);
+        if (!NT_SUCCESS(status))
+            break;
+        requestValue = *input;
+        if (!TimeCardDisciplineAccessAllowed(context, fileObject)) {
+            status = STATUS_DEVICE_BUSY;
+            break;
+        }
+        status = TimeCardGetOutput(request, sizeof(*output),
+                                   (PVOID *)&output);
+        if (NT_SUCCESS(status)) {
+            status = TimeCardClockAdvancedSet(
+                context, &requestValue, output);
             if (NT_SUCCESS(status))
                 information = sizeof(*output);
         }

@@ -98,8 +98,54 @@
     TIMECARD_IOCTL(37, FILE_READ_ACCESS)
 #define IOCTL_TIMECARD_DISCIPLINE_WRITE \
     TIMECARD_IOCTL(38, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_GET_FPGA_CAPABILITIES \
+    TIMECARD_IOCTL(39, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_CLOCK_TELEMETRY_QUERY \
+    TIMECARD_IOCTL(40, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_PPS_QUERY \
+    TIMECARD_IOCTL(41, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_PPS_SET \
+    TIMECARD_IOCTL(42, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_TIMECODE_QUERY \
+    TIMECARD_IOCTL(43, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_TIMECODE_SET \
+    TIMECARD_IOCTL(44, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_TOD_QUERY \
+    TIMECARD_IOCTL(45, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_TOD_SET \
+    TIMECARD_IOCTL(46, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_FPGA_IMAGE_QUERY \
+    TIMECARD_IOCTL(47, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_DISCIPLINE_LEASE \
+    TIMECARD_IOCTL(48, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_TIMESTAMP_QUERY \
+    TIMECARD_IOCTL(49, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_TIMESTAMP_SET \
+    TIMECARD_IOCTL(50, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_TIMESTAMP_READ \
+    TIMECARD_IOCTL(51, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_CLOCK_ADJUST_QUERY \
+    TIMECARD_IOCTL(52, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_CLOCK_ADJUST_SET \
+    TIMECARD_IOCTL(53, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_CORE_INVENTORY_QUERY \
+    TIMECARD_IOCTL(54, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_SIGNAL_EVENT_READ \
+    TIMECARD_IOCTL(55, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_FPGA_CONTRACT_QUERY \
+    TIMECARD_IOCTL(56, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_FPGA_CONTRACT_SET \
+    TIMECARD_IOCTL(57, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_NMEA_UTC_QUERY \
+    TIMECARD_IOCTL(58, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_NMEA_UTC_SET \
+    TIMECARD_IOCTL(59, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
+#define IOCTL_TIMECARD_CLOCK_ADVANCED_QUERY \
+    TIMECARD_IOCTL(60, FILE_READ_ACCESS)
+#define IOCTL_TIMECARD_CLOCK_ADVANCED_SET \
+    TIMECARD_IOCTL(61, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
 
-#define TIMECARD_ABI_VERSION 11u
+#define TIMECARD_ABI_VERSION 15u
 #define TIMECARD_LAYOUT_MSI  1u
 #define TIMECARD_LAYOUT_MSIX 2u
 #define TIMECARD_LAYOUT_ART  3u
@@ -160,6 +206,12 @@
 #define TIMECARD_DISCIPLINE_EEPROM_SIZE 512u
 #define TIMECARD_DISCIPLINE_FLAG_PRESENT (1u << 0)
 #define TIMECARD_DISCIPLINE_FLAG_VALID   (1u << 1)
+
+#define TIMECARD_DISCIPLINE_LEASE_QUERY   0u
+#define TIMECARD_DISCIPLINE_LEASE_ACQUIRE 1u
+#define TIMECARD_DISCIPLINE_LEASE_RELEASE 2u
+#define TIMECARD_DISCIPLINE_LEASE_ACTIVE  (1u << 0)
+#define TIMECARD_DISCIPLINE_LEASE_OWNER   (1u << 1)
 
 #define TIMECARD_HIERARCHY_QUERY   0u
 #define TIMECARD_HIERARCHY_ENABLE  1u
@@ -269,11 +321,80 @@
 #define TIMECARD_CLOCK_SOURCE_PTP  0x04u
 #define TIMECARD_CLOCK_SOURCE_RTC  0x05u
 #define TIMECARD_CLOCK_SOURCE_DCF  0x06u
+#define TIMECARD_CLOCK_SOURCE_NTP  0x07u
+#define TIMECARD_CLOCK_SOURCE_SYNCE 0x08u
+#define TIMECARD_CLOCK_SOURCE_DYN  0xfdu
 #define TIMECARD_CLOCK_SOURCE_REGS 0xfeu
 #define TIMECARD_CLOCK_SOURCE_EXT  0xffu
 
+#define TIMECARD_CLOCK_ADJUST_FLAG_PRESENT            (1u << 0)
+#define TIMECARD_CLOCK_ADJUST_FLAG_FRACTIONAL_DRIFT   (1u << 1)
+#define TIMECARD_CLOCK_ADJUST_FLAG_APPLY_OFFSET       (1u << 16)
+#define TIMECARD_CLOCK_ADJUST_FLAG_APPLY_DRIFT        (1u << 17)
+#define TIMECARD_CLOCK_ADJUST_FLAG_APPLY_THRESHOLD    (1u << 18)
+#define TIMECARD_CLOCK_ADJUST_MAX_OFFSET_NS 1000000000
+#define TIMECARD_CLOCK_ADJUST_MAX_DRIFT_PPB 1000000
+
+/*
+ * Optional Adjustable Clock features.  These registers depend on FPGA
+ * synthesis generics, so the driver exposes them only after an exact image
+ * contract has been activated for the current card and image.
+ */
+#define TIMECARD_CLOCK_ADVANCED_FLAG_PRESENT          (1u << 0)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_RATE_LIMITERS    (1u << 1)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_HOLDOVER         (1u << 2)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_OUTLIER_FILTERS  (1u << 3)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_SERVO_FACTORS    (1u << 4)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_SERVO_LOG        (1u << 5)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_AGING            (1u << 6)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_DYNAMIC_CONTROL  (1u << 7)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_REVERT           (1u << 8)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_HOLDOVER_READY   (1u << 9)
+#define TIMECARD_CLOCK_ADVANCED_FLAG_AGING_READY      (1u << 10)
+
+#define TIMECARD_CLOCK_ADVANCED_APPLY_RATE_LIMITERS   (1u << 0)
+#define TIMECARD_CLOCK_ADVANCED_APPLY_HOLDOVER        (1u << 1)
+#define TIMECARD_CLOCK_ADVANCED_APPLY_OUTLIER_FILTERS (1u << 2)
+#define TIMECARD_CLOCK_ADVANCED_APPLY_SERVO_FACTORS   (1u << 3)
+#define TIMECARD_CLOCK_ADVANCED_APPLY_AGING           (1u << 4)
+#define TIMECARD_CLOCK_ADVANCED_APPLY_CONTROL         (1u << 5)
+#define TIMECARD_CLOCK_ADVANCED_APPLY_ALL             0x0000003fu
+
+#define TIMECARD_CLOCK_LIMITER_ENABLE                 (1u << 31)
+#define TIMECARD_CLOCK_LIMITER_VALUE_MASK             0x7fffffffu
+#define TIMECARD_CLOCK_ADVANCED_CONTROL_HOLDOVER      (1u << 16)
+#define TIMECARD_CLOCK_ADVANCED_CONTROL_AGING         (1u << 18)
+#define TIMECARD_CLOCK_ADVANCED_CONTROL_REVERT        (1u << 19)
+#define TIMECARD_CLOCK_ADVANCED_CONTROL_MASK          \
+    (TIMECARD_CLOCK_ADVANCED_CONTROL_HOLDOVER | \
+     TIMECARD_CLOCK_ADVANCED_CONTROL_AGING | \
+     TIMECARD_CLOCK_ADVANCED_CONTROL_REVERT)
+
 #define TIMECARD_NMEA_FLAG_PRESENT (1u << 0)
 #define TIMECARD_NMEA_FLAG_ENABLED (1u << 1)
+#define TIMECARD_NMEA_FLAG_ADVANCED_VALID (1u << 2)
+#define TIMECARD_NMEA_FLAG_ERROR (1u << 3)
+#define TIMECARD_NMEA_FLAG_CLEAR_ERROR (1u << 31)
+#define TIMECARD_NMEA_GNSS_DEFAULT     0u
+#define TIMECARD_NMEA_GNSS_COMBINED    1u
+#define TIMECARD_NMEA_GNSS_GPS         2u
+#define TIMECARD_NMEA_GNSS_GLONASS     3u
+#define TIMECARD_NMEA_GNSS_GALILEO     4u
+#define TIMECARD_NMEA_GNSS_BEIDOU      5u
+#define TIMECARD_NMEA_GNSS_PROPRIETARY 15u
+#define TIMECARD_NMEA_DISABLE_RMC (1u << 0)
+#define TIMECARD_NMEA_DISABLE_ZDA (1u << 1)
+#define TIMECARD_NMEA_DISABLE_UTC (1u << 2)
+
+#define TIMECARD_NMEA_UTC_FLAG_PRESENT        (1u << 0)
+#define TIMECARD_NMEA_UTC_FLAG_READ_SUPPORTED (1u << 1)
+#define TIMECARD_NMEA_UTC_FLAG_WRITE_SUPPORTED (1u << 2)
+#define TIMECARD_NMEA_UTC_FLAG_LEAP61         (1u << 3)
+#define TIMECARD_NMEA_UTC_FLAG_LEAP59         (1u << 4)
+#define TIMECARD_NMEA_UTC_FLAG_OFFSET_VALID   (1u << 5)
+/* Public UART polarity is logical; gateware's raw encoding is the inverse. */
+#define TIMECARD_UART_POLARITY_NORMAL   0u
+#define TIMECARD_UART_POLARITY_INVERTED 1u
 
 #define TIMECARD_IDENTITY_FLAG_PRESENT (1u << 0)
 #define TIMECARD_IDENTITY_FLAG_VALID   (1u << 1)
@@ -282,7 +403,215 @@
 #define TIMECARD_SIGNAL_COUNT 4u
 #define TIMECARD_SIGNAL_FLAG_PRESENT  (1u << 0)
 #define TIMECARD_SIGNAL_FLAG_ENABLED  (1u << 1)
-#define TIMECARD_SIGNAL_FLAG_INVERTED (1u << 2)
+#define TIMECARD_SIGNAL_FLAG_ACTIVE_HIGH (1u << 2)
+/* Source-compatible legacy name; bit 2 has always selected active-high. */
+#define TIMECARD_SIGNAL_FLAG_INVERTED TIMECARD_SIGNAL_FLAG_ACTIVE_HIGH
+#define TIMECARD_SIGNAL_FLAG_ERROR     (1u << 3)
+#define TIMECARD_SIGNAL_FLAG_TIME_JUMP (1u << 4)
+/* Set request only: use StartSeconds/StartNanoseconds instead of phase alignment. */
+#define TIMECARD_SIGNAL_FLAG_ABSOLUTE_START (1u << 5)
+/* Set request only: clear the documented sticky Error/TimeJump status bits. */
+#define TIMECARD_SIGNAL_FLAG_CLEAR_STATUS (1u << 6)
+#define TIMECARD_SIGNAL_FLAG_COMPLETION_IRQ_AVAILABLE (1u << 7)
+#define TIMECARD_SIGNAL_FLAG_COMPLETION_PENDING       (1u << 8)
+#define TIMECARD_SIGNAL_FLAG_COMPLETION_OVERFLOW      (1u << 9)
+
+#define TIMECARD_SIGNAL_EVENT_QUEUE_LENGTH 32u
+#define TIMECARD_SIGNAL_EVENT_MAX_BATCH    16u
+#define TIMECARD_SIGNAL_EVENT_FLAG_COMPLETED (1u << 0)
+#define TIMECARD_SIGNAL_EVENT_FLAG_ERROR     (1u << 1)
+#define TIMECARD_SIGNAL_EVENT_FLAG_TIME_JUMP (1u << 2)
+#define TIMECARD_SIGNAL_EVENT_FLAG_OVERFLOW  (1u << 3)
+
+/*
+ * The standard Meta/Celestica image contains five Signal Timestamper inputs
+ * plus the PHC/PPS timestamp channel.  Channel numbers below deliberately
+ * match Linux PTP_EXTTS indices 0..5.
+ */
+#define TIMECARD_TIMESTAMP_COUNT 6u
+#define TIMECARD_TIMESTAMP_QUEUE_LENGTH 128u
+#define TIMECARD_TIMESTAMP_MAX_DATA_BYTES 32u
+#define TIMECARD_TIMESTAMP_MAX_BATCH 16u
+
+#define TIMECARD_TIMESTAMP_GNSS1 0u
+#define TIMECARD_TIMESTAMP_TS1   1u
+#define TIMECARD_TIMESTAMP_TS2   2u
+#define TIMECARD_TIMESTAMP_TS3   3u
+#define TIMECARD_TIMESTAMP_TS4   4u
+#define TIMECARD_TIMESTAMP_PHC   5u
+
+/* Public polarity is logical: zero rising/normal, one falling/inverted. */
+#define TIMECARD_TIMESTAMP_POLARITY_RISING  0u
+#define TIMECARD_TIMESTAMP_POLARITY_FALLING 1u
+
+#define TIMECARD_TIMESTAMP_FLAG_PRESENT          (1u << 0)
+#define TIMECARD_TIMESTAMP_FLAG_ENABLED          (1u << 1)
+#define TIMECARD_TIMESTAMP_FLAG_DROP_ERROR       (1u << 2)
+#define TIMECARD_TIMESTAMP_FLAG_EVENT_VALID      (1u << 3)
+#define TIMECARD_TIMESTAMP_FLAG_DATA_VALID       (1u << 4)
+#define TIMECARD_TIMESTAMP_FLAG_IRQ_AVAILABLE    (1u << 5)
+#define TIMECARD_TIMESTAMP_FLAG_QUEUE_OVERFLOW   (1u << 6)
+#define TIMECARD_TIMESTAMP_FLAG_DATA_TRUNCATED   (1u << 7)
+#define TIMECARD_TIMESTAMP_FLAG_CABLE_DELAY_WRITABLE (1u << 8)
+#define TIMECARD_TIMESTAMP_FLAG_COUNTERS_AVAILABLE   (1u << 9)
+#define TIMECARD_TIMESTAMP_FLAG_DATA_AVAILABLE       (1u << 10)
+/* Set-request-only write-one-to-clear operations. */
+#define TIMECARD_TIMESTAMP_FLAG_CLEAR_ERROR      (1u << 30)
+#define TIMECARD_TIMESTAMP_FLAG_CLEAR_QUEUE      (1u << 31)
+
+/* Documented FPGA cores exposed by the standard Meta/Celestica maps. */
+#define TIMECARD_FPGA_CORE_PPS_MASTER       (1u << 0)
+#define TIMECARD_FPGA_CORE_PPS_SLAVE        (1u << 1)
+#define TIMECARD_FPGA_CORE_IRIG_MASTER      (1u << 2)
+#define TIMECARD_FPGA_CORE_IRIG_SLAVE       (1u << 3)
+#define TIMECARD_FPGA_CORE_DCF_MASTER       (1u << 4)
+#define TIMECARD_FPGA_CORE_DCF_SLAVE        (1u << 5)
+#define TIMECARD_FPGA_CORE_TOD_SLAVE        (1u << 6)
+#define TIMECARD_FPGA_CORE_TOD_MASTER       (1u << 7)
+#define TIMECARD_FPGA_CORE_SIGNAL_GENERATOR (1u << 8)
+#define TIMECARD_FPGA_CORE_FREQUENCY_INPUT  (1u << 9)
+#define TIMECARD_FPGA_CORE_SIGNAL_TIMESTAMPER (1u << 10)
+
+#define TIMECARD_FPGA_FEATURE_PPS_CONFIGURATION      (1u << 0)
+#define TIMECARD_FPGA_FEATURE_TIMECODE_CONFIGURATION (1u << 1)
+#define TIMECARD_FPGA_FEATURE_TOD_CONFIGURATION      (1u << 2)
+#define TIMECARD_FPGA_FEATURE_CLOCK_TELEMETRY        (1u << 3)
+#define TIMECARD_FPGA_FEATURE_SIGNAL_REPEAT_COUNT    (1u << 4)
+#define TIMECARD_FPGA_FEATURE_SIGNAL_CABLE_DELAY     (1u << 5)
+#define TIMECARD_FPGA_FEATURE_SIGNAL_STATUS          (1u << 6)
+#define TIMECARD_FPGA_FEATURE_TIMESTAMP_CAPTURE      (1u << 7)
+#define TIMECARD_FPGA_FEATURE_STATIC_CORE_INVENTORY  (1u << 8)
+#define TIMECARD_FPGA_FEATURE_SIGNAL_COMPLETION_EVENTS (1u << 9)
+#define TIMECARD_FPGA_FEATURE_EXACT_IMAGE_CONTRACT      (1u << 10)
+#define TIMECARD_FPGA_FEATURE_CLOCK_SMOOTH_ADJUST       (1u << 11)
+#define TIMECARD_FPGA_FEATURE_CLOCK_ADVANCED_CONFIGURATION (1u << 12)
+#define TIMECARD_FPGA_FEATURE_TOD_MASTER_UTC            (1u << 13)
+#define TIMECARD_FPGA_FEATURE_TIMECODE_ADVANCED         (1u << 14)
+
+#define TIMECARD_FPGA_CONTRACT_ACKNOWLEDGEMENT 0x54434d46u /* "TCMF" */
+#define TIMECARD_FPGA_CONTRACT_CLOCK_SERVO_LOG    (1u << 0)
+#define TIMECARD_FPGA_CONTRACT_CLOCK_ADVANCED     (1u << 1)
+#define TIMECARD_FPGA_CONTRACT_TOD_TELEMETRY      (1u << 2)
+#define TIMECARD_FPGA_CONTRACT_TOD_MASTER_UTC_READ  (1u << 3)
+#define TIMECARD_FPGA_CONTRACT_TOD_MASTER_UTC_WRITE (1u << 4)
+#define TIMECARD_FPGA_CONTRACT_IRIG_MASTER_AM     (1u << 5)
+#define TIMECARD_FPGA_CONTRACT_IRIG_SLAVE_AM      (1u << 6)
+#define TIMECARD_FPGA_CONTRACT_IRIG_SLAVE_YEAR    (1u << 7)
+#define TIMECARD_FPGA_CONTRACT_NTP_SOURCE         (1u << 8)
+#define TIMECARD_FPGA_CONTRACT_ART_TIMESTAMP_EXTENDED (1u << 9)
+#define TIMECARD_FPGA_CONTRACT_SYNCE_SOURCE       (1u << 10)
+#define TIMECARD_FPGA_CONTRACT_DYNAMIC_SOURCE     (1u << 11)
+#define TIMECARD_FPGA_CONTRACT_ALL_FLAGS          0x00000fffu
+
+#define TIMECARD_FPGA_CONTRACT_FLAG_IMAGE_PRESENT (1u << 0)
+#define TIMECARD_FPGA_CONTRACT_FLAG_EXACT_MATCH   (1u << 1)
+#define TIMECARD_FPGA_CONTRACT_FLAG_ACTIVE        (1u << 2)
+
+/* Trusted, static replacement for an FPGA Configuration Slave ROM. */
+#define TIMECARD_CORE_INVENTORY_MAX 32u
+#define TIMECARD_CORE_INTERRUPT_NONE 0xffffffffu
+#define TIMECARD_CORE_TYPE_CLOCK             1u
+#define TIMECARD_CORE_TYPE_IMAGE_IDENTITY    2u
+#define TIMECARD_CORE_TYPE_SIGNAL_TIMESTAMPER 3u
+#define TIMECARD_CORE_TYPE_PPS_MASTER        4u
+#define TIMECARD_CORE_TYPE_PPS_SLAVE         5u
+#define TIMECARD_CORE_TYPE_TOD_SLAVE         6u
+#define TIMECARD_CORE_TYPE_TOD_MASTER        7u
+#define TIMECARD_CORE_TYPE_IRIG_MASTER       8u
+#define TIMECARD_CORE_TYPE_IRIG_SLAVE        9u
+#define TIMECARD_CORE_TYPE_DCF_MASTER       10u
+#define TIMECARD_CORE_TYPE_DCF_SLAVE        11u
+#define TIMECARD_CORE_TYPE_SIGNAL_GENERATOR 12u
+#define TIMECARD_CORE_TYPE_FREQUENCY_INPUT  13u
+
+#define TIMECARD_CORE_FLAG_TRUSTED_PROFILE   (1u << 0)
+#define TIMECARD_CORE_FLAG_REGISTER_MAPPED   (1u << 1)
+#define TIMECARD_CORE_FLAG_VERSION_VALID     (1u << 2)
+#define TIMECARD_CORE_FLAG_INTERRUPT         (1u << 3)
+#define TIMECARD_CORE_FLAG_OPERATOR_ONLY     (1u << 4)
+#define TIMECARD_CORE_FLAG_CURRENT_LAYOUT    (1u << 5)
+#define TIMECARD_CORE_FLAG_BASIC_SURFACE     (1u << 6)
+#define TIMECARD_CORE_FLAG_SYNTHESIS_UNKNOWN (1u << 7)
+
+#define TIMECARD_INVENTORY_FLAG_STATIC_PROFILE  (1u << 0)
+#define TIMECARD_INVENTORY_FLAG_NO_CONFIG_SLAVE (1u << 1)
+#define TIMECARD_INVENTORY_FLAG_IMAGE_PRESENT   (1u << 2)
+#define TIMECARD_INVENTORY_FLAG_SYNTHESIS_UNKNOWN (1u << 3)
+
+/* Hardware/image-contract limitations that software cannot safely infer. */
+#define TIMECARD_FPGA_GAP_TIMESTAMP_INTERRUPTS       (1u << 0)
+#define TIMECARD_FPGA_GAP_CONFIGURATION_SLAVE        (1u << 1)
+#define TIMECARD_FPGA_GAP_OPTIONAL_CLOCK_REGISTERS   (1u << 2)
+#define TIMECARD_FPGA_GAP_TOD_MASTER_UTC_HANDSHAKE   (1u << 3)
+#define TIMECARD_FPGA_GAP_SYNTHESIS_FEATURE_REPORTING (1u << 4)
+
+/* Read-only identity decoded from the trusted static image-version resource. */
+#define TIMECARD_FPGA_IMAGE_FLAG_PRESENT       (1u << 0)
+#define TIMECARD_FPGA_IMAGE_FLAG_LOADER        (1u << 1)
+#define TIMECARD_FPGA_IMAGE_FLAG_FPGA_FIRMWARE (1u << 2)
+
+#define TIMECARD_CLOCK_TELEMETRY_FLAG_PRESENT          (1u << 0)
+#define TIMECARD_CLOCK_TELEMETRY_FLAG_IN_SYNC          (1u << 1)
+#define TIMECARD_CLOCK_TELEMETRY_FLAG_IN_HOLDOVER      (1u << 2)
+#define TIMECARD_CLOCK_TELEMETRY_FLAG_SERVO_AVAILABLE  (1u << 3)
+#define TIMECARD_CLOCK_TELEMETRY_FLAG_LOG_AVAILABLE    (1u << 4)
+#define TIMECARD_CLOCK_TELEMETRY_FLAG_FRACTIONAL_LOG   (1u << 5)
+
+#define TIMECARD_PPS_CORE_MASTER 1u
+#define TIMECARD_PPS_CORE_SLAVE  2u
+#define TIMECARD_PPS_POLARITY_ACTIVE_LOW  0u
+#define TIMECARD_PPS_POLARITY_ACTIVE_HIGH 1u
+#define TIMECARD_PPS_FLAG_PRESENT              (1u << 0)
+#define TIMECARD_PPS_FLAG_ENABLED              (1u << 1)
+#define TIMECARD_PPS_FLAG_ERROR                (1u << 2)
+#define TIMECARD_PPS_FLAG_FILTER_ERROR         (1u << 3)
+#define TIMECARD_PPS_FLAG_SUPERVISION_ERROR    (1u << 4)
+#define TIMECARD_PPS_FLAG_PULSE_WIDTH_WRITABLE (1u << 5)
+#define TIMECARD_PPS_FLAG_CLEAR_ERRORS         (1u << 31)
+
+#define TIMECARD_TIMECODE_FORMAT_IRIG 1u
+#define TIMECARD_TIMECODE_FORMAT_DCF  2u
+#define TIMECARD_TIMECODE_ROLE_MASTER 1u
+#define TIMECARD_TIMECODE_ROLE_SLAVE  2u
+#define TIMECARD_IRIG_MODE_NONE 0u
+#define TIMECARD_IRIG_MODE_B    1u
+#define TIMECARD_IRIG_MODE_G    2u
+#define TIMECARD_TIMECODE_FLAG_PRESENT               (1u << 0)
+#define TIMECARD_TIMECODE_FLAG_ENABLED               (1u << 1)
+#define TIMECARD_TIMECODE_FLAG_ERROR                 (1u << 2)
+#define TIMECARD_TIMECODE_FLAG_DELAY_WRITABLE        (1u << 3)
+#define TIMECARD_TIMECODE_FLAG_CONTROL_BITS_WRITABLE (1u << 4)
+#define TIMECARD_TIMECODE_FLAG_AM_WRITABLE           (1u << 5)
+#define TIMECARD_TIMECODE_FLAG_YEAR_WRITABLE         (1u << 6)
+#define TIMECARD_TIMECODE_FLAG_CLEAR_ERRORS          (1u << 31)
+
+#define TIMECARD_TOD_PROTOCOL_NMEA 0u
+#define TIMECARD_TOD_PROTOCOL_UBX  1u
+#define TIMECARD_TOD_PROTOCOL_TSIP 2u
+#define TIMECARD_TOD_PROTOCOL_ESIP 3u
+#define TIMECARD_TOD_PROTOCOL_PFEC 4u
+#define TIMECARD_TOD_GNSS_ALL      0u
+#define TIMECARD_TOD_GNSS_COMBINED 1u
+#define TIMECARD_TOD_GNSS_GPS      2u
+#define TIMECARD_TOD_GNSS_GLONASS  3u
+#define TIMECARD_TOD_GNSS_GALILEO  4u
+#define TIMECARD_TOD_GNSS_BEIDOU   5u
+#define TIMECARD_TOD_DISABLE_RMC        (1u << 0)
+#define TIMECARD_TOD_DISABLE_ZDA        (1u << 1)
+#define TIMECARD_TOD_DISABLE_STATUS     (1u << 2)
+#define TIMECARD_TOD_DISABLE_POSITION   (1u << 3)
+#define TIMECARD_TOD_DISABLE_SATELLITES (1u << 4)
+#define TIMECARD_TOD_DISABLE_ESIP_CRW   (1u << 5)
+#define TIMECARD_TOD_DISABLE_ESIP_CRY   (1u << 6)
+#define TIMECARD_TOD_DISABLE_ESIP_CRJ   (1u << 7)
+#define TIMECARD_TOD_FLAG_PRESENT       (1u << 0)
+#define TIMECARD_TOD_FLAG_ENABLED       (1u << 1)
+#define TIMECARD_TOD_FLAG_PARSE_ERROR   (1u << 2)
+#define TIMECARD_TOD_FLAG_CHECKSUM_ERROR (1u << 3)
+#define TIMECARD_TOD_FLAG_UART_ERROR    (1u << 4)
+#define TIMECARD_TOD_FLAG_UTC_TELEMETRY_VALID  (1u << 5)
+#define TIMECARD_TOD_FLAG_GNSS_TELEMETRY_VALID (1u << 6)
+#define TIMECARD_TOD_FLAG_CLEAR_ERRORS  (1u << 31)
 
 #define TIMECARD_FREQUENCY_COUNT 4u
 #define TIMECARD_FREQUENCY_FLAG_PRESENT (1u << 0)
@@ -682,12 +1011,70 @@ typedef struct _TIMECARD_DISCIPLINE_BLOB {
     unsigned char Data[TIMECARD_DISCIPLINE_EEPROM_SIZE];
 } TIMECARD_DISCIPLINE_BLOB;
 
+typedef struct _TIMECARD_DISCIPLINE_LEASE {
+    unsigned __int32 Size;
+    unsigned __int32 Action;
+    unsigned __int32 Flags;
+    unsigned __int32 Reserved0;
+    unsigned __int64 Reserved[2];
+} TIMECARD_DISCIPLINE_LEASE;
+
 typedef struct _TIMECARD_CLOCK_SOURCE_CONTROL {
     unsigned __int32 Size;
     unsigned __int32 Source;
     unsigned __int32 ActiveSource;
     unsigned __int32 Reserved[5];
 } TIMECARD_CLOCK_SOURCE_CONTROL;
+
+/* DriftPpbQ16 is signed ppb in Q16.16 fixed-point representation. */
+typedef struct _TIMECARD_CLOCK_ADJUSTMENT {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Version;
+    unsigned __int32 Control;
+    unsigned __int32 Select;
+    signed __int32 OffsetNanoseconds;
+    unsigned __int32 OffsetIntervalNanoseconds;
+    signed __int64 DriftPpbQ16;
+    unsigned __int32 DriftIntervalNanoseconds;
+    unsigned __int32 InSyncThresholdNanoseconds;
+    unsigned __int32 AppliedFlags;
+    unsigned __int32 Reserved[7];
+} TIMECARD_CLOCK_ADJUSTMENT;
+
+/* Raw fixed-point/register values are retained to avoid lossy round trips. */
+typedef struct _TIMECARD_CLOCK_ADVANCED_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Version;
+    unsigned __int32 Control;
+    unsigned __int32 Status;
+    unsigned __int32 ApplyFlags;
+    unsigned __int32 OffsetRateLimiter;
+    unsigned __int32 DriftRateLimiterQ16;
+    unsigned __int32 AgingConfiguration;
+    unsigned __int32 HoldoverConfiguration;
+    unsigned __int32 OffsetOutlierFilter;
+    unsigned __int32 DriftOutlierFilter;
+    unsigned __int32 DynamicControl;
+    unsigned __int32 ServoOffsetP;
+    unsigned __int32 ServoOffsetI;
+    unsigned __int32 ServoDriftP;
+    unsigned __int32 ServoDriftI;
+    unsigned __int32 StatusOffset;
+    unsigned __int32 StatusDrift;
+    unsigned __int32 StatusOffsetFraction;
+    unsigned __int32 StatusDriftFraction;
+    unsigned __int32 StatusHoldover;
+    unsigned __int32 StatusHoldoverFraction;
+    unsigned __int32 StatusHoldoverSamples;
+    unsigned __int32 StatusOffsetOutliers;
+    unsigned __int32 StatusDriftOutliers;
+    unsigned __int32 StatusAgingLow;
+    unsigned __int32 StatusAgingHigh;
+    unsigned __int32 StatusAgingSamples;
+    unsigned __int32 Reserved[3];
+} TIMECARD_CLOCK_ADVANCED_CONTROL;
 
 typedef struct _TIMECARD_NMEA_CONTROL {
     unsigned __int32 Size;
@@ -698,8 +1085,21 @@ typedef struct _TIMECARD_NMEA_CONTROL {
     unsigned __int32 Control;
     unsigned __int32 Status;
     unsigned __int32 Version;
-    unsigned __int32 Reserved[4];
+    signed __int32 CorrectionSeconds;
+    signed __int32 LocalOffsetMinutes;
+    unsigned __int32 Gnss;
+    unsigned __int32 MessageDisableMask;
 } TIMECARD_NMEA_CONTROL;
+
+typedef struct _TIMECARD_NMEA_UTC_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Version;
+    unsigned __int32 RawUtcInfo;
+    unsigned __int32 UtcOffsetSeconds;
+    unsigned __int32 HandshakeControl;
+    unsigned __int32 Reserved[10];
+} TIMECARD_NMEA_UTC_CONTROL;
 
 typedef struct _TIMECARD_IDENTITY {
     unsigned __int32 Size;
@@ -717,12 +1117,231 @@ typedef struct _TIMECARD_SIGNAL_CONTROL {
     unsigned __int32 Version;
     unsigned __int32 RepeatCount;
     unsigned __int32 StartNanoseconds;
-    unsigned __int32 Reserved;
+    unsigned __int32 CableDelayNanoseconds;
     unsigned __int64 PeriodNanoseconds;
     unsigned __int64 PulseNanoseconds;
     unsigned __int64 PhaseNanoseconds;
     unsigned __int64 StartSeconds;
 } TIMECARD_SIGNAL_CONTROL;
+
+typedef struct _TIMECARD_SIGNAL_EVENT {
+    unsigned __int64 SystemInterruptTime100ns;
+    unsigned __int64 Sequence;
+    unsigned __int32 Generator;
+    unsigned __int32 Flags;
+    unsigned __int32 Status;
+    unsigned __int32 Reserved;
+} TIMECARD_SIGNAL_EVENT;
+
+/* Input and output share this METHOD_BUFFERED structure. */
+typedef struct _TIMECARD_SIGNAL_EVENT_BATCH {
+    unsigned __int32 Size;
+    unsigned __int32 Generator;
+    unsigned __int32 MaximumEvents;
+    unsigned __int32 Count;
+    unsigned __int32 DroppedEvents;
+    unsigned __int32 Flags;
+    unsigned __int32 Reserved[2];
+    TIMECARD_SIGNAL_EVENT Events[TIMECARD_SIGNAL_EVENT_MAX_BATCH];
+} TIMECARD_SIGNAL_EVENT_BATCH;
+
+/*
+ * One interrupt snapshot from a Signal Timestamper.  Snapshot payloads are
+ * bounded to 256 bits even if a custom image synthesizes a wider data bus;
+ * DataWidth preserves the hardware value and DATA_TRUNCATED reports clipping.
+ */
+typedef struct _TIMECARD_TIMESTAMP_EVENT {
+    TIMECARD_TIME Time;
+    unsigned __int32 TimestampCount;
+    unsigned __int32 EventCount;
+    unsigned __int32 Error;
+    unsigned __int32 DataWidth;
+    unsigned __int32 Flags;
+    unsigned __int32 Data[TIMECARD_TIMESTAMP_MAX_DATA_BYTES / 4u];
+    unsigned __int32 Reserved[3];
+} TIMECARD_TIMESTAMP_EVENT;
+
+typedef struct _TIMECARD_TIMESTAMP_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Channel;
+    unsigned __int32 Flags;
+    unsigned __int32 Status;
+    unsigned __int32 Version;
+    unsigned __int32 Polarity;
+    unsigned __int32 CableDelayNanoseconds;
+    unsigned __int32 Interrupt;
+    unsigned __int32 InterruptMask;
+    unsigned __int32 EventCount;
+    unsigned __int32 TimestampCount;
+    unsigned __int32 QueueDepth;
+    unsigned __int32 DroppedEvents;
+    unsigned __int32 DataWidth;
+    TIMECARD_TIME Time;
+    unsigned __int32 Data;
+    unsigned __int32 Reserved;
+} TIMECARD_TIMESTAMP_CONTROL;
+
+/* Input and output share this METHOD_BUFFERED structure. */
+typedef struct _TIMECARD_TIMESTAMP_BATCH {
+    unsigned __int32 Size;
+    unsigned __int32 Channel;
+    unsigned __int32 MaximumEvents;
+    unsigned __int32 Count;
+    unsigned __int32 DroppedEvents;
+    unsigned __int32 Flags;
+    unsigned __int32 Reserved[2];
+    TIMECARD_TIMESTAMP_EVENT Events[TIMECARD_TIMESTAMP_MAX_BATCH];
+} TIMECARD_TIMESTAMP_BATCH;
+
+/* CoreMask is the trusted board profile's expected map; query confirms a core. */
+typedef struct _TIMECARD_FPGA_CAPABILITIES {
+    unsigned __int32 Size;
+    unsigned __int32 AbiVersion;
+    unsigned __int32 CoreMask;
+    unsigned __int32 FeatureFlags;
+    unsigned __int32 KnownGaps;
+    unsigned __int32 Layout;
+    unsigned __int32 BoardProfile;
+    unsigned __int32 Reserved[9];
+} TIMECARD_FPGA_CAPABILITIES;
+
+typedef struct _TIMECARD_CORE_DESCRIPTOR {
+    unsigned __int32 Type;
+    unsigned __int32 Instance;
+    unsigned __int32 RegisterOffset;
+    unsigned __int32 RegisterSpan;
+    unsigned __int32 InterruptMessage;
+    unsigned __int32 Version;
+    unsigned __int32 Flags;
+    unsigned __int32 Reserved;
+} TIMECARD_CORE_DESCRIPTOR;
+
+/*
+ * The published Time Card images have no Configuration Slave descriptor ROM.
+ * This inventory reports only the exact static board maps already trusted by
+ * the driver; it never sweeps or probes guessed BAR addresses.
+ */
+typedef struct _TIMECARD_CORE_INVENTORY {
+    unsigned __int32 Size;
+    unsigned __int32 AbiVersion;
+    unsigned __int32 Count;
+    unsigned __int32 Flags;
+    unsigned __int32 BoardProfile;
+    unsigned __int32 Layout;
+    unsigned __int32 RawImageVersion;
+    unsigned __int32 Reserved;
+    TIMECARD_CORE_DESCRIPTOR Cores[TIMECARD_CORE_INVENTORY_MAX];
+} TIMECARD_CORE_INVENTORY;
+
+/*
+ * An explicit, session-scoped synthesis contract.  Set is accepted only when
+ * RawImageVersion exactly matches the driver's trusted image-identity word;
+ * unknown images remain conservative and every optional access revalidates
+ * the match.  The acknowledgement value is required for writes.
+ */
+typedef struct _TIMECARD_FPGA_IMAGE_CONTRACT {
+    unsigned __int32 Size;
+    unsigned __int32 AbiVersion;
+    unsigned __int32 RawImageVersion;
+    unsigned __int32 CapabilityFlags;
+    unsigned __int32 EffectiveFlags;
+    unsigned __int32 StatusFlags;
+    unsigned __int32 BoardProfile;
+    unsigned __int32 Layout;
+    unsigned __int32 Acknowledgement;
+    unsigned __int32 Reserved[7];
+} TIMECARD_FPGA_IMAGE_CONTRACT;
+
+/*
+ * The driver reads exactly one 32-bit word from the documented MSI/MSI-X
+ * image-version resource.  ART layouts are deliberately unsupported because
+ * they do not publish the same trusted static resource map.
+ */
+typedef struct _TIMECARD_FPGA_IMAGE_INFO {
+    unsigned __int32 Size;
+    unsigned __int32 AbiVersion;
+    unsigned __int32 Flags;
+    unsigned __int32 RawVersion;
+    unsigned __int32 ImageTag;
+    unsigned __int32 ImageVersion;
+    unsigned __int32 Layout;
+    unsigned __int32 BoardProfile;
+    unsigned __int32 RegisterOffset;
+    unsigned __int32 Reserved[7];
+} TIMECARD_FPGA_IMAGE_INFO;
+
+typedef struct _TIMECARD_CLOCK_TELEMETRY {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Version;
+    unsigned __int32 Control;
+    unsigned __int32 Status;
+    unsigned __int32 Select;
+    unsigned __int32 CoreMask;
+    unsigned __int32 KnownGaps;
+    unsigned __int32 InSyncThreshold;
+    unsigned __int32 ServoOffsetP;
+    unsigned __int32 ServoOffsetI;
+    unsigned __int32 ServoDriftP;
+    unsigned __int32 ServoDriftI;
+    signed __int32 StatusOffsetNanoseconds;
+    signed __int32 StatusDriftPpb;
+    unsigned __int32 StatusOffsetFraction;
+    unsigned __int32 StatusDriftFraction;
+    unsigned __int32 Reserved[3];
+} TIMECARD_CLOCK_TELEMETRY;
+
+typedef struct _TIMECARD_PPS_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Core;
+    unsigned __int32 Flags;
+    unsigned __int32 Control;
+    unsigned __int32 Status;
+    unsigned __int32 Version;
+    unsigned __int32 Polarity;
+    unsigned __int32 PulseWidthMilliseconds;
+    signed __int32 CableDelayNanoseconds;
+    unsigned __int32 Reserved[7];
+} TIMECARD_PPS_CONTROL;
+
+typedef struct _TIMECARD_TIMECODE_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Format;
+    unsigned __int32 Role;
+    unsigned __int32 Flags;
+    unsigned __int32 Control;
+    unsigned __int32 Status;
+    unsigned __int32 Version;
+    unsigned __int32 Mode;
+    unsigned __int32 Code;
+    signed __int32 CorrectionSeconds;
+    signed __int32 DelayNanoseconds;
+    unsigned __int32 ControlBits;
+    unsigned __int32 BitPosition;
+    unsigned __int32 AmplitudeModulation;
+    unsigned __int32 ManualYear;
+    unsigned __int32 Reserved[5];
+} TIMECARD_TIMECODE_CONTROL;
+
+typedef struct _TIMECARD_TOD_CONTROL {
+    unsigned __int32 Size;
+    unsigned __int32 Flags;
+    unsigned __int32 Control;
+    unsigned __int32 Status;
+    unsigned __int32 Version;
+    unsigned __int32 Protocol;
+    unsigned __int32 Gnss;
+    unsigned __int32 Baud;
+    unsigned __int32 BaudSelector;
+    unsigned __int32 Polarity;
+    signed __int32 CorrectionSeconds;
+    unsigned __int32 MessageDisableMask;
+    unsigned __int32 UtcStatus;
+    signed __int32 TimeToLeapSeconds;
+    unsigned __int32 GnssStatus;
+    unsigned __int32 Satellites;
+    unsigned __int32 Reserved[4];
+} TIMECARD_TOD_CONTROL;
 
 /* Counter numbers are 1 through 4; zero integration seconds disables it. */
 typedef struct _TIMECARD_FREQUENCY_CONTROL {

@@ -73,6 +73,51 @@ if ($productWindowSource -notmatch 'UpdateDemoCelesticaSensors' -or
     $productWindowSource -notmatch '--demo-no-imu') {
     throw 'Control Center product test failed: Celestica visual demo telemetry is missing.'
 }
+if ($productionSource -notmatch 'CurrentSchemaVersion\s*=\s*2' -or
+    $productionSource -notmatch 'RequiredFpgaCoreMask' -or
+    $productionSource -notmatch 'List<PpsProfileSetting>' -or
+    $productionSource -notmatch 'List<TimecodeProfileSetting>' -or
+    $productionSource -notmatch 'TodParserProfileSetting' -or
+    $productionSource -notmatch 'List<SignalGeneratorProfileSetting>') {
+    throw 'Control Center product test failed: typed FPGA profile schema is incomplete.'
+}
+if ($productWindowSource -notmatch 'GetProfileRequiredCoreMask' -or
+    $productWindowSource -notmatch 'missing required core mask' -or
+    $productWindowSource -notmatch 'client\.SetPpsEngine' -or
+    $productWindowSource -notmatch 'client\.SetTimecodeEngine' -or
+    $productWindowSource -notmatch 'client\.SetTodParser' -or
+    $productWindowSource -notmatch 'client\.SetSignalGenerator' -or
+    $productWindowSource -notmatch 'RequireCoreRevision') {
+    throw 'Control Center product test failed: safe typed FPGA profile capture/apply is incomplete.'
+}
+$captureStart = $productWindowSource.IndexOf(
+    'private ConfigurationProfile CaptureConfigurationCore',
+    [StringComparison]::Ordinal)
+$captureEnd = if ($captureStart -ge 0) {
+    $productWindowSource.IndexOf('private void ApplyConfigurationCore',
+        $captureStart, [StringComparison]::Ordinal)
+} else { -1 }
+if ($captureStart -lt 0 -or $captureEnd -le $captureStart) {
+    throw 'Control Center product test failed: profile capture method not found.'
+}
+$captureSource = $productWindowSource.Substring($captureStart,
+    $captureEnd - $captureStart)
+if ($captureSource -match 'GetNmeaOutput\s*\(' -or
+    $captureSource -notmatch 'Do not query the optional ToD Master') {
+    throw 'Control Center product test failed: automatic profile capture can probe the optional ToD Master.'
+}
+if ($productWindowSource -notmatch
+    'image\.BoardProfile\s*!=\s*profile\.FpgaImageBoardProfile[\s\S]*' +
+    'image\.Layout\s*!=\s*profile\.FpgaImageLayout[\s\S]*' +
+    'image\.RawVersion\s*!=\s*profile\.FpgaImageRawVersion[\s\S]*' +
+    'image\.ImageTag\s*!=\s*profile\.FpgaImageTag[\s\S]*' +
+    'image\.ImageVersion\s*!=\s*profile\.FpgaImageVersion[\s\S]*' +
+    'image\.IsLoader\s*!=\s*profile\.FpgaImageLoaderEncoding') {
+    throw 'Control Center product test failed: image-bound profiles do not enforce the complete FPGA identity.'
+}
+if ($productWindowSource -match 'WRITE_REGISTER|READ_REGISTER|RegisterOffset\s*=') {
+    throw 'Control Center product test failed: profiles must not replay raw registers.'
+}
 $wpfUsings = "using System.Windows;`r`nusing System.Windows.Input;`r`nusing System.Windows.Media;`r`n"
 $stubs = @'
 namespace TimeCardControlCenter
@@ -85,6 +130,7 @@ namespace TimeCardControlCenter
         public string Layout { get; set; }
         public bool GnssFixOk { get; set; }
         public bool GnssTelemetryAvailable { get; set; }
+        public bool TodCoreAvailable { get; set; }
         public bool TodTelemetryAvailable { get; set; }
         public int LockedSatellites { get; set; }
         public uint UtcStatus { get; set; }
@@ -129,7 +175,8 @@ namespace TimeCardControlCenter
             {
                 DriverVersion = "1.15", AbiVersion = 8, Layout = "MSI-X",
                 GnssFixOk = true, LockedSatellites = 12, UtcStatus = 1u << 8,
-                GnssTelemetryAvailable = true, TodTelemetryAvailable = true,
+                GnssTelemetryAvailable = true, TodCoreAvailable = true,
+                TodTelemetryAvailable = true,
                 IsClockSynchronized = true, OffsetNanoseconds = 4,
                 SamplingWindowNanoseconds = 9000
             };
@@ -155,7 +202,10 @@ namespace TimeCardControlCenter
 
             IList<ConfigurationProfile> profiles = BuiltInProfiles.Create();
             if (profiles.Count < 5 || !profiles.Any(item => item.HasNmea) ||
-                !profiles.Any(item => item.Sma.Count == 4))
+                !profiles.Any(item => item.Sma.Count == 4) ||
+                profiles.Any(item => item.PpsEngines == null ||
+                    item.TimecodeEngines == null ||
+                    item.SignalGenerators == null))
                 throw new Exception("Built-in profile catalog failed.");
 
             TelemetrySession session = new TelemetrySession(60);
@@ -214,18 +264,113 @@ namespace TimeCardControlCenter
                 throw new Exception("Cross-timestamp histogram statistics failed.");
 
             ConfigurationProfile roundTrip = profiles[0];
+            roundTrip.SchemaVersion = ConfigurationProfile.CurrentSchemaVersion;
+            roundTrip.CapturedAbiVersion = 13;
+            roundTrip.RequiredAbiVersion = 13;
+            roundTrip.RequiredFpgaCoreMask = 0x1ffu;
+            roundTrip.HasNmeaAdvanced = true;
+            roundTrip.NmeaCoreVersion = 0x01060000u;
+            roundTrip.NmeaCorrectionSeconds = -37;
+            roundTrip.NmeaLocalOffsetMinutes = -300;
+            roundTrip.NmeaGnss = 1;
+            roundTrip.NmeaMessageDisableMask = 1;
+            roundTrip.PpsEngines.Add(new PpsProfileSetting {
+                Core = 1, CoreVersion = 0x01060000u, Enabled = true,
+                ActiveHigh = true, HasPulseWidth = true,
+                PulseWidthMilliseconds = 100, CableDelayNanoseconds = 25 });
+            roundTrip.TimecodeEngines.Add(new TimecodeProfileSetting {
+                Format = 1, Role = 1, CoreVersion = 0x01030000u,
+                Enabled = true, Mode = 1, Code = 0,
+                CorrectionSeconds = -37, HasControlBits = true,
+                ControlBits = 0x1234u });
+            roundTrip.TodParser = new TodParserProfileSetting {
+                CoreVersion = 0x02010000u, Enabled = true,
+                Protocol = 1, Gnss = 2, Baud = 115200,
+                CorrectionSeconds = 37, MessageDisableMask = 3 };
+            roundTrip.SignalGenerators.Add(new SignalGeneratorProfileSetting {
+                Generator = 1, CoreVersion = 0x01040000u, Enabled = true,
+                ActiveHigh = true,
+                PeriodNanoseconds = 1000000000, PulseNanoseconds = 100000000,
+                PhaseNanoseconds = 10, RepeatCount = 0,
+                CableDelayNanoseconds = 25 });
+            roundTrip.HasFpgaImageIdentity = true;
+            roundTrip.FpgaImageRawVersion = 0x00008123u;
+            roundTrip.FpgaImageTag = 1u;
+            roundTrip.FpgaImageVersion = 0x0123u;
+            roundTrip.FpgaImageLayout = 2u;
+            roundTrip.FpgaImageBoardProfile = 1u;
+            roundTrip.FpgaImageLoaderEncoding = false;
             XmlSerializer serializer = new XmlSerializer(typeof(ConfigurationProfile));
             using (MemoryStream stream = new MemoryStream())
             {
                 serializer.Serialize(stream, roundTrip);
+                string serializedProfile = Encoding.UTF8.GetString(
+                    stream.ToArray());
+                int signalStart = serializedProfile.IndexOf(
+                    "<SignalGeneratorProfileSetting>",
+                    StringComparison.Ordinal);
+                int signalEnd = serializedProfile.IndexOf(
+                    "</SignalGeneratorProfileSetting>",
+                    StringComparison.Ordinal);
+                string serializedSignal = signalStart < 0 ||
+                    signalEnd < signalStart ? string.Empty :
+                    serializedProfile.Substring(signalStart,
+                        signalEnd - signalStart);
+                if (!serializedSignal.Contains(
+                        "<ActiveHigh>true</ActiveHigh>") ||
+                    serializedSignal.Contains("<Inverted>"))
+                    throw new Exception(
+                        "New signal-generator profiles must persist active-high semantics only.");
                 stream.Position = 0;
                 ConfigurationProfile restored = (ConfigurationProfile)serializer.Deserialize(stream);
-                if (restored.Name != roundTrip.Name || restored.ClockSource != roundTrip.ClockSource)
+                if (restored.Name != roundTrip.Name ||
+                    restored.ClockSource != roundTrip.ClockSource ||
+                    !restored.HasFpgaImageIdentity ||
+                    restored.FpgaImageRawVersion != roundTrip.FpgaImageRawVersion ||
+                    restored.FpgaImageLayout != roundTrip.FpgaImageLayout ||
+                    restored.FpgaImageBoardProfile !=
+                        roundTrip.FpgaImageBoardProfile ||
+                    restored.SchemaVersion !=
+                        ConfigurationProfile.CurrentSchemaVersion ||
+                    restored.RequiredFpgaCoreMask != 0x1ffu ||
+                    !restored.HasNmeaAdvanced ||
+                    restored.NmeaCorrectionSeconds != -37 ||
+                    restored.PpsEngines.Count != 1 ||
+                    restored.PpsEngines[0].PulseWidthMilliseconds != 100 ||
+                    restored.TimecodeEngines.Count != 1 ||
+                    restored.TodParser == null ||
+                    restored.TodParser.Protocol != 1 ||
+                    restored.SignalGenerators.Count != 1 ||
+                    !restored.SignalGenerators[0].ActiveHigh)
                     throw new Exception("Profile serialization failed.");
+            }
+            const string legacyXml =
+                "<ConfigurationProfile><Name>Legacy</Name>" +
+                "<HasNmea>true</HasNmea><NmeaBaud>9600</NmeaBaud>" +
+                "<SignalGenerators><SignalGeneratorProfileSetting>" +
+                "<Generator>1</Generator><Inverted>true</Inverted>" +
+                "</SignalGeneratorProfileSetting></SignalGenerators>" +
+                "</ConfigurationProfile>";
+            using (MemoryStream stream = new MemoryStream(
+                Encoding.UTF8.GetBytes(legacyXml)))
+            {
+                ConfigurationProfile legacy = (ConfigurationProfile)
+                    serializer.Deserialize(stream);
+                if (legacy.SchemaVersion != 0 || legacy.Name != "Legacy" ||
+                    !legacy.HasNmea || legacy.NmeaBaud != 9600 ||
+                    legacy.PpsEngines == null ||
+                    legacy.TimecodeEngines == null ||
+                    legacy.SignalGenerators == null ||
+                    legacy.PpsEngines.Count != 0 ||
+                    legacy.SignalGenerators.Count != 1 ||
+                    !legacy.SignalGenerators[0].ActiveHigh)
+                    throw new Exception("Legacy profile compatibility failed.");
             }
             ControlCenterSettings settings = new ControlCenterSettings
             {
                 Theme = "Midnight blue", RefreshSeconds = .5,
+                SelectedDeviceSerial = "001122334455",
+                SelectedDevicePath = @"\\?\pci#card-a#{8315a67a}",
                 LastKnownGoodProfile = roundTrip
             };
             serializer = new XmlSerializer(typeof(ControlCenterSettings));
@@ -236,10 +381,14 @@ namespace TimeCardControlCenter
                 ControlCenterSettings restored =
                     (ControlCenterSettings)serializer.Deserialize(stream);
                 if (restored.Theme != settings.Theme ||
+                    restored.SelectedDeviceSerial !=
+                        settings.SelectedDeviceSerial ||
+                    restored.SelectedDevicePath !=
+                        settings.SelectedDevicePath ||
                     restored.LastKnownGoodProfile.Name != roundTrip.Name)
                     throw new Exception("Settings serialization failed.");
             }
-            return "Control Center product tests passed (health graph, spaced SMA topology lane, profiles, XML round-trip, telemetry retention/export, histogram percentiles, vibration math, automatic sensor acquisition-latency chart, textured six-face 3D IMU view, no-IMU showcase, IMU zero-sample debounce, ICP-10100 compensation).";
+            return "Control Center product tests passed (health graph, spaced SMA topology lane, profiles, FPGA image compatibility metadata/XML round-trip, telemetry retention/export, histogram percentiles, vibration math, automatic sensor acquisition-latency chart, textured six-face 3D IMU view, no-IMU showcase, IMU zero-sample debounce, ICP-10100 compensation).";
         }
     }
 }
