@@ -12,6 +12,7 @@ namespace TimeCardControlCenter
     public sealed class TimeCardClient : IDisposable
     {
         private const string DevicePathPrefix = @"\\.\TimeCard";
+        private const string LegacyDevicePath = DevicePathPrefix + "0";
         private const uint GenericRead = 0x80000000;
         private const uint GenericWrite = 0x40000000;
         private const uint FileShareRead = 0x00000001;
@@ -212,7 +213,11 @@ namespace TimeCardControlCenter
         {
             List<TimeCardDeviceDescriptor> devices =
                 new List<TimeCardDeviceDescriptor>();
-            foreach (string path in EnumerateDevicePaths())
+            List<string> paths = EnumerateDevicePaths().ToList();
+            bool legacyFallback = paths.Count == 0;
+            if (legacyFallback)
+                paths.Add(LegacyDevicePath);
+            foreach (string path in paths)
             {
                 string serial = string.Empty;
                 string board = "Time Card";
@@ -250,6 +255,11 @@ namespace TimeCardControlCenter
                 }
                 catch (Exception ex)
                 {
+                    Win32Exception win32 = ex as Win32Exception;
+                    if (legacyFallback && win32 != null &&
+                        (win32.NativeErrorCode == 2 ||
+                         win32.NativeErrorCode == 3))
+                        continue;
                     error = ex.Message;
                 }
                 devices.Add(new TimeCardDeviceDescriptor(path, serial, board,
@@ -270,7 +280,7 @@ namespace TimeCardControlCenter
             if (deviceIndex < (uint)interfaces.Count)
                 return interfaces[(int)deviceIndex];
             if (interfaces.Count == 0 && deviceIndex == 0u)
-                return DevicePathPrefix + "0"; // ABI 1-13 compatibility.
+                return LegacyDevicePath; // ABI 1-13 compatibility.
             throw new Win32Exception(2, string.Format(
                 System.Globalization.CultureInfo.InvariantCulture,
                 "Time Card index {0} is not present ({1} interface(s) found).",

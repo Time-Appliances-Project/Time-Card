@@ -157,6 +157,9 @@ TimeCardControlCenter\bin\Release\TimeCardControlCenter.exe
 The kernel device currently requires administrator access for both read and
 write IOCTLs. The application opens normally so its interface and diagnostics
 remain available; when access is denied, select **Restart as administrator**.
+Drivers that predate the multi-card device-interface inventory remain
+discoverable through the legacy `\\.\TimeCard0` compatibility path. Installing
+driver 1.42 is still recommended to expose the complete ABI 15 feature set.
 
 The driver and card must already be installed. The dashboard reconnects every
 five seconds if the card is temporarily unavailable.

@@ -17,6 +17,15 @@ if ($clientSource -notmatch
         'SetupDiGetClassDevs[\s\S]*throw new Win32Exception') {
     throw 'Multi-card test failed: public exact-path inventory behavior is incomplete.'
 }
+if ($clientSource -notmatch
+        'LegacyDevicePath\s*=\s*DevicePathPrefix\s*\+\s*"0"' -or
+    $clientSource -notmatch
+        'legacyFallback\s*=\s*paths\.Count\s*==\s*0' -or
+    $clientSource -notmatch 'paths\.Add\(LegacyDevicePath\)' -or
+    $clientSource -notmatch 'win32\.NativeErrorCode\s*==\s*2' -or
+    $clientSource -notmatch 'win32\.NativeErrorCode\s*==\s*3') {
+    throw 'Multi-card test failed: legacy single-card discovery fallback is incomplete.'
+}
 if ($settingsSource -notmatch 'SelectedDeviceSerial' -or
     $settingsSource -notmatch 'SelectedDevicePath') {
     throw 'Multi-card test failed: stable card selection is not persisted.'
