@@ -207,9 +207,14 @@ if (-not $SkipBuild) {
 }
 Assert-True (Test-Path -LiteralPath $executablePath -PathType Leaf) `
     "service executable is missing: $executablePath"
-Assert-True (Test-Path -LiteralPath (Join-Path (Split-Path $executablePath) `
-        'TimeCardDiscipline.dll') -PathType Leaf) `
-    'the native miniCOD DLL is not beside the service executable'
+Assert-True (-not (Test-Path -LiteralPath (Join-Path `
+        (Split-Path $executablePath) 'TimeCardDiscipline.dll'))) `
+    'the service still has a loose native miniCOD DLL'
+$serviceAssembly = [Reflection.Assembly]::Load(
+    [IO.File]::ReadAllBytes($executablePath))
+Assert-True ($serviceAssembly.GetManifestResourceNames() -contains
+        'TimeCardControlCenter.Native.TimeCardDiscipline.dll') `
+    'the service does not contain its embedded native miniCOD resource'
 Assert-True (Test-Path -LiteralPath (Join-Path (Split-Path $executablePath) `
         'TimeCardTimeProvider.dll') -PathType Leaf) `
     'the native W32Time provider DLL is not beside the service executable'

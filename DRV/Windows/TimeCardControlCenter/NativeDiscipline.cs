@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -153,6 +156,252 @@ namespace TimeCardControlCenter
         }
     }
 
+    internal static class NativeDisciplineLibrary
+    {
+        private const string EmbeddedResourceName =
+            "TimeCardControlCenter.Native.TimeCardDiscipline.dll";
+        private const uint LoadLibrarySearchDllLoadDir = 0x00000100u;
+        private const uint LoadLibrarySearchSystem32 = 0x00000800u;
+        private const int MaximumLibraryBytes = 64 * 1024 * 1024;
+        private static readonly object SyncRoot = new object();
+        private static IntPtr module;
+        private static FileStream lockedLibrary;
+
+        internal static string LoadedPath { get; private set; }
+
+        internal static void EnsureLoaded()
+        {
+            lock (SyncRoot)
+            {
+                if (module != IntPtr.Zero)
+                {
+                    GC.KeepAlive(lockedLibrary);
+                    return;
+                }
+
+                FileStream candidateLock = null;
+                string path;
+                try
+                {
+                    byte[] embedded = ReadEmbeddedLibrary();
+                    if (embedded == null)
+                        throw new DllNotFoundException(
+                            "The embedded native miniCOD resource is missing. " +
+                            "The Windows executable is incomplete.");
+                    path = StageEmbeddedLibrary(embedded,
+                        out candidateLock);
+
+                    IntPtr loaded = LoadLibraryEx(path, IntPtr.Zero,
+                        LoadLibrarySearchDllLoadDir |
+                        LoadLibrarySearchSystem32);
+                    int error = Marshal.GetLastWin32Error();
+                    if (loaded == IntPtr.Zero)
+                        throw new DllNotFoundException(string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Windows could not load the embedded native " +
+                            "miniCOD library from {0}: {1} (error {2}).",
+                            path, new Win32Exception(error).Message, error));
+
+                    lockedLibrary = candidateLock;
+                    candidateLock = null;
+                    LoadedPath = path;
+                    module = loaded;
+                }
+                finally
+                {
+                    if (candidateLock != null)
+                        candidateLock.Dispose();
+                }
+            }
+        }
+
+        internal static T GetExport<T>(string name) where T : class
+        {
+            EnsureLoaded();
+            IntPtr address = GetProcAddress(module, name);
+            if (address == IntPtr.Zero)
+                throw new EntryPointNotFoundException(
+                    "The embedded native miniCOD library does not export " +
+                    name + ".");
+            T value = Marshal.GetDelegateForFunctionPointer(address,
+                typeof(T)) as T;
+            if (value == null)
+                throw new InvalidOperationException(
+                    "The native miniCOD export has an incompatible ABI: " +
+                    name + ".");
+            return value;
+        }
+
+        private static byte[] ReadEmbeddedLibrary()
+        {
+            Assembly assembly = typeof(NativeDisciplineLibrary).Assembly;
+            using (Stream resource = assembly.GetManifestResourceStream(
+                EmbeddedResourceName))
+            {
+                if (resource == null)
+                    return null;
+                using (MemoryStream copy = new MemoryStream())
+                {
+                    resource.CopyTo(copy);
+                    if (copy.Length <= 0 ||
+                        copy.Length > MaximumLibraryBytes)
+                        throw new InvalidDataException(
+                            "The embedded native miniCOD library has an " +
+                            "invalid size.");
+                    return copy.ToArray();
+                }
+            }
+        }
+
+        private static string StageEmbeddedLibrary(byte[] bytes,
+            out FileStream fileLock)
+        {
+            byte[] expectedHash;
+            using (SHA256 algorithm = SHA256.Create())
+                expectedHash = algorithm.ComputeHash(bytes);
+            string hash = BitConverter.ToString(expectedHash)
+                .Replace("-", string.Empty).ToLowerInvariant();
+            bool elevated = IsProcessElevated();
+            string cacheRoot = Environment.GetFolderPath(elevated ?
+                Environment.SpecialFolder.ProgramFiles :
+                Environment.SpecialFolder.LocalApplicationData);
+            if (string.IsNullOrWhiteSpace(cacheRoot))
+                throw new InvalidOperationException(
+                    "Windows did not provide a secure application-data path " +
+                    "for the native-library cache.");
+            string productDirectory = EnsurePrivateDirectory(cacheRoot,
+                "OCP Time Card");
+            string nativeDirectory = EnsurePrivateDirectory(productDirectory,
+                "Native");
+            string directory = EnsurePrivateDirectory(nativeDirectory, hash);
+            string path = Path.Combine(directory,
+                "TimeCardDiscipline." + hash + ".dll");
+
+            for (int attempt = 0; attempt < 4; ++attempt)
+            {
+                if (File.Exists(path))
+                {
+                    try
+                    {
+                        fileLock = OpenAndVerify(path, expectedHash);
+                        return path;
+                    }
+                    catch (InvalidDataException)
+                    {
+                        try { File.Delete(path); }
+                        catch (IOException) { }
+                        catch (UnauthorizedAccessException) { }
+                    }
+                    catch (IOException)
+                    {
+                        Thread.Sleep(25);
+                        continue;
+                    }
+                }
+
+                string temporary = path + "." +
+                    Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    using (FileStream output = new FileStream(temporary,
+                        FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    {
+                        output.Write(bytes, 0, bytes.Length);
+                        output.Flush(true);
+                    }
+                    try
+                    {
+                        File.Move(temporary, path);
+                    }
+                    catch (IOException)
+                    {
+                        if (!File.Exists(path))
+                            throw;
+                    }
+                }
+                finally
+                {
+                    try
+                    {
+                        if (File.Exists(temporary))
+                            File.Delete(temporary);
+                    }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+            }
+
+            fileLock = OpenAndVerify(path, expectedHash);
+            return path;
+        }
+
+        private static bool IsProcessElevated()
+        {
+            using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+            {
+                WindowsPrincipal principal = new WindowsPrincipal(identity);
+                return principal.IsInRole(
+                    WindowsBuiltInRole.Administrator);
+            }
+        }
+
+        private static string EnsurePrivateDirectory(string parent,
+            string name)
+        {
+            string path = Path.Combine(parent, name);
+            DirectoryInfo directory = Directory.CreateDirectory(path);
+            if ((directory.Attributes & FileAttributes.ReparsePoint) != 0)
+                throw new IOException(
+                    "The native-library cache contains an unsafe reparse " +
+                    "point: " + path);
+            return directory.FullName;
+        }
+
+        private static FileStream OpenAndVerify(string path,
+            byte[] expectedHash)
+        {
+            FileStream input = new FileStream(path, FileMode.Open,
+                FileAccess.Read, FileShare.Read);
+            try
+            {
+                byte[] actualHash;
+                using (SHA256 algorithm = SHA256.Create())
+                    actualHash = algorithm.ComputeHash(input);
+                if (!HashesEqual(expectedHash, actualHash))
+                    throw new InvalidDataException(
+                        "The cached native miniCOD library failed its " +
+                        "SHA-256 integrity check.");
+                input.Position = 0;
+                return input;
+            }
+            catch
+            {
+                input.Dispose();
+                throw;
+            }
+        }
+
+        private static bool HashesEqual(byte[] left, byte[] right)
+        {
+            if (left == null || right == null || left.Length != right.Length)
+                return false;
+            int difference = 0;
+            for (int index = 0; index < left.Length; ++index)
+                difference |= left[index] ^ right[index];
+            return difference == 0;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode,
+            SetLastError = true, EntryPoint = "LoadLibraryExW")]
+        private static extern IntPtr LoadLibraryEx(string fileName,
+            IntPtr file, uint flags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Ansi,
+            SetLastError = true, ExactSpelling = true)]
+        private static extern IntPtr GetProcAddress(IntPtr module,
+            string procedureName);
+    }
+
     internal sealed class NativeDisciplineAlgorithm : IDisposable
     {
         private IntPtr context;
@@ -174,6 +423,7 @@ namespace TimeCardControlCenter
         {
             if (options == null)
                 throw new ArgumentNullException("options");
+            NativeDisciplineLibrary.EnsureLoaded();
             StringBuilder error = new StringBuilder(1024);
             NativeDisciplineConfiguration configuration = options.ToNative();
             IntPtr value = NativeMethods.CreateConfigured(factoryCoarse,
@@ -271,50 +521,147 @@ namespace TimeCardControlCenter
 
         private static class NativeMethods
         {
-            private const string Library = "TimeCardDiscipline.dll";
+            private const uint ExpectedLibraryVersion = 0x00010000u;
 
-            [DllImport(Library, CallingConvention = CallingConvention.Cdecl,
-                EntryPoint = "tcod_create", CharSet = CharSet.Ansi)]
-            internal static extern IntPtr Create(uint factoryCoarse,
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+            private delegate uint VersionFunction();
+
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl,
+                CharSet = CharSet.Ansi)]
+            private delegate IntPtr CreateFunction(uint factoryCoarse,
                 byte[] savedParameters, uint savedParametersLength,
                 StringBuilder error, uint errorLength);
 
-            [DllImport(Library, CallingConvention = CallingConvention.Cdecl,
-                EntryPoint = "tcod_create_configured", CharSet = CharSet.Ansi)]
-            internal static extern IntPtr CreateConfigured(uint factoryCoarse,
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl,
+                CharSet = CharSet.Ansi)]
+            private delegate IntPtr CreateConfiguredFunction(
+                uint factoryCoarse,
                 byte[] savedParameters, uint savedParametersLength,
                 ref NativeDisciplineConfiguration configuration,
                 StringBuilder error, uint errorLength);
 
-            [DllImport(Library, CallingConvention = CallingConvention.Cdecl,
-                EntryPoint = "tcod_process")]
-            internal static extern int Process(IntPtr context,
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+            private delegate int ProcessFunction(IntPtr context,
                 ref NativeDisciplineInput input,
                 out NativeDisciplineOutput output);
 
-            [DllImport(Library, CallingConvention = CallingConvention.Cdecl,
-                EntryPoint = "tcod_destroy")]
-            internal static extern void Destroy(IntPtr context);
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+            private delegate void DestroyFunction(IntPtr context);
 
-            [DllImport(Library, CallingConvention = CallingConvention.Cdecl,
-                EntryPoint = "tcod_get_calibration_plan")]
-            internal static extern int GetCalibrationPlan(IntPtr context,
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+            private delegate int GetCalibrationPlanFunction(IntPtr context,
                 [Out] ushort[] points, uint capacity, out uint pointCount,
                 out uint samplesPerPoint);
 
-            [DllImport(Library, CallingConvention = CallingConvention.Cdecl,
-                EntryPoint = "tcod_complete_calibration")]
-            internal static extern int CompleteCalibration(IntPtr context,
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+            private delegate int CompleteCalibrationFunction(IntPtr context,
                 float[] phaseSamples, uint sampleCount);
 
-            [DllImport(Library, CallingConvention = CallingConvention.Cdecl,
-                EntryPoint = "tcod_parameters_size")]
-            internal static extern uint ParametersSize();
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+            private delegate uint ParametersSizeFunction();
 
-            [DllImport(Library, CallingConvention = CallingConvention.Cdecl,
-                EntryPoint = "tcod_get_parameters")]
-            internal static extern int GetParameters(IntPtr context,
+            [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+            private delegate int GetParametersFunction(IntPtr context,
                 [Out] byte[] buffer, uint bufferLength);
+
+            private static readonly CreateFunction CreateCall;
+            private static readonly VersionFunction VersionCall;
+            private static readonly CreateConfiguredFunction
+                CreateConfiguredCall;
+            private static readonly ProcessFunction ProcessCall;
+            private static readonly DestroyFunction DestroyCall;
+            private static readonly GetCalibrationPlanFunction
+                GetCalibrationPlanCall;
+            private static readonly CompleteCalibrationFunction
+                CompleteCalibrationCall;
+            private static readonly ParametersSizeFunction ParametersSizeCall;
+            private static readonly GetParametersFunction GetParametersCall;
+
+            static NativeMethods()
+            {
+                VersionCall = NativeDisciplineLibrary.GetExport<VersionFunction>(
+                    "tcod_version");
+                uint version = VersionCall();
+                if (version != ExpectedLibraryVersion)
+                    throw new InvalidOperationException(string.Format(
+                        CultureInfo.InvariantCulture,
+                        "The embedded native miniCOD ABI is 0x{0:x8}; " +
+                        "0x{1:x8} is required.", version,
+                        ExpectedLibraryVersion));
+                CreateCall = NativeDisciplineLibrary.GetExport<CreateFunction>(
+                    "tcod_create");
+                CreateConfiguredCall = NativeDisciplineLibrary.GetExport<
+                    CreateConfiguredFunction>("tcod_create_configured");
+                ProcessCall = NativeDisciplineLibrary.GetExport<ProcessFunction>(
+                    "tcod_process");
+                DestroyCall = NativeDisciplineLibrary.GetExport<DestroyFunction>(
+                    "tcod_destroy");
+                GetCalibrationPlanCall = NativeDisciplineLibrary.GetExport<
+                    GetCalibrationPlanFunction>("tcod_get_calibration_plan");
+                CompleteCalibrationCall = NativeDisciplineLibrary.GetExport<
+                    CompleteCalibrationFunction>(
+                    "tcod_complete_calibration");
+                ParametersSizeCall = NativeDisciplineLibrary.GetExport<
+                    ParametersSizeFunction>("tcod_parameters_size");
+                GetParametersCall = NativeDisciplineLibrary.GetExport<
+                    GetParametersFunction>("tcod_get_parameters");
+            }
+
+            internal static IntPtr Create(uint factoryCoarse,
+                byte[] savedParameters, uint savedParametersLength,
+                StringBuilder error, uint errorLength)
+            {
+                return CreateCall(factoryCoarse, savedParameters,
+                    savedParametersLength, error, errorLength);
+            }
+
+            internal static IntPtr CreateConfigured(uint factoryCoarse,
+                byte[] savedParameters, uint savedParametersLength,
+                ref NativeDisciplineConfiguration configuration,
+                StringBuilder error, uint errorLength)
+            {
+                return CreateConfiguredCall(factoryCoarse, savedParameters,
+                    savedParametersLength, ref configuration, error,
+                    errorLength);
+            }
+
+            internal static int Process(IntPtr context,
+                ref NativeDisciplineInput input,
+                out NativeDisciplineOutput output)
+            {
+                return ProcessCall(context, ref input, out output);
+            }
+
+            internal static void Destroy(IntPtr context)
+            {
+                DestroyCall(context);
+            }
+
+            internal static int GetCalibrationPlan(IntPtr context,
+                ushort[] points, uint capacity, out uint pointCount,
+                out uint samplesPerPoint)
+            {
+                return GetCalibrationPlanCall(context, points, capacity,
+                    out pointCount, out samplesPerPoint);
+            }
+
+            internal static int CompleteCalibration(IntPtr context,
+                float[] phaseSamples, uint sampleCount)
+            {
+                return CompleteCalibrationCall(context, phaseSamples,
+                    sampleCount);
+            }
+
+            internal static uint ParametersSize()
+            {
+                return ParametersSizeCall();
+            }
+
+            internal static int GetParameters(IntPtr context, byte[] buffer,
+                uint bufferLength)
+            {
+                return GetParametersCall(context, buffer, bufferLength);
+            }
         }
     }
 

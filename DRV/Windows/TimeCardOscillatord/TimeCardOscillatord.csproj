@@ -63,7 +63,7 @@
   <ItemGroup>
     <None Include="App.config" />
     <Content Include="oscillatord.example.json"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
-    <Content Include="..\TimeCardDiscipline\bin\Release\TimeCardDiscipline.dll"><Link>TimeCardDiscipline.dll</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
+    <EmbeddedResource Include="..\TimeCardDiscipline\bin\Release\TimeCardDiscipline.dll"><LogicalName>TimeCardControlCenter.Native.TimeCardDiscipline.dll</LogicalName></EmbeddedResource>
     <Content Include="..\TimeCardDiscipline\THIRD_PARTY_NOTICES.md"><Link>THIRD_PARTY_NOTICES.md</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
     <Content Include="..\..\..\Software\oscillatord\third_party\disciplining-minipod\LICENSE"><Link>MINICOD-LICENSE.txt</Link><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></Content>
   </ItemGroup>

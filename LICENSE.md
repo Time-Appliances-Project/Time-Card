@@ -36,9 +36,10 @@ distributed under their own licenses, which take precedence for those files:
   (see `Software/oscillatord/LICENSE` and `Software/oscillatord/UPSTREAM.md`).
 - `Software/oscillatord/third_party/disciplining-minipod/` — Orolia miniCOD
   oscillator-discipline library, licensed under GNU LGPL version 2.1 or later
-  (see its `LICENSE` and `UPSTREAM.md`). The Windows application loads it as a
-  separate DLL; its notices, wrapper, and corresponding source are retained in
-  the repository.
+  (see its `LICENSE` and `UPSTREAM.md`). The Windows Control Center and native
+  service embed a rebuildable DLL image; its notices, wrapper, complete
+  corresponding application/library source, and exact build scripts are
+  retained together in the repository.
 - `FPGA/Binary/Production/Binaries/` and `SOM/FPGA/Binaries/` — FPGA
   bitstreams distributed under the terms in the `LICENSE.md` file in each of
   those directories.

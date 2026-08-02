@@ -3,8 +3,10 @@
 `TimeCardOscillatord.exe` provides oscillator discipline and monitoring on
 Windows without WSL, a Linux virtual machine, `/dev/ptp*`, `chronyd`, or a
 Linux `oscillatord` process. It is an x64 .NET Framework Windows Service. The
-Orolia/Safran miniCOD 3.6.0 algorithm is compiled into the adjacent native
-`TimeCardDiscipline.dll` with `clang-cl`.
+Orolia/Safran miniCOD 3.6.0 algorithm is compiled with `clang-cl` and embedded
+inside `TimeCardOscillatord.exe`; no loose miniCOD DLL is loaded.
+The runtime target is x64 Windows 10 or 11 so the embedded native loader can
+use the restricted modern `LoadLibraryEx` search flags.
 
 The service talks only to the OCP Time Card Windows driver. The same monitoring
 protocol is available to Time Card Control Center locally through a protected
@@ -120,12 +122,13 @@ cd DRV\Windows
 The output is in `TimeCardOscillatord\bin\Release` and includes:
 
 - `TimeCardOscillatord.exe` and its `.config` file;
-- `TimeCardDiscipline.dll`;
 - `TimeCardTimeProvider.dll`, the optional native W32Time input provider;
 - `oscillatord.example.json`;
 - miniCOD license and third-party notices.
 
 No Linux compiler, WSL distribution, or Linux service is used by this build.
+The optional time-provider DLL remains separate because the Windows Time
+Service loads providers through a registered native-DLL interface.
 
 ## Validate and run interactively
 

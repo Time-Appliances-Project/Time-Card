@@ -25,5 +25,15 @@ if errorlevel 1 exit /b 1
 "%MSBUILD%" TimeCardControlCenter\TimeCardControlCenter.csproj /t:Rebuild /p:Configuration=%CONFIG% /p:Platform=AnyCPU /nologo /v:minimal
 if errorlevel 1 exit /b 1
 
+set "OUTPUT=TimeCardControlCenter\bin\%CONFIG%"
+if not exist "%OUTPUT%\TimeCardControlCenter.exe" (
+    echo error: the Control Center executable was not created.
+    exit /b 1
+)
+if exist "%OUTPUT%\TimeCardDiscipline.dll" (
+    echo error: the native miniCOD library was staged as a loose DLL instead of an embedded resource.
+    exit /b 1
+)
+
 echo.
-echo Application: TimeCardControlCenter\bin\%CONFIG%\TimeCardControlCenter.exe
+echo Application: %OUTPUT%\TimeCardControlCenter.exe

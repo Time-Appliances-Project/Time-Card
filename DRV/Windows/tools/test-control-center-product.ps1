@@ -11,6 +11,8 @@ $windowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
     '..\TimeCardControlCenter\MainWindow.xaml.cs') -Raw -Encoding UTF8
 $productWindowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
     '..\TimeCardControlCenter\MainWindow.Product.cs') -Raw -Encoding UTF8
+$oscillatordWindowSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
+    '..\TimeCardControlCenter\MainWindow.Oscillatord.cs') -Raw -Encoding UTF8
 $projectSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
     '..\TimeCardControlCenter\TimeCardControlCenter.csproj') -Raw -Encoding UTF8
 $topologySource = Get-Content -LiteralPath (Join-Path $PSScriptRoot `
@@ -19,6 +21,31 @@ if ($windowXaml -notmatch 'x:Name="OscillatordPage"' -or
     $windowXaml -notmatch 'OscillatordAction_Click' -or
     $windowXaml -notmatch 'CONTROL TOKEN \(NEVER STORED\)') {
     throw 'Control Center product test failed: oscillatord workspace is incomplete.'
+}
+if ($windowXaml -notmatch
+        'x:Name="OscillatordRemoteModeCheckBox"[^>]*IsChecked="False"' -or
+    $windowXaml -notmatch
+        'x:Name="OscillatordRemoteSettingsPanel"\s+Visibility="Collapsed"' -or
+    $windowXaml -notmatch 'Protected named pipe' -or
+    $windowXaml -notmatch 'Remote TCP traffic is not encrypted' -or
+    $oscillatordWindowSource -notmatch
+        'RequestLocalAsync\(request,\s*string\.Empty\)' -or
+    $oscillatordWindowSource -notmatch
+        'RequestAsync\(host,\s*port,\s*request' -or
+    $oscillatordWindowSource -match 'RequestPreferredAsync' -or
+    $oscillatordWindowSource -notmatch
+        'OscillatordTokenBox\.Password\s*=\s*string\.Empty' -or
+    $oscillatordWindowSource -notmatch
+        'SetOscillatordConnectionState\(remote,\s*"DEMO",\s*"AccentBrush"\)' -or
+    $oscillatordWindowSource -notmatch
+        'Demo mode does not send requests to a live oscillatord service' -or
+    $oscillatordWindowSource -match
+        'SetOscillatordConnectionState\(remote,\s*"REJECTED"' -or
+    ([regex]::Matches($oscillatordWindowSource,
+        'ResetOscillatordTelemetry\(remote\);').Count -lt 3) -or
+    $oscillatordWindowSource -notmatch
+        'remote \? "REMOTE . " : "LOCAL . "') {
+    throw 'Control Center product test failed: explicit local/remote oscillatord transport selection is incomplete.'
 }
 if ($windowXaml -notmatch 'Viewport3D\s+x:Name="ImuOrientationViewport"' -or
     $windowXaml -notmatch 'x:Name="ImuVisualizationStatusText"') {

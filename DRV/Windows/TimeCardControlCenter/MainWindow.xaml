@@ -1355,39 +1355,67 @@
                                 <StackPanel>
                                     <TextBlock Text="WINDOWS SERVICE &amp; REMOTE COMPATIBILITY" Style="{StaticResource Eyebrow}" />
                                     <TextBlock Text="oscillatord control &amp; telemetry" Style="{StaticResource PageTitle}" Margin="0,5,0,4" />
-                                    <TextBlock Text="Use the local native Windows service without WSL, or connect to a remote Linux/Windows oscillatord through the compatible protocol."
+                                    <TextBlock Text="The protected local Windows service is the default and needs no IP address. Enable remote mode only to reach oscillatord on another Windows or Linux host."
                                                Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Border Style="{StaticResource StatusChip}" Margin="0,0,10,0">
+                                    <Border Style="{StaticResource StatusChip}">
                                         <TextBlock x:Name="OscillatordConnectionText" Text="NOT CONNECTED"
                                                    Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" />
                                     </Border>
-                                    <Button x:Name="OscillatordRefreshButton" Content="Refresh service" Click="RefreshOscillatord_Click" />
                                 </StackPanel>
                             </Grid>
 
                             <Border Grid.Row="3" Style="{StaticResource Panel}" Margin="0,24,0,18" Padding="16">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="2*" /><ColumnDefinition Width="0.75*" />
-                                        <ColumnDefinition Width="2*" /><ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Margin="0,0,12,0">
-                                        <TextBlock Text="SERVICE HOST OR IP" Style="{StaticResource Label}" Margin="0,0,0,5" />
-                                        <TextBox x:Name="OscillatordHostTextBox" Text="127.0.0.1" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="1" Margin="0,0,12,0">
-                                        <TextBlock Text="TCP PORT" Style="{StaticResource Label}" Margin="0,0,0,5" />
-                                        <TextBox x:Name="OscillatordPortTextBox" Text="2958" />
-                                    </StackPanel>
-                                    <StackPanel Grid.Column="2" Margin="0,0,12,0">
-                                        <TextBlock Text="CONTROL TOKEN (NEVER STORED)" Style="{StaticResource Label}" Margin="0,0,0,5" />
-                                        <PasswordBox x:Name="OscillatordTokenBox" />
-                                    </StackPanel>
-                                    <Button Grid.Column="3" Content="Connect" Click="RefreshOscillatord_Click"
-                                            VerticalAlignment="Bottom" Padding="20,8" />
-                                </Grid>
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,20,0">
+                                            <TextBlock x:Name="OscillatordEndpointModeText" Text="LOCAL WINDOWS SERVICE"
+                                                       Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <TextBlock x:Name="OscillatordEndpointSummaryText"
+                                                       Text="Protected named pipe · no IP address, TCP port, shared token, or WSL required."
+                                                       Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <CheckBox x:Name="OscillatordRemoteModeCheckBox" Grid.Column="1"
+                                                  Content="Remote oscillatord" IsChecked="False"
+                                                  Click="OscillatordRemoteMode_Click"
+                                                  VerticalAlignment="Center" Margin="0,0,18,0"
+                                                  ToolTip="Show TCP settings for an oscillatord service on another machine." />
+                                        <Button x:Name="OscillatordRefreshButton" Grid.Column="2"
+                                                Content="Connect local service" Click="RefreshOscillatord_Click"
+                                                VerticalAlignment="Center" Padding="20,8" />
+                                    </Grid>
+                                    <Grid x:Name="OscillatordRemoteSettingsPanel" Visibility="Collapsed"
+                                          Margin="0,18,0,0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="2*" /><ColumnDefinition Width="0.75*" />
+                                            <ColumnDefinition Width="2*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Margin="0,0,12,0">
+                                            <TextBlock Text="REMOTE HOST OR IP" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <TextBox x:Name="OscillatordHostTextBox" Text="127.0.0.1" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                                            <TextBlock Text="TCP PORT" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <TextBox x:Name="OscillatordPortTextBox" Text="2958" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="CONTROL TOKEN (NEVER STORED)" Style="{StaticResource Label}" Margin="0,0,0,5" />
+                                            <PasswordBox x:Name="OscillatordTokenBox" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Margin="0,10,0,0"
+                                                   Text="Remote TCP traffic is not encrypted. Use a trusted private network or a protected tunnel."
+                                                   Foreground="{DynamicResource GoldBrush}" FontSize="11" TextWrapping="Wrap" />
+                                    </Grid>
+                                </StackPanel>
                             </Border>
 
                             <UniformGrid Grid.Row="4" Columns="4" Margin="0,0,0,18">
@@ -1452,7 +1480,7 @@
                                         <Button Grid.Column="1" Content="Read calibration EEPROM" Tag="7" Click="OscillatordAction_Click"
                                                 Style="{StaticResource SecondaryButton}" VerticalAlignment="Top" />
                                     </Grid>
-                                    <WrapPanel>
+                                    <WrapPanel x:Name="OscillatordGuardedActionsPanel" IsEnabled="False">
                                         <Button Content="Start calibration" Tag="1" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
                                         <Button Content="Save calibration" Tag="8" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />
                                         <Button Content="Start fake holdover" Tag="9" Click="OscillatordAction_Click" Style="{StaticResource DangerButton}" Margin="0,0,8,8" />

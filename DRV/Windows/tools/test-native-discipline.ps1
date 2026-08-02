@@ -4,10 +4,83 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $dll = Join-Path $root `
-    'TimeCardControlCenter\bin\Release\TimeCardDiscipline.dll'
+    'TimeCardDiscipline\bin\Release\TimeCardDiscipline.dll'
 if (-not (Test-Path -LiteralPath $dll)) {
     throw "Native discipline DLL not found: $dll"
 }
+$application = Join-Path $root `
+    'TimeCardControlCenter\bin\Release\TimeCardControlCenter.exe'
+if (-not (Test-Path -LiteralPath $application)) {
+    throw "Control Center executable not found: $application"
+}
+$sidecar = Join-Path (Split-Path -Parent $application) `
+    'TimeCardDiscipline.dll'
+if (Test-Path -LiteralPath $sidecar) {
+    throw 'The Control Center still has a loose TimeCardDiscipline.dll sidecar.'
+}
+
+$assembly = [Reflection.Assembly]::LoadFrom($application)
+$resourceName = 'TimeCardControlCenter.Native.TimeCardDiscipline.dll'
+if ($assembly.GetManifestResourceNames() -notcontains $resourceName) {
+    throw 'The native miniCOD DLL is not embedded in the Control Center.'
+}
+$loaderType = $assembly.GetType(
+    'TimeCardControlCenter.NativeDisciplineLibrary', $true)
+$loaderFlags = [Reflection.BindingFlags]'Static,NonPublic'
+$ensureLoaded = $loaderType.GetMethod('EnsureLoaded', $loaderFlags)
+$loadedPathProperty = $loaderType.GetProperty('LoadedPath', $loaderFlags)
+if (-not $ensureLoaded -or -not $loadedPathProperty) {
+    throw 'The embedded native-library loader contract is incomplete.'
+}
+$ensureLoaded.Invoke($null, $null)
+$loadedPath = [string]$loadedPathProperty.GetValue($null, $null)
+if (-not (Test-Path -LiteralPath $loadedPath -PathType Leaf)) {
+    throw "The embedded native library was not staged: $loadedPath"
+}
+$resourceStream = $assembly.GetManifestResourceStream($resourceName)
+$sha256 = [Security.Cryptography.SHA256]::Create()
+try {
+    $resourceHash = [BitConverter]::ToString(
+        $sha256.ComputeHash($resourceStream)).Replace('-', '')
+} finally {
+    $sha256.Dispose()
+    $resourceStream.Dispose()
+}
+$loadedHash = (Get-FileHash -LiteralPath $loadedPath `
+    -Algorithm SHA256).Hash
+if ($loadedHash -ne $resourceHash) {
+    throw 'The staged native library does not match the embedded resource.'
+}
+$algorithmType = $assembly.GetType(
+    'TimeCardControlCenter.NativeDisciplineAlgorithm', $true)
+$create = $algorithmType.GetMethod('Create',
+    [Reflection.BindingFlags]'Static,Public', $null,
+    [type[]]@([uint32], [byte[]]), $null)
+if (-not $create) {
+    throw 'The native discipline creation entry point was not found.'
+}
+$createArguments = New-Object object[] 2
+$createArguments[0] = [uint32]32768
+$createArguments[1] = $null
+$embeddedAlgorithm = $create.Invoke($null, $createArguments)
+try {
+    if (-not $embeddedAlgorithm) {
+        throw 'The embedded native miniCOD engine did not start.'
+    }
+    $embeddedParameters = [byte[]]$algorithmType.GetMethod(
+        'GetParameters', [Reflection.BindingFlags]'Instance,Public').Invoke(
+            $embeddedAlgorithm, $null)
+    if ($embeddedParameters.Length -ne 512 -or
+        $embeddedParameters[0] -ne [byte][char]'O' -or
+        $embeddedParameters[0x90] -ne [byte][char]'O') {
+        throw 'The embedded native miniCOD parameter ABI is invalid.'
+    }
+} finally {
+    if ($embeddedAlgorithm) {
+        ([IDisposable]$embeddedAlgorithm).Dispose()
+    }
+}
+
 $escapedDll = ([IO.Path]::GetFullPath($dll)).Replace('\', '\\')
 $source = @"
 using System;
@@ -107,9 +180,6 @@ public static class NativeDisciplineSmoke
 Add-Type -TypeDefinition $source -Language CSharp
 $result = [NativeDisciplineSmoke]::Run()
 
-$application = Join-Path $root `
-    'TimeCardControlCenter\bin\Release\TimeCardControlCenter.exe'
-$assembly = [Reflection.Assembly]::LoadFrom($application)
 $managedAbiSizes = @{
     TimeCardCapabilitiesRaw = 64
     TimeCardPhaseSampleRaw = 80

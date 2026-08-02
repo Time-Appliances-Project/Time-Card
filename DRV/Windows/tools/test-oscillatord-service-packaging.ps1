@@ -62,8 +62,15 @@ Assert-Contains $build '/p:PlatformTarget=x64' `
     'The Windows service build is not pinned to x64.'
 Assert-Contains $build 'build-discipline-library\.cmd' `
     'The native miniCOD dependency is not built with the service.'
-Assert-Contains $build 'TimeCardDiscipline\.dll' `
-    'The native miniCOD DLL is not staged beside the service.'
+Assert-Contains $project `
+    '<EmbeddedResource Include="\.\.\\TimeCardDiscipline\\bin\\Release\\TimeCardDiscipline\.dll">' `
+    'The native miniCOD DLL is not embedded in the service.'
+Assert-Contains $project `
+    '<LogicalName>TimeCardControlCenter\.Native\.TimeCardDiscipline\.dll</LogicalName>' `
+    'The service native-resource name does not match the loader contract.'
+Assert-True (-not ($build -match
+        'copy\s+/y\s+"TimeCardDiscipline\\bin\\Release\\TimeCardDiscipline\.dll"')) `
+    'The service build still stages a loose miniCOD DLL.'
 Assert-Contains $project '<TargetFrameworkVersion>v4\.7\.2</TargetFrameworkVersion>' `
     'The service must target .NET Framework 4.7.2.'
 Assert-Contains $project '<PlatformTarget>x64</PlatformTarget>' `
@@ -81,6 +88,16 @@ Assert-Contains $install '#Requires -RunAsAdministrator' `
     'The installer is not explicitly elevated.'
 Assert-Contains $install "OcpTimeCardOscillatord" `
     'The installer uses the wrong service name.'
+Assert-True (-not ($install -match 'Native discipline library not found')) `
+    'The service installer still requires a loose miniCOD DLL.'
+Assert-Contains $install `
+    "obsoleteNames\s*=\s*@\('TimeCardDiscipline\.dll'[^)]*'TimeCardDiscipline\.pdb'" `
+    'The service upgrade does not remove obsolete loose miniCOD files.'
+Assert-Contains $install `
+    '\$obsoleteNames\s+-notcontains\s+\$_\.Name' `
+    'The service installer can re-copy an obsolete loose miniCOD file.'
+Assert-Contains $install 'foreach\s*\(\$obsoleteName\s+in\s+\$obsoleteNames\)' `
+    'The service upgrade does not delete every obsolete loose miniCOD file.'
 Assert-Contains $install "eventSource = 'OCP Time Card Oscillatord'" `
     'The installer registers the wrong Event Log source.'
 Assert-Contains $serviceLog `

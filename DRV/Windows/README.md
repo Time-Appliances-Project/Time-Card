@@ -233,6 +233,12 @@ to the ART 24c08 layout (configuration at `0x000`, temperature table at `0x090`)
 and a host backup under `%ProgramData%\OCP Time Card`; writes require version-1
 headers and are verified byte for byte.
 
+The Control Center and native `OcpTimeCardOscillatord` Release builds carry
+this native library as a verified embedded resource, so neither loads a loose
+miniCOD DLL. The service replaces the Linux/WSL daemon for continuous Windows
+discipline. WSL is needed only when intentionally building, running, or
+testing the separate Linux driver and Linux tools.
+
 u-blox receiver reconfiguration is deliberately separate from ordinary UART
 monitoring. It defaults off and requires the explicit
 `gnssReceiverReconfigure` service setting. When enabled, the service detects the
@@ -254,6 +260,12 @@ separate by card identity, and publishes telemetry over a protected local named
 pipe plus an optional compatible TCP endpoint. Read-EEPROM responses include
 presence/validity, length, SHA-256, and the exact binary image as JSON
 `data_base64` for read-only diagnostics.
+
+The Control Center uses the protected local service pipe by default and hides
+all network settings. Its optional **Remote oscillatord** mode reveals the host,
+TCP port, and non-persistent token and uses explicit TCP for a remote Windows or
+Linux service. TCP is unencrypted and should remain on a trusted network or in
+a protected tunnel.
 
 On a multi-card host, `oscillatord.json` can select the target by the preferred
 six-byte `deviceSerial`, by an exact enumerated `devicePath`, or by both for a
@@ -370,6 +382,7 @@ JSON, or binary export.
 ```powershell
 .\build-gui.cmd release
 .\TimeCardControlCenter\bin\Release\TimeCardControlCenter.exe
+.\package-control-center.ps1 -SkipBuild
 ```
 
 The application can restart itself with administrator rights when the driver

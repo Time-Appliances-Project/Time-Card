@@ -308,41 +308,100 @@ namespace TimeCardControlCenter
             await RefreshOscillatordAsync(true);
         }
 
+        private void OscillatordRemoteMode_Click(object sender, RoutedEventArgs e)
+        {
+            ApplyOscillatordConnectionMode();
+        }
+
+        private bool IsRemoteOscillatordMode
+        {
+            get
+            {
+                return OscillatordRemoteModeCheckBox.IsChecked == true;
+            }
+        }
+
+        private void ApplyOscillatordConnectionMode()
+        {
+            bool remote = IsRemoteOscillatordMode;
+            OscillatordRemoteSettingsPanel.Visibility = remote ?
+                Visibility.Visible : Visibility.Collapsed;
+            OscillatordEndpointModeText.Text = remote ?
+                "REMOTE OSCILLATORD" : "LOCAL WINDOWS SERVICE";
+            OscillatordEndpointSummaryText.Text = remote ?
+                "Explicit TCP connection to oscillatord on another Windows or Linux host." :
+                "Protected named pipe · no IP address, TCP port, shared token, or WSL required.";
+            OscillatordRefreshButton.Content = remote ?
+                "Connect remote" : "Connect local service";
+            if (!remote)
+                OscillatordTokenBox.Password = string.Empty;
+
+            SetOscillatordConnectionState(remote, "NOT CHECKED", "MutedBrush");
+            ResetOscillatordTelemetry(remote);
+            OscillatordResultText.Text = remote ?
+                "Remote mode selected. Enter the TCP endpoint, then connect." :
+                "Local mode selected. Connect to query the protected Windows service pipe.";
+        }
+
         private async Task RefreshOscillatordAsync(bool showError)
         {
             if (oscillatordRefreshing)
                 return;
+            bool remote = IsRemoteOscillatordMode;
             if (productSettings != null && productSettings.DemoMode)
             {
-                ApplyOscillatordSnapshot(CreateDemoOscillatordSnapshot());
-                OscillatordConnectionText.Text = "DEMO";
+                ApplyOscillatordSnapshot(CreateDemoOscillatordSnapshot(), remote);
+                SetOscillatordConnectionState(remote, "DEMO", "AccentBrush");
+                OscillatordGuardedActionsPanel.IsEnabled = false;
                 OscillatordResultText.Text = "Demo service telemetry · no network request was sent.";
                 return;
             }
             oscillatordRefreshing = true;
             OscillatordRefreshButton.IsEnabled = false;
-            OscillatordConnectionText.Text = "CONNECTING";
-            OscillatordConnectionText.Foreground = (Brush)FindResource("GoldBrush");
+            OscillatordRemoteModeCheckBox.IsEnabled = false;
+            OscillatordRemoteSettingsPanel.IsEnabled = false;
+            SetOscillatordConnectionState(remote, "CHECKING", "GoldBrush");
+            bool serviceResponded = false;
             try
             {
-                int port = ParseOscillatordPort();
-                OscillatordSnapshot snapshot = await oscillatordClient.RequestPreferredAsync(
-                    OscillatordHostTextBox.Text, port, OscillatordRequest.Status,
-                    OscillatordTokenBox.Password);
-                ApplyOscillatordSnapshot(snapshot);
-                OscillatordResultText.Text = string.Format(CultureInfo.InvariantCulture,
-                    "{0:u}  Connected to {1}:{2}. Protocol {3}; {4}.",
-                    DateTime.UtcNow, OscillatordHostTextBox.Text.Trim(), port,
-                    snapshot.ProtocolVersion,
-                    snapshot.ControlEnabled ? "control enabled by service" : "read-only service");
-                Log(string.Format(CultureInfo.InvariantCulture,
-                    "oscillatord {0} connected at {1}:{2}.",
-                    snapshot.Version ?? "unknown", OscillatordHostTextBox.Text.Trim(), port));
+                string host;
+                int port;
+                OscillatordSnapshot snapshot = await RequestOscillatordAsync(
+                    OscillatordRequest.Status, remote, out host, out port);
+                serviceResponded = true;
+                if (!string.IsNullOrEmpty(snapshot.Error))
+                {
+                    SetOscillatordConnectionState(remote, "ERROR", "DangerBrush");
+                    throw new InvalidOperationException(snapshot.Error);
+                }
+                ApplyOscillatordSnapshot(snapshot, remote);
+                SetOscillatordConnectionState(remote, "REACHABLE", "AccentBrush");
+                if (remote)
+                {
+                    OscillatordResultText.Text = string.Format(CultureInfo.InvariantCulture,
+                        "{0:u}  Remote {1}:{2} responded over TCP. Protocol {3}; {4}.",
+                        DateTime.UtcNow, host, port, snapshot.ProtocolVersion,
+                        snapshot.ControlEnabled ? "token-authorized control enabled" : "read-only service");
+                    Log(string.Format(CultureInfo.InvariantCulture,
+                        "oscillatord {0} responded over TCP at {1}:{2}.",
+                        snapshot.Version ?? "unknown", host, port));
+                }
+                else
+                {
+                    OscillatordResultText.Text = string.Format(CultureInfo.InvariantCulture,
+                        "{0:u}  Local Windows service responded over the protected named pipe. Protocol {1}; {2}.",
+                        DateTime.UtcNow, snapshot.ProtocolVersion,
+                        HasAdministratorAccess() ? "administrator control available" : "telemetry is read-only until the app is elevated");
+                    Log(string.Format(CultureInfo.InvariantCulture,
+                        "oscillatord {0} responded through the protected local Windows service pipe.",
+                        snapshot.Version ?? "unknown"));
+                }
             }
             catch (Exception ex)
             {
-                OscillatordConnectionText.Text = "UNAVAILABLE";
-                OscillatordConnectionText.Foreground = (Brush)FindResource("DangerBrush");
+                ResetOscillatordTelemetry(remote);
+                if (!serviceResponded)
+                    SetOscillatordConnectionState(remote, "UNAVAILABLE", "DangerBrush");
                 OscillatordResultText.Text = ex.Message;
                 if (showError)
                     MessageBox.Show(this, ex.Message, "oscillatord connection failed",
@@ -351,12 +410,23 @@ namespace TimeCardControlCenter
             finally
             {
                 OscillatordRefreshButton.IsEnabled = true;
+                OscillatordRemoteModeCheckBox.IsEnabled = true;
+                OscillatordRemoteSettingsPanel.IsEnabled = true;
                 oscillatordRefreshing = false;
             }
         }
 
         private async void OscillatordAction_Click(object sender, RoutedEventArgs e)
         {
+            if (oscillatordRefreshing)
+                return;
+            if (productSettings != null && productSettings.DemoMode)
+            {
+                OscillatordGuardedActionsPanel.IsEnabled = false;
+                OscillatordResultText.Text =
+                    "Demo mode does not send requests to a live oscillatord service.";
+                return;
+            }
             Button button = sender as Button;
             int requestValue;
             if (button == null || !int.TryParse(Convert.ToString(button.Tag,
@@ -375,23 +445,45 @@ namespace TimeCardControlCenter
                     return;
             }
 
+            bool remote = IsRemoteOscillatordMode;
             oscillatordRefreshing = true;
             OscillatordRefreshButton.IsEnabled = false;
+            OscillatordRemoteModeCheckBox.IsEnabled = false;
+            OscillatordRemoteSettingsPanel.IsEnabled = false;
+            bool serviceResponded = false;
             try
             {
-                OscillatordSnapshot snapshot = await oscillatordClient.RequestPreferredAsync(
-                    OscillatordHostTextBox.Text, ParseOscillatordPort(), request,
-                    OscillatordTokenBox.Password);
-                ApplyOscillatordSnapshot(snapshot);
+                string host;
+                int port;
+                OscillatordSnapshot snapshot = await RequestOscillatordAsync(
+                    request, remote, out host, out port);
+                serviceResponded = true;
                 if (!string.IsNullOrEmpty(snapshot.Error))
+                {
+                    SetOscillatordConnectionState(remote, "REACHABLE", "AccentBrush");
                     throw new InvalidOperationException(snapshot.Error);
+                }
+                ApplyOscillatordSnapshot(snapshot, remote);
+                SetOscillatordConnectionState(remote, "REACHABLE", "AccentBrush");
                 OscillatordResultText.Text = string.Format(CultureInfo.InvariantCulture,
-                    "{0:u}  Service response: {1}.", DateTime.UtcNow,
+                    "{0:u}  {1} service response: {2}.", DateTime.UtcNow,
+                    remote ? host + ":" + port.ToString(CultureInfo.InvariantCulture) : "Local",
                     string.IsNullOrEmpty(snapshot.ActionRequested) ? "accepted" : snapshot.ActionRequested);
                 Log("oscillatord action: " + (snapshot.ActionRequested ?? request.ToString()));
             }
             catch (Exception ex)
             {
+                ResetOscillatordTelemetry(remote);
+                if (!serviceResponded)
+                    SetOscillatordConnectionState(remote, "UNAVAILABLE", "DangerBrush");
+                else
+                {
+                    SetOscillatordConnectionState(remote, "REACHABLE", "AccentBrush");
+                    OscillatordControlPolicyText.Text =
+                        "The service responded but rejected the requested operation.";
+                    OscillatordControlPolicyText.Foreground =
+                        (Brush)FindResource("GoldBrush");
+                }
                 OscillatordResultText.Text = ex.Message;
                 MessageBox.Show(this, ex.Message, "oscillatord operation failed",
                     MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -399,8 +491,28 @@ namespace TimeCardControlCenter
             finally
             {
                 OscillatordRefreshButton.IsEnabled = true;
+                OscillatordRemoteModeCheckBox.IsEnabled = true;
+                OscillatordRemoteSettingsPanel.IsEnabled = true;
                 oscillatordRefreshing = false;
             }
+        }
+
+        private Task<OscillatordSnapshot> RequestOscillatordAsync(
+            OscillatordRequest request, bool remote, out string host, out int port)
+        {
+            if (!remote)
+            {
+                host = string.Empty;
+                port = 0;
+                return oscillatordClient.RequestLocalAsync(request, string.Empty);
+            }
+
+            host = OscillatordHostTextBox.Text.Trim();
+            if (string.IsNullOrEmpty(host))
+                throw new InvalidOperationException("Remote oscillatord host is required.");
+            port = ParseOscillatordPort();
+            return oscillatordClient.RequestAsync(host, port, request,
+                OscillatordTokenBox.Password);
         }
 
         private int ParseOscillatordPort()
@@ -412,18 +524,66 @@ namespace TimeCardControlCenter
             return port;
         }
 
-        private void ApplyOscillatordSnapshot(OscillatordSnapshot snapshot)
+        private void SetOscillatordConnectionState(bool remote, string state,
+            string brushKey)
         {
-            OscillatordConnectionText.Text = "LIVE";
-            OscillatordConnectionText.Foreground = (Brush)FindResource("AccentBrush");
+            OscillatordConnectionText.Text = (remote ? "REMOTE · " : "LOCAL · ") + state;
+            OscillatordConnectionText.Foreground = (Brush)FindResource(brushKey);
+        }
+
+        private void ResetOscillatordTelemetry(bool remote)
+        {
+            OscillatordVersionText.Text = "—";
+            OscillatordStateText.Text = "—";
+            OscillatordProgressText.Text = "Awaiting service";
+            OscillatordOffsetText.Text = "—";
+            OscillatordClockClassText.Text = "Clock class —";
+            OscillatordOscillatorText.Text = "—";
+            OscillatordLockText.Text = "Lock unknown";
+            OscillatordLockText.Foreground = (Brush)FindResource("MutedBrush");
+            OscillatordGnssText.Text = "—";
+            OscillatordGnssText.Foreground = (Brush)FindResource("MutedBrush");
+            OscillatordGnssDetailText.Text = "Awaiting GNSS";
+            OscillatordFineText.Text = "—";
+            OscillatordCoarseText.Text = "—";
+            OscillatordTemperatureText.Text = "—";
+            OscillatordHoldoverText.Text = "—";
+            OscillatordSatellitesText.Text = "—";
+            OscillatordTimeAccuracyText.Text = "—";
+            OscillatordSurveyText.Text = "—";
+            OscillatordLeapText.Text = "—";
+            OscillatordAntennaText.Text = "—";
+            OscillatordGuardedActionsPanel.IsEnabled = false;
+            OscillatordControlPolicyText.Text = remote ?
+                "Connect to read the remote TCP control policy." :
+                "Connect locally to read telemetry. Guarded changes require Windows Administrator access.";
+            OscillatordControlPolicyText.Foreground =
+                (Brush)FindResource("MutedBrush");
+        }
+
+        private void ApplyOscillatordSnapshot(OscillatordSnapshot snapshot,
+            bool remote)
+        {
             OscillatordVersionText.Text = string.Format(CultureInfo.InvariantCulture,
                 "{0} {1} · protocol {2}", snapshot.Service ?? "oscillatord",
                 snapshot.Version ?? "unknown", snapshot.ProtocolVersion);
-            OscillatordControlPolicyText.Text = snapshot.ControlEnabled ?
-                "The service permits token-authorized state changes. This client still confirms every operation." :
-                "TCP control is read-only. Local Windows administrators can use the protected named pipe for guarded operations.";
+            bool controlAllowed = remote ? snapshot.ControlEnabled :
+                HasAdministratorAccess();
+            if (remote)
+            {
+                OscillatordControlPolicyText.Text = snapshot.ControlEnabled ?
+                    "Remote TCP permits token-authorized state changes. This client confirms every operation; transport is not encrypted." :
+                    "Remote TCP is read-only. Use the protected local Windows pipe for administrator-guarded operations.";
+            }
+            else
+            {
+                OscillatordControlPolicyText.Text = controlAllowed ?
+                    "Protected local pipe. This elevated app can request guarded state changes; every operation is still confirmed." :
+                    "Protected local pipe permits telemetry. Restart the app as Administrator to enable guarded state changes; no token is used.";
+            }
             OscillatordControlPolicyText.Foreground = (Brush)FindResource(
-                snapshot.ControlEnabled ? "GoldBrush" : "MutedBrush");
+                controlAllowed ? "GoldBrush" : "MutedBrush");
+            OscillatordGuardedActionsPanel.IsEnabled = controlAllowed;
 
             OscillatordDisciplining discipline = snapshot.Disciplining;
             OscillatordStateText.Text = discipline == null ? "—" :

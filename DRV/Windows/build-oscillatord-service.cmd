@@ -45,9 +45,6 @@ if errorlevel 1 exit /b 1
 
 set "OUTPUT=TimeCardOscillatord\bin\%CONFIG%"
 if not exist "%OUTPUT%" mkdir "%OUTPUT%"
-copy /y "TimeCardDiscipline\bin\Release\TimeCardDiscipline.dll" "%OUTPUT%\TimeCardDiscipline.dll" >nul
-if errorlevel 1 exit /b 1
-if exist "TimeCardDiscipline\bin\Release\TimeCardDiscipline.pdb" copy /y "TimeCardDiscipline\bin\Release\TimeCardDiscipline.pdb" "%OUTPUT%\TimeCardDiscipline.pdb" >nul
 copy /y "TimeCardDiscipline\THIRD_PARTY_NOTICES.md" "%OUTPUT%\THIRD_PARTY_NOTICES.md" >nul
 if errorlevel 1 exit /b 1
 copy /y "..\..\Software\oscillatord\third_party\disciplining-minipod\LICENSE" "%OUTPUT%\MINICOD-LICENSE.txt" >nul
@@ -58,6 +55,10 @@ if exist "TimeCardTimeProvider\bin\Release\TimeCardTimeProvider.pdb" copy /y "Ti
 
 if not exist "%OUTPUT%\TimeCardOscillatord.exe" (
     echo error: service build did not create %OUTPUT%\TimeCardOscillatord.exe
+    exit /b 1
+)
+if exist "%OUTPUT%\TimeCardDiscipline.dll" (
+    echo error: the native miniCOD library was staged as a loose DLL instead of an embedded resource.
     exit /b 1
 )
 

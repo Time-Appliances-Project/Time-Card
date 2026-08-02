@@ -88,11 +88,6 @@ $sourceExecutable = Join-Path $SourceDirectory 'TimeCardOscillatord.exe'
 if (-not (Test-Path -LiteralPath $sourceExecutable -PathType Leaf)) {
     throw "Service executable not found: $sourceExecutable"
 }
-$nativeLibrary = Join-Path $SourceDirectory 'TimeCardDiscipline.dll'
-if (-not (Test-Path -LiteralPath $nativeLibrary -PathType Leaf)) {
-    throw "Native discipline library not found: $nativeLibrary"
-}
-
 # An existing W32Time process can have the in-tree provider DLL mapped. Only
 # pause W32Time when this exact provider registration resolves below our
 # product directory; an unrelated or externally managed registration must not
@@ -143,13 +138,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $extensions = @('.exe', '.dll', '.config', '.json', '.md', '.txt', '.pdb')
+$obsoleteNames = @('TimeCardDiscipline.dll', 'TimeCardDiscipline.pdb')
 $releaseFiles = Get-ChildItem -LiteralPath $SourceDirectory -File |
-    Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() }
+    Where-Object {
+        $extensions -contains $_.Extension.ToLowerInvariant() -and
+        $obsoleteNames -notcontains $_.Name
+    }
 try {
     if ($registeredProviderOwnedByProduct -and $windowsTimeWasRunning) {
         Write-Host 'Stopping Windows Time to update its loaded Time Card provider...'
         $windowsTimeStoppedForUpdate = $true
         Stop-ServiceForUpdate $windowsTime
+    }
+    foreach ($obsoleteName in $obsoleteNames) {
+        $obsoletePath = Join-Path $installDirectory $obsoleteName
+        if (Test-Path -LiteralPath $obsoletePath -PathType Leaf) {
+            Remove-Item -LiteralPath $obsoletePath -Force
+        }
     }
     foreach ($file in $releaseFiles) {
         Copy-Item -LiteralPath $file.FullName -Destination `

@@ -99,10 +99,9 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="..\TimeCardDiscipline\bin\Release\TimeCardDiscipline.dll">
-      <Link>TimeCardDiscipline.dll</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <EmbeddedResource Include="..\TimeCardDiscipline\bin\Release\TimeCardDiscipline.dll">
+      <LogicalName>TimeCardControlCenter.Native.TimeCardDiscipline.dll</LogicalName>
+    </EmbeddedResource>
     <Content Include="..\TimeCardDiscipline\THIRD_PARTY_NOTICES.md">
       <Link>THIRD_PARTY_NOTICES.md</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

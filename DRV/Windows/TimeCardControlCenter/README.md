@@ -137,7 +137,9 @@ explicitly chooses a new divisor.
 ## Build
 
 Visual Studio 2022 with the managed desktop build tools and the .NET Framework
-4.7.2 targeting pack is required. No NuGet packages are used.
+4.7.2 targeting pack is required. The runtime target is x64 Windows 10 or 11;
+the hardened native loader uses the modern restricted `LoadLibraryEx` search
+flags. No NuGet packages are used.
 
 From a regular command prompt or PowerShell window:
 
@@ -150,6 +152,12 @@ The executable is written to:
 
 ```text
 TimeCardControlCenter\bin\Release\TimeCardControlCenter.exe
+```
+
+Create the portable ZIP, including the required license and notice files, with:
+
+```powershell
+.\package-control-center.ps1 -SkipBuild
 ```
 
 ## Run
@@ -535,25 +543,38 @@ not monitor GNSS port 0 at the same time. **Bypass survey** matches upstream
 `gnss-bypass-survey`; it is off by default and adds an explicit warning to the
 start confirmation.
 
-`TimeCardDiscipline.dll` must remain beside `TimeCardControlCenter.exe`; the
-Release build copies it automatically. `tools\test-native-discipline.ps1`
-exercises the native ABI, one process step, and exact 512-byte EEPROM
-serialization without requiring hardware.
+The Release build embeds `TimeCardDiscipline.dll` inside
+`TimeCardControlCenter.exe`, so the portable application no longer depends on
+a loose native DLL beside it. Windows still requires a native PE image on disk
+while loading it; at first use the application extracts the exact embedded
+bytes into a SHA-256-versioned cache, verifies them, loads by absolute path,
+and holds the file read-locked for the process lifetime. Non-elevated sessions
+use the user's LocalAppData; elevated sessions and the Windows service use the
+administrator-protected Program Files tree so a medium-integrity process
+cannot replace code before it is loaded.
+`tools\test-native-discipline.ps1` exercises that embedded-resource loader,
+the native ABI, one process step, and exact 512-byte EEPROM serialization
+without requiring hardware.
 
 ### Native Windows oscillatord and compatible remote service
 
-The lower half of the same workspace connects first to the protected local
-`OcpTimeCardOscillatord` Windows-service pipe. No WSL or Linux daemon is needed.
-The same client remains wire-compatible with the integrated Linux
+The lower half of the same workspace defaults explicitly to the protected local
+`OcpTimeCardOscillatord` Windows-service pipe. Local mode has no host, IP port,
+or shared-token setting, and no WSL or Linux daemon is needed. Selecting
+**Remote oscillatord** reveals the host, TCP port, and temporary control-token
+fields and forces a TCP request—even when the remote host is `127.0.0.1`—so the
+reported transport is never ambiguous. The same client remains wire-compatible
+with the integrated Linux
 [`oscillatord`](../../../Software/oscillatord) TCP monitoring protocol. It
 shows service and protocol versions, phase offset and clock class, disciplining
 state and convergence, holdover readiness, mRO-50 lock/temperature/fine/coarse
 controls, and GNSS fix, satellites, accuracy, survey, leap-second, and antenna
 state. The native service and Linux service both use TCP port 2958 by default.
 
-The token is held only in the password field for the current process and is
-never written to application settings, telemetry exports, support bundles, or
-logs. Status and calibration-EEPROM reads work against a read-only service.
+The remote token is held only in the password field for the current process,
+is cleared when returning to local mode, and is never written to application
+settings, telemetry exports, support bundles, or logs. Status and
+calibration-EEPROM reads work against a read-only service.
 Calibration, EEPROM saves, fake holdover, GNSS start/stop/reset, and mRO-50
 coarse changes require confirmation in the app and independent authorization
 by the caller's local Administrator token on the Windows pipe, or by
