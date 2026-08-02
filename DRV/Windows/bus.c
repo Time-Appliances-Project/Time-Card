@@ -45,6 +45,14 @@ static const TIMECARD_CHILD_DESCRIPTION TimeCardChildren[] = {
       L"Time Card PCIe Precision Time Measurement (PTM)" }
 };
 
+/* ART has timestamp capture inputs but no signal-generator cores. */
+static const TIMECARD_CHILD_DESCRIPTION TimeCardArtTimestampChild = {
+    TimeCardSubsystemTimingIo,
+    L"TIMECARD\\TIMESTAMP_INPUTS",
+    L"TIMESTAMP_INPUTS",
+    L"Time Card Timestamp Inputs"
+};
+
 C_ASSERT(ARRAYSIZE(TimeCardChildren) == TIMECARD_SUBSYSTEM_COUNT);
 
 static NTSTATUS
@@ -139,6 +147,9 @@ FailInit:
 NTSTATUS
 TimeCardCreateSubsystemDevices(PDEVICE_CONTEXT context)
 {
+    const TIMECARD_CHILD_DESCRIPTION *description;
+    NTSTATUS firstFailure = STATUS_SUCCESS;
+    BOOLEAN allCreated = TRUE;
     ULONG i;
     NTSTATUS status;
 
@@ -152,16 +163,23 @@ TimeCardCreateSubsystemDevices(PDEVICE_CONTEXT context)
         }
         if (context->ChildDevices[i] != NULL)
             continue;
-        status = TimeCardCreateChild(context->Device, &TimeCardChildren[i],
+        description = &TimeCardChildren[i];
+        if (context->BoardProfile == TIMECARD_BOARD_ART &&
+            description->Subsystem == TimeCardSubsystemTimingIo) {
+            description = &TimeCardArtTimestampChild;
+        }
+        status = TimeCardCreateChild(context->Device, description,
                                      &context->ChildDevices[i]);
         if (!NT_SUCCESS(status)) {
             KdPrint(("timecard: failed to create child %lu, status 0x%08lx\n",
                      i, status));
-            return status;
+            if (NT_SUCCESS(firstFailure))
+                firstFailure = status;
+            allCreated = FALSE;
         }
     }
-    context->HierarchyCreated = TRUE;
-    return STATUS_SUCCESS;
+    context->HierarchyCreated = allCreated;
+    return firstFailure;
 }
 
 static NTSTATUS

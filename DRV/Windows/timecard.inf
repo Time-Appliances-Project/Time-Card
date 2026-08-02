@@ -56,6 +56,7 @@ timecard-ptm.ico = 1
 %Nmea.DeviceDesc%         = TimeCard_Nmea, TIMECARD\UART_NMEA
 %Sma.DeviceDesc%          = TimeCard_Sma, TIMECARD\SMA
 %TimingIo.DeviceDesc%     = TimeCard_TimingIo, TIMECARD\TIMING_IO
+%TimestampInputs.DeviceDesc% = TimeCard_TimingIo, TIMECARD\TIMESTAMP_INPUTS
 %I2c.DeviceDesc%          = TimeCard_I2c, TIMECARD\I2C
 %Flash.DeviceDesc%        = TimeCard_Flash, TIMECARD\FLASH
 %Ptm.DeviceDesc%          = TimeCard_Ptm, TIMECARD\PTM
@@ -100,9 +101,9 @@ HKR, "Interrupt Management\MessageSignaledInterruptProperties", MSISupported, 0x
 HKR, "Interrupt Management\MessageSignaledInterruptProperties", MessageNumberLimit, 0x10001, 64
 
 [TimeCard_Hierarchy.AddReg]
-; Fail closed on first install. The elevated control tool enables child PDOs
-; live and persists this value only after their health has been verified.
-HKR, , EnableSubsystemDevices, 0x00010003, 0
+; Descriptive raw child PDOs are fail-open and do not touch card hardware.
+; NOCLOBBER preserves an administrator's explicit persisted override.
+HKR, , EnableSubsystemDevices, 0x00010003, 1
 
 [TimeCard_Device.NT.Services]
 AddService = timecard, %SPSVCINST_ASSOCSERVICE%, TimeCard_Service_Inst
@@ -249,6 +250,7 @@ AtomicClock.DeviceDesc       = "Time Card Atomic Clock (UART)"
 Nmea.DeviceDesc              = "Time Card NMEA Output (UART)"
 Sma.DeviceDesc               = "Time Card SMA Inputs and Outputs"
 TimingIo.DeviceDesc          = "Time Card Timestamp and Signal Generators"
+TimestampInputs.DeviceDesc   = "Time Card Timestamp Inputs"
 I2c.DeviceDesc               = "Time Card I2C Controller"
 Flash.DeviceDesc             = "Time Card FPGA Firmware and SPI Flash"
 Ptm.DeviceDesc               = "Time Card PCIe Precision Time Measurement (PTM)"

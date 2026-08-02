@@ -465,6 +465,7 @@ typedef enum _TIMECARD_SUBSYSTEM {
      TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemGnss) | \
      TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemAtomicClock) | \
      TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemSma) | \
+     TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemTimingIo) | \
      TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemI2c) | \
      TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemFlash))
 

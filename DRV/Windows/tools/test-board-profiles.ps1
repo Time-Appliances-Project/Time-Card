@@ -15,6 +15,7 @@ $projectSource = Get-Content -Raw (Join-Path $windows 'timecard.vcxproj')
 $abiSource = Get-Content -Raw (Join-Path $windows 'include\timecard_ioctl.h')
 $mroSource = Get-Content -Raw (Join-Path $windows 'mro50.c')
 $verifySource = Get-Content -Raw (Join-Path $windows 'verify.ps1')
+$installSource = Get-Content -Raw (Join-Path $windows 'install.ps1')
 
 function Assert-Match {
     param(
@@ -40,6 +41,12 @@ Assert-Match $infSource 'PCI\\VEN_18D4&DEV_1008' `
     'Windows Celestica PCI match is missing'
 Assert-Match $infSource 'PCI\\VEN_1AD7&DEV_A000' `
     'Windows Orolia ART PCI match is missing'
+Assert-Match $infSource `
+    'TIMECARD\\TIMESTAMP_INPUTS[\s\S]*Time Card Timestamp Inputs' `
+    'Windows Orolia ART timestamp-input child is missing'
+Assert-Match $infSource `
+    'EnableSubsystemDevices,\s*0x00010003,\s*1' `
+    'the INF disables subsystem devices on first installation'
 
 $linuxArtOffsets = @(
     '\.offset\s*=\s*0x01000000,\s*\.size\s*=\s*0x10000',
@@ -91,6 +98,9 @@ Assert-Match $projectSource 'mro50\.c' `
     'mRO-50 implementation is not in the driver build'
 Assert-Match $headerSource 'TIMECARD_SUBSYSTEM_MASK_ART' `
     'ART subsystem capability mask is missing'
+Assert-Match $headerSource `
+    'TIMECARD_SUBSYSTEM_MASK_ART[\s\S]{0,500}TimeCardSubsystemTimingIo' `
+    'ART timestamp inputs are omitted from the subsystem capability mask'
 Assert-Match $headerSource 'TIMECARD_BOARD_CELESTICA\s+3u' `
     'Celestica does not have a distinct board profile'
 Assert-Match $driverSource `
@@ -132,6 +142,24 @@ Assert-Match $verifySource `
     'live verification does not validate ART discipline capabilities'
 Assert-Match $busSource '\*enabled\s*=\s*TRUE;[\s\S]*STATUS_OBJECT_NAME_NOT_FOUND' `
     'new supported cards do not default to the full Device Manager hierarchy'
+Assert-Match $busSource `
+    'TimeCardArtTimestampChild[\s\S]*TIMECARD\\\\TIMESTAMP_INPUTS' `
+    'ART does not use its timestamp-input-specific raw PDO identity'
+Assert-Match $busSource `
+    'firstFailure\s*=\s*STATUS_SUCCESS[\s\S]*allCreated\s*=\s*FALSE[\s\S]*HierarchyCreated\s*=\s*allCreated[\s\S]*return\s+firstFailure' `
+    'one child-PDO failure still aborts the remaining hierarchy enumeration'
+Assert-Match $verifySource `
+    'ABI:[\s\S]*hierarchy-persist[\s\S]*TIMECARD\\TIMESTAMP_INPUTS' `
+    'live verification does not safely migrate and validate the ART hierarchy'
+Assert-Match $verifySource `
+    'missingChildren[\s\S]*pnputil\.exe /restart-device' `
+    'verification does not restart a controller when legacy children remain absent'
+Assert-Match $installSource `
+    'KeepHierarchyDisabled[\s\S]*ABI:\\s\+[\s\S]*hierarchy-persist[\s\S]*pnputil\.exe /restart-device' `
+    'the installer does not health-check and migrate a legacy disabled hierarchy'
+Assert-Match $installSource `
+    'if\s*\(\$EnableTestSigning\)[\s\S]{0,300}bcdedit\.exe /set testsigning on' `
+    'the installer can change system-wide test-signing policy without explicit opt-in'
 Assert-Match $i2cSource 'TimeCardMonitorBranchResolveLocked' `
     'environment and power monitors are not discovered across board-variant mux routes'
 Assert-Match $i2cSource 'AXI-IIC dynamic repeated START' `
@@ -160,4 +188,4 @@ Assert-Match $serialSource 'TIMECARD_UART_RX_RING_SIZE' `
 Assert-Match $serialSource 'TIMECARD_UART_BURST_IDLE_US' `
     'burst-aware UART polling fallback is missing'
 
-Write-Host 'Board-profile tests passed (3 PCI identities, Celestica sensors, ART map, transports, independent sensor-route discovery, hierarchy default, UART buffering, and capability gating).'
+Write-Host 'Board-profile tests passed (3 PCI identities, Celestica sensors, ART map/timestamp child, transports, resilient hierarchy policy, UART buffering, and capability gating).'

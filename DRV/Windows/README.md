@@ -424,18 +424,29 @@ cd DRV\Windows
 .\install.ps1
 ```
 
-The script enables Windows test-signing and stages or installs the package.
-Reboot when requested, then verify the controller:
+The installer leaves Windows boot-signing policy unchanged by default. If this
+machine is already configured for local driver development, it stages or
+installs the test-signed package without broadening boot security. Otherwise,
+use a Microsoft-signed package. The explicit `-EnableTestSigning` switch is
+available only for an acknowledged development-machine setup; it enables a
+system-wide boot policy and requires a reboot.
+
+Reboot when requested, then verify the controller and migrate any legacy
+hierarchy-disabled setting:
 
 ```powershell
-.\verify.ps1 -SetFromSystem -TestGnssUart
+.\verify.ps1 -ExpectHierarchy -SetFromSystem -TestGnssUart
 ```
 
 ## Device hierarchy
 
 Subsystem enumeration is enabled by default for every newly installed
-supported card. The controller therefore appears with its PHC, ToD/GNSS,
-UART, SMA, timing, I2C, flash, and PTM children immediately. Verify it with:
+supported card. The controller therefore appears with only the functions
+implemented by that board. Meta/Facebook and Celestica expose the full eleven
+children. Orolia ART exposes seven: PHC, primary GNSS UART, mRO-50/atomic UART,
+SMA I/O, timestamp inputs, OpenCores I2C/EEPROM, and Altera SPI flash. It does
+not advertise the absent Meta ToD/NMEA, GNSS2, signal-generator, or PTM cores.
+Verify it with:
 
 ```powershell
 .\verify.ps1 -ExpectHierarchy -TestGnssUart
@@ -452,6 +463,11 @@ hierarchy persistently and later re-enable it:
 
 An explicit persisted disable takes precedence over the default. Existing
 child nodes disappear after the Time Card device or Windows is restarted.
+Driver packages before 1.42 wrote a disabled value during first installation;
+`verify.ps1 -ExpectHierarchy` performs a health and ABI check before enabling
+and persisting the corrected hierarchy policy. If Windows does not publish the
+new child PDOs after a rescan, verification restarts only the Time Card PCI
+device to complete the migration; it does not reboot Windows.
 
 ## Control tool
 

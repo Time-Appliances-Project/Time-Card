@@ -36,6 +36,36 @@ try {
         }
     }
 
+    if (-not (Test-Path -LiteralPath $tool)) {
+        throw "Control tool not found: $tool"
+    }
+    $statusOutput = & $tool status 2>&1
+    $statusExitCode = $LASTEXITCODE
+    $statusOutput | Out-Host
+    if ($statusExitCode -ne 0) { throw 'timecardctl status failed.' }
+    if (($statusOutput -join "`n") -notmatch 'ABI:\s+(1[5-9]|[2-9][0-9]+)\b') {
+        throw 'The complete Windows feature set requires ABI 15 or newer. Reboot or restart the controller to finish the driver replacement.'
+    }
+
+    $hasFbProfile = $devices | Where-Object {
+        $_.InstanceId -like 'PCI\VEN_1D9B&DEV_0400*' -or
+        $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
+    }
+    $hasCelesticaProfile = $devices | Where-Object {
+        $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
+    }
+    $hasArtProfile = $devices | Where-Object {
+        $_.InstanceId -like 'PCI\VEN_1AD7&DEV_A000*'
+    }
+
+    if ($ExpectHierarchy) {
+        & $tool hierarchy-persist
+        if ($LASTEXITCODE -ne 0) {
+            throw 'The subsystem hierarchy could not be enabled and persisted.'
+        }
+        pnputil.exe /scan-devices | Out-Host
+    }
+
     $timeCardDevices = Get-PnpDevice -PresentOnly -Class TimeCard |
         Sort-Object FriendlyName
     $timeCardDevices |
@@ -48,16 +78,6 @@ try {
         'TIMECARD\I2C\*',
         'TIMECARD\FLASH\*'
     )
-    $hasFbProfile = $devices | Where-Object {
-        $_.InstanceId -like 'PCI\VEN_1D9B&DEV_0400*' -or
-        $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
-    }
-    $hasCelesticaProfile = $devices | Where-Object {
-        $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
-    }
-    $hasArtProfile = $devices | Where-Object {
-        $_.InstanceId -like 'PCI\VEN_1AD7&DEV_A000*'
-    }
     if ($hasFbProfile) {
         $expectedChildren += @(
             'TIMECARD\TOD\*',
@@ -67,7 +87,50 @@ try {
             'TIMECARD\PTM\*'
         )
     }
+    if ($hasArtProfile) {
+        $expectedChildren += 'TIMECARD\TIMESTAMP_INPUTS\*'
+    }
     if ($ExpectHierarchy) {
+        $missingChildren = @()
+        foreach ($childPattern in $expectedChildren) {
+            if (-not ($timeCardDevices |
+                    Where-Object InstanceId -Like $childPattern)) {
+                $missingChildren += $childPattern
+            }
+        }
+
+        if ($missingChildren) {
+            Write-Host 'Waiting for the subsystem child devices to appear...'
+            Start-Sleep -Seconds 2
+            pnputil.exe /scan-devices | Out-Host
+            $timeCardDevices = Get-PnpDevice -PresentOnly -Class TimeCard |
+                Sort-Object FriendlyName
+            $missingChildren = @()
+            foreach ($childPattern in $expectedChildren) {
+                if (-not ($timeCardDevices |
+                        Where-Object InstanceId -Like $childPattern)) {
+                    $missingChildren += $childPattern
+                }
+            }
+        }
+
+        if ($missingChildren) {
+            Write-Host 'Restarting the Time Card controller to finish the legacy hierarchy migration...'
+            foreach ($device in $devices) {
+                & pnputil.exe /restart-device $device.InstanceId | Out-Host
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Could not restart Time Card controller: $($device.InstanceId)"
+                }
+            }
+            Start-Sleep -Seconds 1
+            pnputil.exe /scan-devices | Out-Host
+            $timeCardDevices = Get-PnpDevice -PresentOnly -Class TimeCard |
+                Sort-Object FriendlyName
+            $timeCardDevices |
+                Format-Table -AutoSize Status, FriendlyName, InstanceId |
+                Out-Host
+        }
+
         foreach ($childPattern in $expectedChildren) {
             $child = $timeCardDevices |
                 Where-Object InstanceId -Like $childPattern
@@ -78,17 +141,6 @@ try {
                 throw "Time Card child is not healthy: $($child.InstanceId)"
             }
         }
-    }
-    if (-not (Test-Path -LiteralPath $tool)) {
-        throw "Control tool not found: $tool"
-    }
-
-    $statusOutput = & $tool status 2>&1
-    $statusExitCode = $LASTEXITCODE
-    $statusOutput | Out-Host
-    if ($statusExitCode -ne 0) { throw 'timecardctl status failed.' }
-    if (($statusOutput -join "`n") -notmatch 'ABI:\s+(1[5-9]|[2-9][0-9]+)\b') {
-        throw 'The complete Windows feature set requires ABI 15 or newer. Reboot or restart the controller to finish the driver replacement.'
     }
     $capabilityOutput = & $tool capabilities 2>&1
     $capabilityExitCode = $LASTEXITCODE

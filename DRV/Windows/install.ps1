@@ -1,11 +1,14 @@
 #Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
-    [switch]$StageOnly
+    [switch]$StageOnly,
+    [switch]$KeepHierarchyDisabled,
+    [switch]$EnableTestSigning
 )
 
 $ErrorActionPreference = 'Stop'
 $package = Join-Path $PSScriptRoot 'x64\Release\timecard\timecard.inf'
+$tool = Join-Path $PSScriptRoot 'out\timecardctl.exe'
 $log = Join-Path $PSScriptRoot 'install.log'
 
 Start-Transcript -Path $log -Force | Out-Null
@@ -21,10 +24,15 @@ try {
         throw 'Secure Boot is enabled. A local test-signed driver cannot load.'
     }
 
-    Write-Host 'Enabling Windows test-signing for the next boot...'
-    & bcdedit.exe /set testsigning on
-    if ($LASTEXITCODE -ne 0) {
-        throw "bcdedit failed with exit code $LASTEXITCODE"
+    if ($EnableTestSigning) {
+        Write-Warning 'Enabling Windows test-signing changes system-wide boot security and requires a reboot.'
+        & bcdedit.exe /set testsigning on
+        if ($LASTEXITCODE -ne 0) {
+            throw "bcdedit failed with exit code $LASTEXITCODE"
+        }
+    } else {
+        Write-Host 'Leaving Windows boot-signing policy unchanged.'
+        Write-Host 'If pnputil rejects this local package, either use a Microsoft-signed package or explicitly rerun with -EnableTestSigning.'
     }
 
     Write-Host 'Staging the TimeCard driver package...'
@@ -42,15 +50,60 @@ try {
         throw "pnputil failed with exit code $pnpExitCode"
     }
 
+    $replacementPending = $pnpExitCode -eq 3010 -or $rebootRequired
+    if (-not $StageOnly -and -not $KeepHierarchyDisabled -and
+        -not $replacementPending) {
+        $presentController = Get-PnpDevice -PresentOnly | Where-Object {
+            $_.InstanceId -like 'PCI\VEN_1D9B&DEV_0400*' -or
+            $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*' -or
+            $_.InstanceId -like 'PCI\VEN_1AD7&DEV_A000*'
+        } | Select-Object -First 1
+        if ($presentController) {
+            if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) {
+                throw "Control tool not found: $tool. Run build.cmd first."
+            }
+            $statusOutput = & $tool status 2>&1
+            $statusExitCode = $LASTEXITCODE
+            $statusOutput | Out-Host
+            if ($statusExitCode -ne 0 -or
+                ($statusOutput -join "`n") -notmatch
+                    'ABI:\s+(1[5-9]|[2-9][0-9]+)\b') {
+                throw 'The installed controller is not yet running ABI 15 or newer. Reboot before enabling its subsystem hierarchy.'
+            }
+            & $tool hierarchy-persist
+            if ($LASTEXITCODE -ne 0) {
+                throw 'The subsystem hierarchy could not be enabled and persisted.'
+            }
+            pnputil.exe /scan-devices | Out-Host
+            Start-Sleep -Seconds 1
+            $phcPresent = Get-PnpDevice -PresentOnly | Where-Object {
+                $_.InstanceId -like 'TIMECARD\PHC\*'
+            } | Select-Object -First 1
+            if (-not $phcPresent) {
+                Write-Host 'Restarting the Time Card controller to finish the legacy hierarchy migration...'
+                & pnputil.exe /restart-device $presentController.InstanceId |
+                    Out-Host
+                if ($LASTEXITCODE -ne 0) {
+                    throw 'The controller could not be restarted after enabling its subsystem hierarchy.'
+                }
+                pnputil.exe /scan-devices | Out-Host
+            }
+        }
+    }
+
     Write-Host ''
-    if ($pnpExitCode -eq 3010 -or $rebootRequired) {
+    if ($replacementPending) {
         Write-Host 'Driver package staged. Windows requires a reboot to replace the'
         Write-Host 'currently loaded kernel driver.'
     } else {
         Write-Host 'Driver package staged. Confirm the running version with'
         Write-Host '.\out\timecardctl.exe status from an Administrator prompt.'
     }
-    Write-Host 'After the new driver loads, run verify.ps1 as Administrator.'
+    if ($KeepHierarchyDisabled) {
+        Write-Host 'The subsystem hierarchy was left disabled by request.'
+    } else {
+        Write-Host 'After the new driver loads, run verify.ps1 -ExpectHierarchy as Administrator.'
+    }
 }
 finally {
     Stop-Transcript | Out-Null

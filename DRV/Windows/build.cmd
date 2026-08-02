@@ -11,8 +11,20 @@ if not "%~1"=="" if /i not "%~1"=="test" if /i not "%~1"=="release" (
     exit /b 2
 )
 
-set "MSBUILD=msbuild"
-if defined VSINSTALLDIR if exist "%VSINSTALLDIR%MSBuild\Current\Bin\amd64\MSBuild.exe" set "MSBUILD=%VSINSTALLDIR%MSBuild\Current\Bin\amd64\MSBuild.exe"
+set "VSROOT=%ProgramFiles%\Microsoft Visual Studio\2022\Community"
+if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
+    for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSROOT=%%i"
+)
+set "VCVARS=%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"
+if not exist "%VCVARS%" (
+    echo error: the Visual Studio x64 C++ build environment was not found.
+    exit /b 1
+)
+call "%VCVARS%" >nul
+if errorlevel 1 exit /b 1
+
+set "MSBUILD=msbuild.exe"
+if exist "%VSROOT%\MSBuild\Current\Bin\amd64\MSBuild.exe" set "MSBUILD=%VSROOT%\MSBuild\Current\Bin\amd64\MSBuild.exe"
 
 where "%MSBUILD%" >nul 2>nul
 if errorlevel 1 if not exist "%MSBUILD%" (
