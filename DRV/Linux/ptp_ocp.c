@@ -33,10 +33,11 @@
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0)
 #define timer_delete_sync(t) timer_delete_sync(t)
 #endif
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 16, 0)
+#ifndef timer_container_of
 #define timer_container_of(var, timer, field) from_timer(var, timer, field)
 #endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0) || \
+	(defined(RHEL_RELEASE_CODE) && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(10, 3))
 #define OCP_BIN_ATTR_CONST const
 #else
 #define OCP_BIN_ATTR_CONST
@@ -1112,11 +1113,12 @@ static struct ocp_resource ocp_fb_resource_rev1[] = {
 			.fixed_rate = 50000000,
 			.data_size = sizeof(struct xiic_i2c_platform_data),
 			.data = &(struct xiic_i2c_platform_data) {
-				.num_devices = 2,
+				.num_devices = 3,
 				.devices = (struct i2c_board_info[]) {
 					{ I2C_BOARD_INFO("24c02", 0x50) },
 					{ I2C_BOARD_INFO("24mac402", 0x58),
 					  .platform_data = "mac" },
+					{ I2C_BOARD_INFO("timecard-led-mux", 0x70) },
 				},
 			},
 		},
@@ -1348,11 +1350,12 @@ static struct ocp_resource ocp_fb_resource_rev2[] = {
 			.fixed_rate = 50000000,
 			.data_size = sizeof(struct xiic_i2c_platform_data),
 			.data = &(struct xiic_i2c_platform_data) {
-				.num_devices = 2,
+				.num_devices = 3,
 				.devices = (struct i2c_board_info[]) {
 					{ I2C_BOARD_INFO("24c02", 0x50) },
 					{ I2C_BOARD_INFO("24mac402", 0x58),
 					  .platform_data = "mac" },
+					{ I2C_BOARD_INFO("timecard-led-mux", 0x70) },
 				},
 			},
 		},
@@ -2604,7 +2607,8 @@ fail:
 }
 
 static int
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0) || \
+	(defined(RHEL_RELEASE_CODE) && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(10, 3))
 ptp_ocp_firstchild(struct device *dev, const void *data)
 #else
 ptp_ocp_firstchild(struct device *dev, void *data)
@@ -7801,7 +7805,8 @@ ptp_ocp_complete(struct ptp_ocp *bp)
 
 	pps = pps_lookup_dev(bp->ptp);
 	if (pps)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0) || \
+	(defined(RHEL_RELEASE_CODE) && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(10, 3))
 		ptp_ocp_symlink(bp, &pps->dev, "pps");
 #else
 		ptp_ocp_symlink(bp, pps->dev, "pps");
@@ -8074,7 +8079,12 @@ ptp_ocp_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto out;
 
 	if (bp->ptm) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0) || \
+	(defined(RHEL_RELEASE_CODE) && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(10, 3))
+		err = pci_enable_ptm(bp->pdev);
+#else
 		err = pci_enable_ptm(bp->pdev, NULL);
+#endif
 		if (err)
 			goto out;
 		ptp_ocp_disable_ptm(bp);

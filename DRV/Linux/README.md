@@ -79,6 +79,12 @@ After the driver loads, the card exposes:
 Standard `linuxptp` tools such as `phc2sys`, `ptp4l`, and `ts2phc` can use the
 PHC.
 
+## R4006 I2C peripherals and status LEDs
+
+The [`R4006`](R4006) directory provides the PCA9546 mux, standard hwmon and
+IIO sensor enumeration, IS32FL3207 multicolor LED support, the automatic GNSS
+and SMA LED policy, CentOS Stream 10 backports, and the USB-C EEPROM utility.
+
 ## Qt Control Center
 
 [`TimeCardControlCenter`](TimeCardControlCenter) provides a native Qt 6 Linux

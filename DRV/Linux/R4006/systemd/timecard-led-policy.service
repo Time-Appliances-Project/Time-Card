@@ -1,0 +1,12 @@
+[Unit]
+Description=OCP Time Card GNSS and SMA LED policy
+After=systemd-modules-load.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/timecard-led-policy
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

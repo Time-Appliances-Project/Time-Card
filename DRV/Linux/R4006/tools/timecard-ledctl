@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage:
+  timecard-ledctl list
+  timecard-ledctl <gnss1|gnss2|sma1|sma2|sma3|sma4|all> \
+      <off|red|green|blue|yellow|cyan|magenta|white|R,G,B> [brightness]
+
+Brightness and R, G, B values are integers from 0 through 255.
+Examples:
+  timecard-ledctl sma1 green 64
+  timecard-ledctl sma2 255,80,0 96
+  timecard-ledctl all off
+EOF
+}
+
+die() {
+    echo "timecard-ledctl: $*" >&2
+    exit 1
+}
+
+valid_byte() {
+    [[ $1 =~ ^[0-9]+$ ]] && (( $1 >= 0 && $1 <= 255 ))
+}
+
+shopt -s nullglob
+led_root=/sys/class/leds
+
+if [[ ${1:-} == list ]]; then
+    leds=("$led_root"/timecard-*:rgb:indicator-*)
+    ((${#leds[@]})) || die "no Time Card LEDs are registered"
+    for led in "${leds[@]}"; do
+        printf '%s brightness=%s intensity=%s\n' \
+            "${led##*/}" "$(<"$led/brightness")" \
+            "$(<"$led/multi_intensity")"
+    done
+    exit 0
+fi
+
+(($# >= 2 && $# <= 3)) || { usage >&2; exit 2; }
+connector=$1
+color=$2
+brightness=${3:-128}
+
+case "$connector" in
+    gnss1|gnss2|sma1|sma2|sma3|sma4) ;;
+    all) ;;
+    *) die "unknown connector '$connector'" ;;
+esac
+
+valid_byte "$brightness" || die "brightness must be from 0 through 255"
+
+case "$color" in
+    off)     red=0;   green=0;   blue=0;   brightness=0 ;;
+    red)     red=255; green=0;   blue=0 ;;
+    green)   red=0;   green=255; blue=0 ;;
+    blue)    red=0;   green=0;   blue=255 ;;
+    yellow)  red=255; green=255; blue=0 ;;
+    cyan)    red=0;   green=255; blue=255 ;;
+    magenta) red=255; green=0;   blue=255 ;;
+    white)   red=255; green=255; blue=255 ;;
+    *,*,*)
+        IFS=, read -r red green blue <<<"$color"
+        if ! valid_byte "$red" || ! valid_byte "$green" ||
+            ! valid_byte "$blue"; then
+            die "RGB components must each be from 0 through 255"
+        fi
+        ;;
+    *) die "unknown color '$color'" ;;
+esac
+
+if [[ $connector == all ]]; then
+    leds=("$led_root"/timecard-*:rgb:indicator-*)
+else
+    leds=("$led_root"/timecard-*:rgb:indicator-"$connector")
+fi
+((${#leds[@]})) || die "no registered Time Card LED matches '$connector'"
+
+for led in "${leds[@]}"; do
+    [[ $(<"$led/multi_index") == "red green blue" ]] ||
+        die "unexpected component order for ${led##*/}"
+    printf '%s %s %s\n' "$red" "$green" "$blue" >"$led/multi_intensity"
+    printf '%s\n' "$brightness" >"$led/brightness"
+done

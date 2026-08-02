@@ -1,0 +1,250 @@
+#!/usr/bin/python3
+"""Safely clone the production Time Card 24C02 EEPROM over USB-C."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import os
+from pathlib import Path
+import sys
+import time
+
+import usb.core
+from pyftdi.gpio import GpioController
+from pyftdi.i2c import I2cController, I2cNackError
+
+
+FTDI_VENDOR_ID = 0x0403
+FTDI_PRODUCT_ID = 0x6011
+EEPROM_ADDRESS = 0x50
+EEPROM_SIZE = 256
+EEPROM_PAGE_SIZE = 8
+I2C_FREQUENCY = 100_000
+USB_I2C_MUX_PIN = 1 << 6  # FT4232H channel A, ADBUS6/MUX3_SEL
+EXPECTED_IMAGE_SHA256 = (
+    "0e0f26f3ce12c98757a3275cdb0bbc6a15919e622ad87238980ec02c623540f4"
+)
+DEFAULT_IMAGE = Path("/root/timecard-eeprom/eeprom.bin")
+DEFAULT_BACKUP_DIR = Path("/root/timecard-eeprom/backups")
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def load_image(path: Path) -> bytes:
+    try:
+        image = path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(f"cannot read image {path}: {exc}") from exc
+
+    if len(image) != EEPROM_SIZE:
+        raise RuntimeError(
+            f"image must be exactly {EEPROM_SIZE} bytes, got {len(image)}"
+        )
+
+    digest = sha256(image)
+    if digest != EXPECTED_IMAGE_SHA256:
+        raise RuntimeError(
+            "image SHA-256 does not match the approved production image:\n"
+            f"  expected {EXPECTED_IMAGE_SHA256}\n"
+            f"  actual   {digest}"
+        )
+    return image
+
+
+def discover_ft4232h() -> tuple[str, str]:
+    devices = list(
+        usb.core.find(
+            find_all=True,
+            idVendor=FTDI_VENDOR_ID,
+            idProduct=FTDI_PRODUCT_ID,
+        )
+        or []
+    )
+    if not devices:
+        raise RuntimeError("no FT4232H found; connect the Time Card USB-C data cable")
+    if len(devices) != 1:
+        found = ", ".join(
+            f"bus {dev.bus} address {dev.address}" for dev in devices
+        )
+        raise RuntimeError(
+            f"found {len(devices)} FT4232H devices ({found}); connect only one Time Card"
+        )
+
+    dev = devices[0]
+    identity = f"bus-{dev.bus:03d}-device-{dev.address:03d}"
+    return f"ftdi://ftdi:4232:{dev.bus}:{dev.address}", identity
+
+
+class TimeCardEeprom:
+    def __init__(self, ftdi_base: str) -> None:
+        self._base = ftdi_base
+        self._gpio: GpioController | None = None
+        self._i2c: I2cController | None = None
+        self._port = None
+
+    def __enter__(self) -> "TimeCardEeprom":
+        try:
+            # Select the USB/MPSSE side of the card's I2C analog switch.
+            # All other channel-A pins remain inputs, including the JTAG pins.
+            self._gpio = GpioController()
+            self._gpio.configure(
+                f"{self._base}/1", direction=USB_I2C_MUX_PIN, frequency=1_000
+            )
+            self._gpio.write(USB_I2C_MUX_PIN)
+            time.sleep(0.05)
+
+            self._i2c = I2cController()
+            self._i2c.configure(
+                f"{self._base}/2", frequency=I2C_FREQUENCY
+            )
+            self._port = self._i2c.get_port(EEPROM_ADDRESS)
+            self._port.configure_register(bigendian=False, width=1)
+            if not self._port.poll():
+                raise RuntimeError("EEPROM 0x50 did not acknowledge on the USB I2C bus")
+            return self
+        except Exception:
+            self.close()
+            raise
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._i2c is not None:
+            try:
+                self._i2c.terminate()
+            finally:
+                self._i2c = None
+                self._port = None
+        if self._gpio is not None:
+            try:
+                self._gpio.write(0)
+            finally:
+                self._gpio.close()
+                self._gpio = None
+
+    def read_all(self) -> bytes:
+        return bytes(self._port.read_from(0, EEPROM_SIZE))
+
+    def _wait_until_ready(self, timeout: float = 0.25) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                if self._port.poll():
+                    return
+            except I2cNackError:
+                pass
+            time.sleep(0.005)
+        raise RuntimeError("EEPROM did not become ready after its write cycle")
+
+    def write_image(self, current: bytes, image: bytes) -> int:
+        pages_written = 0
+        for offset in range(0, EEPROM_SIZE, EEPROM_PAGE_SIZE):
+            page = image[offset : offset + EEPROM_PAGE_SIZE]
+            if current[offset : offset + EEPROM_PAGE_SIZE] == page:
+                continue
+
+            self._port.write_to(offset, page)
+            self._wait_until_ready()
+
+            page_readback = bytes(self._port.read_from(offset, len(page)))
+            if page_readback != page:
+                raise RuntimeError(
+                    f"verification failed immediately after writing offset 0x{offset:02x}; "
+                    "the FPGA EEPROM write-protect signal may be enabled"
+                )
+            pages_written += 1
+            print(f"  wrote and verified 0x{offset:02x}-0x{offset + len(page) - 1:02x}")
+        return pages_written
+
+
+def save_backup(directory: Path, identity: str, data: bytes) -> Path:
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    path = directory / f"eeprom-{timestamp}-{identity}-{sha256(data)[:12]}.bin"
+    with path.open("xb") as output:
+        output.write(data)
+        output.flush()
+        os.fsync(output.fileno())
+    return path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Back up, program, and verify the Time Card 24C02 EEPROM at address 0x50. "
+            "The 24MAC402 identity EEPROM at 0x58 is never accessed."
+        )
+    )
+    parser.add_argument("--image", type=Path, default=DEFAULT_IMAGE)
+    parser.add_argument("--backup-dir", type=Path, default=DEFAULT_BACKUP_DIR)
+    parser.add_argument(
+        "--flash",
+        action="store_true",
+        help="perform the write; without this flag the script only reads and backs up",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="do not ask for interactive confirmation when --flash is used",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    if os.geteuid() != 0:
+        raise RuntimeError("run this utility as root")
+
+    image = load_image(args.image)
+    ftdi_base, identity = discover_ft4232h()
+    print(f"FT4232H: {identity}")
+    print(f"Image:   {args.image}")
+    print(f"SHA-256: {sha256(image)}")
+
+    with TimeCardEeprom(ftdi_base) as eeprom:
+        current = eeprom.read_all()
+        current_digest = sha256(current)
+        backup = save_backup(args.backup_dir, identity, current)
+        print(f"Current: {current_digest}")
+        print(f"Backup:  {backup}")
+
+        if current == image:
+            print("Result: EEPROM already matches the production image; no write needed")
+            return 0
+
+        if not args.flash:
+            print("Result: EEPROM differs; rerun with --flash to program it")
+            return 2
+
+        if not args.yes:
+            answer = input(
+                "Type FLASH to program EEPROM 0x50 (the operation is not reversible): "
+            )
+            if answer != "FLASH":
+                print("Cancelled; no data written")
+                return 3
+
+        print("Programming EEPROM 0x50 in 8-byte pages:")
+        pages_written = eeprom.write_image(current, image)
+        readback = eeprom.read_all()
+        readback_digest = sha256(readback)
+        print(f"Readback: {readback_digest}")
+        if readback != image:
+            raise RuntimeError("final 256-byte verification failed")
+        print(f"Result: PASS, {pages_written} changed page(s) programmed and verified")
+        return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("Interrupted", file=sys.stderr)
+        sys.exit(130)
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
