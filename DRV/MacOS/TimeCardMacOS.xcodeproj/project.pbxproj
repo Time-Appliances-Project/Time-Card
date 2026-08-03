@@ -58,9 +58,10 @@
 		A0000000000000000000020D /* timecardctl.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = timecardctl.entitlements; sourceTree = "<group>"; };
 		A0000000000000000000020E /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
 		A0000000000000000000020F /* TimeCardUserClient.iig */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.iig; path = TimeCardUserClient.iig; sourceTree = "<group>"; };
+		A00000000000000000000210 /* CLIAppBundleTests.cmake */ = {isa = PBXFileReference; lastKnownFileType = text; path = CLIAppBundleTests.cmake; sourceTree = "<group>"; };
 		A00000000000000000000301 /* TimeCardMacOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TimeCardMacOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000302 /* TimeCardDriver.dext */ = {isa = PBXFileReference; explicitFileType = wrapper.driver-extension; includeInIndex = 0; path = TimeCardDriver.dext; sourceTree = BUILT_PRODUCTS_DIR; };
-		A00000000000000000000303 /* timecardctl */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = timecardctl; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000303 /* timecardctl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = timecardctl.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000304 /* timecard-register-tests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "timecard-register-tests"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -89,8 +90,8 @@
 		A00000000000000000000803 /* Driver */ = {isa = PBXGroup; path = Driver; sourceTree = "<group>"; children = (A00000000000000000000204, A00000000000000000000205, A0000000000000000000020F, A0000000000000000000020A, A0000000000000000000020B, ); };
 		A00000000000000000000804 /* Shared */ = {isa = PBXGroup; path = Shared; sourceTree = "<group>"; children = (A00000000000000000000208, A00000000000000000000209, ); };
 		A00000000000000000000805 /* CLI */ = {isa = PBXGroup; path = CLI; sourceTree = "<group>"; children = (A00000000000000000000206, A0000000000000000000020D, ); };
-		A00000000000000000000806 /* Tests */ = {isa = PBXGroup; path = Tests; sourceTree = "<group>"; children = (A00000000000000000000207, ); };
-		A00000000000000000000807 /* Products */ = {isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (A00000000000000000000301, A00000000000000000000302, A00000000000000000000303, A00000000000000000000304, ); };
+		A00000000000000000000806 /* Tests */ = {isa = PBXGroup; path = Tests; sourceTree = "<group>"; children = (A00000000000000000000207, A00000000000000000000210, ); };
+		A00000000000000000000807 /* Products */ = {isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (A00000000000000000000301, A00000000000000000000302, A00000000000000000000303 /* timecardctl.app */, A00000000000000000000304, ); };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -124,8 +125,8 @@
 			dependencies = ();
 			name = timecardctl;
 			productName = timecardctl;
-			productReference = A00000000000000000000303;
-			productType = "com.apple.product-type.tool";
+			productReference = A00000000000000000000303 /* timecardctl.app */;
+			productType = "com.apple.product-type.application";
 		};
 		A00000000000000000000504 /* timecard-register-tests */ = {
 			isa = PBXNativeTarget;
@@ -183,8 +184,8 @@
 		A00000000000000000000C12 /* App Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = App/TimeCardMacOS.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "OCP Time Card"; INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities"; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; SWIFT_EMIT_LOC_STRINGS = YES; SWIFT_VERSION = 5.0; }; name = Release; };
 		A00000000000000000000C21 /* Driver Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Driver/TimeCardDriver.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DRIVERKIT_DEPLOYMENT_TARGET = 20.0; GCC_PREPROCESSOR_DEFINITIONS = ("DEBUG=1", "$(inherited)", ); HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; INFOPLIST_FILE = Driver/Info.plist; MARKETING_VERSION = 0.1.0; ONLY_ACTIVE_ARCH = YES; OTHER_LDFLAGS = ("-framework", DriverKit, "-framework", PCIDriverKit, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.driver; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = driverkit; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = driverkit; }; name = Debug; };
 		A00000000000000000000C22 /* Driver Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = Driver/TimeCardDriver.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DRIVERKIT_DEPLOYMENT_TARGET = 20.0; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; INFOPLIST_FILE = Driver/Info.plist; MARKETING_VERSION = 0.1.0; OTHER_LDFLAGS = ("-framework", DriverKit, "-framework", PCIDriverKit, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.driver; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = driverkit; SKIP_INSTALL = YES; SUPPORTED_PLATFORMS = driverkit; }; name = Release; };
-		A00000000000000000000C31 /* CLI Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = CLI/timecardctl.entitlements; CODE_SIGN_STYLE = Automatic; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; MACOSX_DEPLOYMENT_TARGET = 14.0; OTHER_LDFLAGS = ("-framework", IOKit, "-framework", CoreFoundation, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.cli; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Debug; };
-		A00000000000000000000C32 /* CLI Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = CLI/timecardctl.entitlements; CODE_SIGN_STYLE = Automatic; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; MACOSX_DEPLOYMENT_TARGET = 14.0; OTHER_LDFLAGS = ("-framework", IOKit, "-framework", CoreFoundation, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.cli; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Release; };
+		A00000000000000000000C31 /* CLI Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = CLI/timecardctl.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = YES; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; INFOPLIST_KEY_CFBundleDisplayName = timecardctl; INFOPLIST_KEY_LSBackgroundOnly = YES; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1.0; OTHER_LDFLAGS = ("-framework", IOKit, "-framework", CoreFoundation, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.cli; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Debug; };
+		A00000000000000000000C32 /* CLI Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = CLI/timecardctl.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; ENABLE_HARDENED_RUNTIME = YES; GENERATE_INFOPLIST_FILE = YES; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; INFOPLIST_KEY_CFBundleDisplayName = timecardctl; INFOPLIST_KEY_LSBackgroundOnly = YES; MACOSX_DEPLOYMENT_TARGET = 14.0; MARKETING_VERSION = 0.1.0; OTHER_LDFLAGS = ("-framework", IOKit, "-framework", CoreFoundation, ); PRODUCT_BUNDLE_IDENTIFIER = org.opentimeserver.timecard.macos.cli; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Release; };
 		A00000000000000000000C41 /* Tests Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; MACOSX_DEPLOYMENT_TARGET = 14.0; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Debug; };
 		A00000000000000000000C42 /* Tests Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; HEADER_SEARCH_PATHS = "$(SRCROOT)/Shared"; MACOSX_DEPLOYMENT_TARGET = 14.0; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = macosx; }; name = Release; };
 /* End XCBuildConfiguration section */
