@@ -2,7 +2,7 @@
 
 This document records the result of comparing the timing-core manuals in
 `SOM/FPGA/Doc`, the Linux `ptp_ocp` implementation, and NetTimeLogic's
-Universal Configuration Manager (UCM) with Windows driver 1.42 / ABI 15 and
+Universal Configuration Manager (UCM) with Windows driver 1.43 / ABI 15 and
 the Time Card Control Center.
 
 The implementation follows two rules throughout:
@@ -15,7 +15,7 @@ The implementation follows two rules throughout:
 
 ## Implemented core coverage
 
-| Reference core | Linux | Windows 1.42 / ABI 15 | Safety boundary |
+| Reference core | Linux | Windows 1.43 / ABI 15 | Safety boundary |
 | --- | --- | --- | --- |
 | Adjustable Clock | PHC, source selection, time/offset/drift control, and contract-gated optional telemetry | PHC read/set, cross timestamp, source selection, smooth offset/drift/window/threshold controls, Q16 fractional drift, base status with holdover/aging readiness, and contract-gated servo factors/logs, holdover, outlier filters, rate limiters, aging, revert, and dynamic update | Common registers use revision gates. Synthesis-optional registers require the exact-image contract. NTP requires Clock 1.8+; SyncE selector 8 and dynamic selector 253 require Clock 2.7+; each source also requires its explicit synthesized-datapath contract. |
 | Signal Generator | Four PTP periodic outputs with phase/start, repeat count, and cable delay | Four generators with phase-aligned or exact future PHC/TAI start, polarity, period, pulse width, repeat count, cable delay, readback, sticky-status clear, and interrupt-backed completion/error/time-jump event queues | v1.2/v1.3 fields are revision-gated. Every write is read back and the complete prior register set is restored on failure. |
@@ -134,6 +134,6 @@ The following items cannot be completed safely in host software alone:
   and packaging integration.
 
 These are static and build checks, not a claim of runtime validation. Before a
-production deployment, install 1.42 on each supported board/image combination,
+production deployment, install 1.43 on each supported board/image combination,
 exercise all contracted features, verify interrupt delivery under load, and
 perform signal loopbacks with calibrated external equipment.

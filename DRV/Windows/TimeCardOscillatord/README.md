@@ -62,7 +62,9 @@ acknowledged u-blox CFG-VALSET profile. `gnssPersistConfiguration` is a second,
 independent opt-in: false changes RAM only, while true also selects battery-
 backed RAM and flash. A UBX-ACK-NAK or missing acknowledgement aborts the
 startup attempt rather than assuming that the timing receiver accepted the
-profile.
+profile. Baud detection accepts either the MON-VER reply or any complete,
+checksum-valid UBX frame; this keeps continuously streaming F9T profiles from
+flapping merely because MON-VER is delayed behind receiver output.
 
 The driver discipline lease makes the active service the sole owner of
 discipline-related writes. Closing the service's device handle releases that
@@ -85,6 +87,13 @@ not used to force an oscillator algorithm onto unknown hardware.
 Native miniCOD discipline requires driver ABI 14 or newer. Older drivers may
 still expose telemetry, but the service refuses to start software discipline
 without the exclusive lease and crash-cleanup contract.
+
+Driver 1.43 selects ART board-config bit zero during device start. This keeps
+the direct mRO-50 fine/coarse bridge connected; bit one is reserved for an
+explicit diagnostic serial session and cannot be used simultaneously with
+native discipline. The paired PPS path uses the ART rising-edge interrupts and
+software event counters because ART's basic timestamp cores do not publish a
+reliable common version or timestamp-count register.
 
 SA5x management is similarly capability- and protocol-gated. Automatic latch
 recovery is restricted to firmware positively identified as affected; unknown
@@ -349,7 +358,10 @@ The default endpoint is:
 Authenticated local users can read status and the EEPROM diagnostic payload.
 State-changing requests are accepted only when the connecting Windows identity
 is a local Administrator. This is the preferred Control Center transport and
-does not need a shared token.
+does not need a shared token. Windows requires the pipe connection ACE to cover
+generic pipe creation and asynchronous synchronization before the server can
+impersonate the caller. The service then rejects anonymous identities and keeps
+authenticated non-administrators read-only.
 
 ### RTCM and raw-observation pipe
 

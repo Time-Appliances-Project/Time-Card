@@ -2,6 +2,15 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $source = Join-Path $PSScriptRoot '..\TimeCardControlCenter\OscillatordClient.cs'
+$clientSource = Get-Content -LiteralPath $source -Raw -Encoding UTF8
+if ($clientSource -notmatch
+        'RequestLocalWithFallbackAsync[\s\S]*UnauthorizedAccessException[\s\S]*RequestAsync\("127\.0\.0\.1",\s*LocalTcpPort' -or
+    $clientSource -notmatch
+        'LastRequestUsedLocalPipe\s*=\s*true' -or
+    $clientSource -notmatch
+        'TokenImpersonationLevel\.Impersonation') {
+    throw 'oscillatord client test failed: local pipe telemetry fallback is incomplete'
+}
 Add-Type -Path $source -ReferencedAssemblies @(
     'System.dll', 'System.Core.dll', 'System.Runtime.Serialization.dll', 'System.Xml.dll')
 

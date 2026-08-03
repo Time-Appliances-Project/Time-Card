@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.Net.Sockets;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Json;
+using System.Security.Principal;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
@@ -189,7 +190,10 @@ namespace TimeCardControlCenter
     {
         private const int MaximumResponseBytes = 1024 * 1024;
         private const string LocalPipeName = "OcpTimeCard.Oscillatord.v1";
+        private const int LocalTcpPort = 2958;
         private readonly TimeSpan timeout;
+
+        public bool LastRequestUsedLocalPipe { get; private set; }
 
         public OscillatordClient(TimeSpan timeout)
         {
@@ -213,7 +217,12 @@ namespace TimeCardControlCenter
                 await AwaitWithTimeout(connect, "Connecting to oscillatord timed out.");
 
                 using (NetworkStream stream = client.GetStream())
-                    return await ExchangeAsync(stream, request, token);
+                {
+                    OscillatordSnapshot snapshot = await ExchangeAsync(
+                        stream, request, token);
+                    LastRequestUsedLocalPipe = false;
+                    return snapshot;
+                }
             }
             throw new InvalidDataException("oscillatord returned an incomplete or oversized JSON response.");
         }
@@ -236,8 +245,39 @@ namespace TimeCardControlCenter
                 catch (TimeoutException)
                 {
                 }
+                catch (UnauthorizedAccessException)
+                {
+                }
             }
             return await RequestAsync(host, port, request, token);
+        }
+
+        public async Task<OscillatordSnapshot> RequestLocalWithFallbackAsync(
+            OscillatordRequest request, string token)
+        {
+            try
+            {
+                return await RequestLocalAsync(request, token);
+            }
+            catch (IOException)
+            {
+            }
+            catch (TimeoutException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+
+            /*
+             * A LocalSystem-created pipe can be rejected by Windows integrity
+             * policy even when its DACL grants an authenticated desktop user
+             * read/write access. The service's loopback TCP endpoint has the
+             * same read-only default and never exposes an address setting in
+             * local mode, so it is a safe telemetry fallback.
+             */
+            return await RequestAsync("127.0.0.1", LocalTcpPort, request,
+                token);
         }
 
         public async Task<OscillatordSnapshot> RequestLocalAsync(
@@ -245,13 +285,17 @@ namespace TimeCardControlCenter
         {
             using (NamedPipeClientStream pipe = new NamedPipeClientStream(
                 ".", LocalPipeName, PipeDirection.InOut,
-                PipeOptions.Asynchronous))
+                PipeOptions.Asynchronous,
+                TokenImpersonationLevel.Impersonation))
             {
                 Task connect = pipe.ConnectAsync(checked((int)Math.Min(
                     timeout.TotalMilliseconds, int.MaxValue)));
                 await AwaitWithTimeout(connect,
                     "Connecting to the local Windows oscillatord service timed out.");
-                return await ExchangeAsync(pipe, request, token);
+                OscillatordSnapshot snapshot = await ExchangeAsync(
+                    pipe, request, token);
+                LastRequestUsedLocalPipe = true;
+                return snapshot;
             }
         }
 

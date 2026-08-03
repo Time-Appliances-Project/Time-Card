@@ -304,8 +304,14 @@ Assert-Matches $monitoringSource 'parsed\.Request\s*<\s*0\s*\|\|\s*parsed\.Reque
     'monitoring does not reject request numbers outside the protocol enum'
 Assert-Matches $monitoringSource 'BuiltinAdministratorsSid' `
     'the named-pipe ACL is missing Administrators'
-Assert-Matches $monitoringSource 'AuthenticatedUserSid' `
-    'authenticated local users cannot read service status'
+Assert-Matches $monitoringSource 'WellKnownSidType\.WorldSid' `
+    'named-pipe clients cannot complete the Windows pipe connection handshake'
+Assert-Matches $monitoringSource `
+    'PipeAccessRights\.ReadWrite\s*\|[\s\S]{0,100}PipeAccessRights\.CreateNewInstance\s*\|[\s\S]{0,100}PipeAccessRights\.Synchronize' `
+    'named-pipe clients lack the generic-write and asynchronous handshake rights'
+Assert-Matches $monitoringSource `
+    'IsClientAuthenticated\s*\(pipe\)[\s\S]{0,160}Anonymous named-pipe clients are not accepted' `
+    'the named-pipe server does not reject unauthenticated clients after impersonation'
 Assert-Matches $monitoringSource 'IsClientAdministrator\s*\(' `
     'the named-pipe control path does not verify administrator identity'
 Assert-Matches $monitoringSource 'IsLocalClient\s*\(pipe\)' `
@@ -325,6 +331,9 @@ Assert-Matches $monitoringSource `
 Assert-Matches $runtimeSource `
     'StopCoreAsync\(source\)\.GetAwaiter\(\)\.GetResult\(\)' `
     'runtime startup does not perform transactional rollback'
+Assert-Matches $runtimeSource `
+    'response\.ControlEnabled\s*=\s*ControlAuthorized\(token,\s*origin\)' `
+    'monitoring status does not report authorization for the actual caller transport'
 Assert-Matches $windowsServiceSource `
     'catch[\s\S]*startedRuntime\.StopAsync\(\)' `
     'Windows Service startup does not roll back a partial runtime'

@@ -194,7 +194,7 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
   binary payload as Base64.
 * CAD files for the custom PCIe bracket 
 
-The Windows package currently ships driver **1.42 / ABI 15** and a native
+The Windows package currently ships driver **1.43 / ABI 15** and a native
 Control Center that brings the complete Time Card into one application:
 
 * Precision-clock telemetry, detail-focused rolling offset graphs, clock-source
@@ -254,7 +254,7 @@ in `SOM/FPGA/Doc` to Linux, Windows, and the application.
 
 # FPGA and UCM coverage status
 
-Driver 1.42 / ABI 15 implements every software-feasible gap identified by the
+Driver 1.43 / ABI 15 implements every software-feasible gap identified by the
 FPGA-manual review and the Universal Configuration Manager audit:
 
 * Six interrupt-backed signal-timestamp channels and four signal-generator

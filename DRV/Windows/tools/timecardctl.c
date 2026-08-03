@@ -903,7 +903,7 @@ oscillator_name(unsigned long oscillator)
     switch (oscillator) {
     case TIMECARD_OSCILLATOR_NONE: return "None detected";
     case TIMECARD_OSCILLATOR_UART: return "UART/protocol probe required";
-    case TIMECARD_OSCILLATOR_MRO50: return "Microchip mRO-50";
+    case TIMECARD_OSCILLATOR_MRO50: return "Safran mRO-50";
     case TIMECARD_OSCILLATOR_SA53: return "Microchip SA53";
     default: return "Unknown";
     }

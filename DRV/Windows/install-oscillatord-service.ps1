@@ -223,16 +223,17 @@ if (-not (Test-Path -LiteralPath $configPath)) {
 $binaryPath = '"' + $destinationExecutable + '" --service'
 if ($existingService) {
     Invoke-ServiceControl @('config', $serviceName,
-        'binPath=', $binaryPath,
         'start=', 'delayed-auto',
         'obj=', 'LocalSystem',
         'DisplayName=', $displayName)
 } else {
-    Invoke-ServiceControl @('create', $serviceName,
-        'binPath=', $binaryPath,
-        'start=', 'delayed-auto',
-        'obj=', 'LocalSystem',
-        'DisplayName=', $displayName)
+    # Windows PowerShell 5 can lose the embedded executable quotes while
+    # forwarding a binPath through sc.exe. New-Service passes the complete
+    # path as a typed value and defaults the service account to LocalSystem.
+    New-Service -Name $serviceName -BinaryPathName $binaryPath `
+        -DisplayName $displayName -StartupType Automatic | Out-Null
+    Invoke-ServiceControl @('config', $serviceName,
+        'start=', 'delayed-auto')
 }
 Invoke-ServiceControl @('description', $serviceName,
     'Disciplines and monitors OCP Time Card oscillators on native Windows.')

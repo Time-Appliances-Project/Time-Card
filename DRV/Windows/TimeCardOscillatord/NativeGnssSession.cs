@@ -1274,6 +1274,14 @@ namespace TimeCardControlCenter
                             if (frame.MessageClass == 0x0a &&
                                 frame.MessageId == 0x04)
                                 return candidate;
+                            /*
+                             * Some timing-receiver profiles continuously
+                             * transmit valid UBX but do not reliably answer a
+                             * MON-VER poll while their UART FIFO is busy. A
+                             * checksum-valid UBX frame proves the host divisor
+                             * just as strongly and avoids reconnect flapping.
+                             */
+                            return candidate;
                         }
                     }
                     else
@@ -1282,7 +1290,7 @@ namespace TimeCardControlCenter
             }
             token.ThrowIfCancellationRequested();
             throw new InvalidOperationException(
-                "The u-blox receiver did not answer UBX-MON-VER at the configured or standard UART rates.");
+                "No valid u-blox traffic was detected at the configured or standard UART rates.");
         }
 
         public void ApplyConfiguration(

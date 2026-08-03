@@ -417,6 +417,14 @@ typedef struct _DEVICE_CONTEXT {
     WDFFILEOBJECT DisciplineOwner;
     UCHAR PhaseReferencePolarity;
     UCHAR PhaseOscillatorPolarity;
+    volatile LONG PhaseReferenceSequence;
+    volatile LONG PhaseOscillatorSequence;
+    ULONG PhaseReferenceCounter;
+    ULONG PhaseOscillatorCounter;
+    TIMECARD_TIME PhaseReferenceTime;
+    TIMECARD_TIME PhaseOscillatorTime;
+    ULONG PhaseReferenceError;
+    ULONG PhaseOscillatorError;
     WDFDEVICE ChildDevices[TIMECARD_SUBSYSTEM_COUNT];
     WDFWAITLOCK RegisterLock;
     WDFINTERRUPT UartInterrupt[TIMECARD_UART_INTERRUPT_OBJECTS];
@@ -667,6 +675,9 @@ NTSTATUS TimeCardPhaseQuery(PDEVICE_CONTEXT context,
 NTSTATUS TimeCardPhaseControl(PDEVICE_CONTEXT context,
                               const TIMECARD_PHASE_CONTROL *request,
                               TIMECARD_PHASE_CONTROL *response);
+VOID TimeCardRecordPhaseTimestamp(PDEVICE_CONTEXT context, ULONG channel,
+                                  ULONG error, ULONG nanoseconds,
+                                  ULONG seconds);
 /* RegisterLock must be held by the caller. */
 VOID TimeCardPhaseDisableLocked(PDEVICE_CONTEXT context);
 VOID TimeCardPhaseSuspend(PDEVICE_CONTEXT context);

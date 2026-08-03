@@ -9,6 +9,8 @@ $driverSource = Get-Content -Raw (Join-Path $windows 'driver.c')
 $busSource = Get-Content -Raw (Join-Path $windows 'bus.c')
 $i2cSource = Get-Content -Raw (Join-Path $windows 'i2c.c')
 $serialSource = Get-Content -Raw (Join-Path $windows 'serial.c')
+$timestampSource = Get-Content -Raw (Join-Path $windows 'timestamp.c')
+$disciplineSource = Get-Content -Raw (Join-Path $windows 'discipline.c')
 $headerSource = Get-Content -Raw (Join-Path $windows 'timecard.h')
 $infSource = Get-Content -Raw (Join-Path $windows 'timecard.inf')
 $projectSource = Get-Content -Raw (Join-Path $windows 'timecard.vcxproj')
@@ -90,6 +92,27 @@ Assert-Match $abiSource 'TIMECARD_ABI_VERSION\s+15u' `
     'the current Windows package does not expose ABI 15'
 Assert-Match $mroSource 'TimeCardMro50Query' `
     'ART mRO-50 query implementation is missing'
+Assert-Match $driverSource `
+    'BoardProfile\s*==\s*TIMECARD_BOARD_ART[\s\S]{0,1000}ArtBoardConfig,\s*0u' `
+    'ART startup selects the diagnostic UART instead of the direct mRO bridge'
+Assert-Match $timestampSource `
+    'TimeCardTimestampCoreUsable[\s\S]{0,240}TIMECARD_BOARD_ART' `
+    'ART versionless timestamp cores are rejected'
+Assert-Match $timestampSource `
+    'PhaseCaptureEnabled[\s\S]{0,500}TimeCardRecordPhaseTimestamp[\s\S]{0,300}TIMECARD_TIMESTAMP_IRQ_MASK' `
+    'ART paired PPS interrupts are not captured and acknowledged'
+Assert-Match $timestampSource `
+    'rawPolarity\s*!=\s*0u\s*\?[\s\S]{0,100}TIMECARD_TIMESTAMP_POLARITY_FALLING' `
+    'timestamp polarity does not match Linux rising=0/falling=1 semantics'
+Assert-Match $disciplineSource `
+    'TimeCardRecordPhaseTimestamp[\s\S]*PhaseReferenceSequence[\s\S]*PhaseOscillatorSequence' `
+    'paired PPS ISR samples do not use coherent software counters'
+Assert-Match $disciplineSource `
+    'PhaseReference->InterruptMask,[\s\S]{0,80}1u[\s\S]{0,160}PhaseOscillator->InterruptMask,[\s\S]{0,80}1u' `
+    'native discipline leaves ART paired PPS interrupts masked'
+Assert-Match $disciplineSource `
+    'TimeCardPollPhaseTimestampLocked[\s\S]{0,800}TimeCardRecordPhaseTimestamp[\s\S]{0,500}reg->Interrupt, 1u' `
+    'ART phase capture lacks the polling fallback for bitstreams without MSI-X routing'
 Assert-Match $projectSource 'i2c_ocores\.c' `
     'OpenCores I2C implementation is not in the driver build'
 Assert-Match $projectSource 'flash_altera\.c' `

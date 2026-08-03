@@ -105,6 +105,12 @@ Assert-Contains $serviceLog `
     'The service and installer Event Log sources do not match.'
 Assert-Contains $install "start=', 'delayed-auto" `
     'The service is not configured for delayed automatic start.'
+Assert-Contains $install `
+    'New-Service[\s\S]{0,180}-BinaryPathName\s+\$binaryPath[\s\S]{0,180}-StartupType\s+Automatic' `
+    'Initial service creation does not preserve the quoted executable path safely.'
+Assert-True (-not ($install -match
+        "Invoke-ServiceControl\s+@\('create'")) `
+    'The installer still forwards its quoted binPath through sc.exe create.'
 Assert-Contains $install "obj=', 'LocalSystem" `
     'The service is not configured to use LocalSystem.'
 Assert-Contains $install 'restart/5000/restart/15000/restart/60000' `

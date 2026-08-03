@@ -367,26 +367,26 @@ Assert-Sequence $timestamp @(
     'STATUS_DEVICE_DATA_ERROR') `
     'timestamp configuration does not restore its prior state on failure'
 
-Write-Host '=== 1.42 package metadata ==='
-Assert-Match $inf 'DriverVer\s*=\s*08/01/2026,1\.42\.0\.0' `
-    'INF version is not 1.42.0.0'
-Assert-Match $package 'TimeCard-1\.42-x64\.cab' `
-    'submission CAB name is not version 1.42'
-Assert-Match $providerResource 'FILEVERSION\s+1,42,0,0' `
-    'W32Time provider file version is not 1.42.0.0'
+Write-Host '=== 1.43 package metadata ==='
+Assert-Match $inf 'DriverVer\s*=\s*08/02/2026,1\.43\.0\.0' `
+    'INF version is not 1.43.0.0'
+Assert-Match $package 'TimeCard-1\.43-x64\.cab' `
+    'submission CAB name is not version 1.43'
+Assert-Match $providerResource 'FILEVERSION\s+1,43,0,0' `
+    'W32Time provider file version is not 1.43.0.0'
 Assert-Match $providerBuild `
     'rc\.exe[\s\S]*?timecard_time_provider\.rc[\s\S]*?timecard_time_provider\.res' `
     'the W32Time provider build does not link its version resource'
 Assert-Match $controlAssembly `
-    'AssemblyFileVersion\("1\.42\.0\.0"\)' `
-    'Control Center file version is not 1.42.0.0'
+    'AssemblyFileVersion\("1\.43\.0\.0"\)' `
+    'Control Center file version is not 1.43.0.0'
 Assert-Match $serviceAssembly `
-    'AssemblyFileVersion\("1\.42\.0\.0"\)' `
-    'oscillatord service file version is not 1.42.0.0'
+    'AssemblyFileVersion\("1\.43\.0\.0"\)' `
+    'oscillatord service file version is not 1.43.0.0'
 Assert-Match $serviceRuntime `
-    'ServiceVersion\s*=\s*"1\.42\.0"' `
-    'oscillatord monitoring version is not 1.42.0'
-Assert-Match $ptp 'DriverVersion\s*=\s*0x0001002au' `
-    'runtime driver version is not 1.42'
+    'ServiceVersion\s*=\s*"1\.43\.0"' `
+    'oscillatord monitoring version is not 1.43.0'
+Assert-Match $ptp 'DriverVersion\s*=\s*0x0001002bu' `
+    'runtime driver version is not 1.43'
 
 Write-Host "Advanced FPGA static tests passed ($assertions assertions; no hardware accessed)."

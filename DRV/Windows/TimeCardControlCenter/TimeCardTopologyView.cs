@@ -177,12 +177,47 @@ namespace TimeCardControlCenter
             string title = layout.Key == "atomic" && node != null &&
                 node.Name.StartsWith("mRO-50",
                     StringComparison.OrdinalIgnoreCase) ?
-                "MRO-50 ATOMIC" : layout.Title;
-            dc.DrawText(Text(title, 11, Colors.White, FontWeights.SemiBold),
-                new Point(layout.Bounds.Left + 27, layout.Bounds.Top + 9));
+                "mRO-50 ATOMIC" : layout.Title;
+            double titleLeft = layout.Bounds.Left + 27;
+            double titleWidth = Math.Max(1,
+                layout.Bounds.Right - titleLeft - 8);
+            FormattedText titleText = Text(title, 11, Colors.White,
+                FontWeights.SemiBold);
+            double statusTop = layout.Bounds.Top + 34;
+
+            dc.PushClip(new RectangleGeometry(new Rect(
+                layout.Bounds.Left + 2, layout.Bounds.Top + 2,
+                Math.Max(1, layout.Bounds.Width - 4),
+                Math.Max(1, layout.Bounds.Height - 4)), 9, 9));
+            if (layout.Key == "atomic" &&
+                title.StartsWith("mRO-50", StringComparison.Ordinal) &&
+                titleText.Width > titleWidth)
+            {
+                /* Keep the ART label legible on compact Overview layouts. */
+                dc.DrawText(Text("mRO-50", 10, Colors.White,
+                    FontWeights.SemiBold), new Point(titleLeft,
+                    layout.Bounds.Top + 5));
+                dc.DrawText(Text("ATOMIC", 8,
+                    Color.FromRgb(151, 178, 197), FontWeights.SemiBold),
+                    new Point(titleLeft, layout.Bounds.Top + 20));
+                statusTop = layout.Bounds.Top + 41;
+            }
+            else
+            {
+                if (titleText.Width > titleWidth)
+                {
+                    double fittedSize = Math.Max(7,
+                        11 * titleWidth / titleText.Width);
+                    titleText = Text(title, fittedSize, Colors.White,
+                        FontWeights.SemiBold);
+                }
+                dc.DrawText(titleText,
+                    new Point(titleLeft, layout.Bounds.Top + 9));
+            }
             string status = node == null ? "WAITING" : node.Status;
             dc.DrawText(Text(status, 9, color, FontWeights.SemiBold),
-                new Point(layout.Bounds.Left + 14, layout.Bounds.Top + 34));
+                new Point(layout.Bounds.Left + 14, statusTop));
+            dc.Pop();
         }
 
         private void DrawSmaConnectors(DrawingContext dc, Rect board)

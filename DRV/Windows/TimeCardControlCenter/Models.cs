@@ -2276,7 +2276,7 @@ namespace TimeCardControlCenter
         {
             get
             {
-                return OscillatorType == 2u ? "Microchip mRO-50" :
+                return OscillatorType == 2u ? "Safran mRO-50" :
                     OscillatorType == 3u ? "Microchip SA53" :
                     OscillatorType == 1u ? "UART oscillator (probe required)" :
                     "No controllable oscillator";

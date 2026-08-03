@@ -90,7 +90,7 @@ controller from starting.
 
 ## Hardware compatibility
 
-Driver 1.42 / ABI 15 selects the same three PCI profiles and resource maps as
+Driver 1.43 / ABI 15 selects the same three PCI profiles and resource maps as
 the Linux `ptp_ocp` driver while keeping their board-level sensor populations
 distinct. Meta/Facebook and Celestica share the rev1 and rev2 FPGA maps. Older
 PCI revision 00 gateware uses the rev1 MSI map and may expose 2 or 32 interrupt
@@ -127,7 +127,11 @@ The mRO-50 bridge reports enable/lock, raw temperature, and fine/coarse
 adjustment words without depending on the optional 16550 serial bridge. The
 temperature is intentionally displayed as a raw word because its physical
 scale is not published for this gateware image. The mRO serial port is still
-configured for 9,600 baud when present.
+configured for 9,600 baud when present. Driver 1.43 leaves ART board-config bit
+zero so the direct bridge remains connected for native oscillatord. Explicitly
+selecting `mro-serial on` is a diagnostic mode that disconnects direct
+fine/coarse control; stop oscillatord before using it and select
+`mro-serial off` before restarting discipline.
 
 Linux assigns no fixed baud to the ART primary-GNSS UART. Driver 1.35 likewise
 preserves its gateware divisor during device start; an operator may still set
@@ -203,7 +207,7 @@ future bitstream work rather than host software, is in
 
 ## Native oscillator discipline
 
-Driver 1.42 / ABI 15 exposes a capability-first ABI instead of asking user mode to infer
+Driver 1.43 / ABI 15 exposes a capability-first ABI instead of asking user mode to infer
 hardware from a PCI ID or probe arbitrary MMIO. `IOCTL_TIMECARD_GET_CAPABILITIES`
 reports the board profile, oscillator type, safe steering ranges, paired-PPS
 indices, phase-step support, temperature telemetry, hardware-discipline support,
@@ -212,9 +216,10 @@ and whether a writable discipline EEPROM is present.
 On Orolia/Safran ART, the driver maps the FPGA's GNSS PPS timestamp input 0 and
 internal-oscillator PPS timestamp input 5. A phase sample latches both timestamp
 counters consistently and reports `oscillator - reference`, normalized to one
-PPS period. Capture uses polling mode with its interrupt masks disabled, is
-suspended safely across D0 exit, and is restored only when an application had
-requested it. PHC corrections are relative and bounded to
+PPS period. Driver 1.43 uses the same rising-edge interrupts as Linux and turns
+the ART versionless event stream into coherent software counters for the
+native service. Capture is suspended safely across D0 exit and restored only
+when an application had requested it. PHC corrections are relative and bounded to
 `-499999999..499999999` ns. Direct mRO-50 fine and coarse writes are constrained
 to the published miniCOD ranges (`0..4800` and `0..0x3fffff`).
 
@@ -352,7 +357,7 @@ Run the hardware-independent FPGA and product checks from this directory:
 ```
 
 `test-fpga-advanced.ps1` verifies ABI 15 layouts, revision and synthesis gates,
-interrupt maps, trusted static inventory, transactional rollback, and 1.42
+interrupt maps, trusted static inventory, transactional rollback, and 1.43
 metadata without opening the device. It does not replace real signal loopback
 or interrupt-load testing.
 
@@ -389,7 +394,7 @@ The application can restart itself with administrator rights when the driver
 requires elevation. See [TimeCardControlCenter/README.md](TimeCardControlCenter/README.md)
 for complete build, UART, and capability details.
 
-Driver **1.42 / ABI 15** is required for the complete feature set shown below.
+Driver **1.43 / ABI 15** is required for the complete feature set shown below.
 
 ![Control Center overview](assets/timecard-control-center.png)
 
@@ -768,7 +773,7 @@ attempts this access on ART. The identity makes diagnostics and exported
 profiles traceable to a board layout and bitstream version without pretending
 to know synthesis generics that the image does not publish.
 
-Driver 1.42 / ABI 15 completes the software-feasible FPGA/UCM audit gaps. It
+Driver 1.43 / ABI 15 completes the software-feasible FPGA/UCM audit gaps. It
 adds six-channel interrupt-backed Signal Timestamper capture, generator
 completion events, smooth and advanced Adjustable Clock control, PFEC and
 protocol-specific ToD telemetry, ToD Master UTC handshakes, IRIG AM/code/year,

@@ -75,6 +75,7 @@ namespace TimeCardControlCenter
             TestUtcAndLeapValidation();
             TestPulseSafetyAndRfTelemetry();
             TestHardwareWriteOptIn();
+            TestPassiveBaudDetection();
             TestReceiverProfileAndAcknowledgement();
             TestStartupPlanner(epoch);
             return assertions.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -388,6 +389,24 @@ namespace TimeCardControlCenter
                     false, true, CancellationToken.None).GetAwaiter()
                     .GetResult();
             }, "CFG-VALSET NAK is surfaced");
+        }
+
+        private static void TestPassiveBaudDetection()
+        {
+            TimeCardClient transport = new TimeCardClient();
+            transport.Reads.Enqueue(new byte[0]);
+            transport.Reads.Enqueue(new byte[0]);
+            transport.Reads.Enqueue(new byte[0]);
+            transport.Reads.Enqueue(UbxProtocol.BuildFrame(0x01, 0x61,
+                new byte[] { 0x01, 0x00, 0x00, 0x00 }));
+            NativeGnssSessionManager manager =
+                new NativeGnssSessionManager(transport, 0, 115200);
+            uint detected = manager.DetectReceiverBaudAsync(
+                true, CancellationToken.None).GetAwaiter().GetResult();
+            Equal(detected, 115200u,
+                "checksum-valid passive UBX confirms receiver baud");
+            Equal(transport.WriteCalls, 1,
+                "baud detection still requests MON-VER before passive proof");
         }
 
         private static bool HasConfiguration(

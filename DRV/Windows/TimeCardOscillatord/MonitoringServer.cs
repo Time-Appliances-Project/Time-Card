@@ -514,6 +514,9 @@ namespace TimeCardControlCenter
                     if (!IsLocalClient(pipe))
                         throw new UnauthorizedAccessException(
                             "Remote named-pipe clients are not accepted.");
+                    if (!IsClientAuthenticated(pipe))
+                        throw new UnauthorizedAccessException(
+                            "Anonymous named-pipe clients are not accepted.");
                     bool administrator = IsClientAdministrator(pipe);
                     OscillatordWireRequest request =
                         await MonitoringWire.ReadRequestAsync(pipe, token)
@@ -586,8 +589,11 @@ namespace TimeCardControlCenter
                 PipeAccessRights.FullControl, AccessControlType.Allow));
             security.AddAccessRule(new PipeAccessRule(
                 new SecurityIdentifier(
-                    WellKnownSidType.AuthenticatedUserSid, null),
-                PipeAccessRights.ReadWrite, AccessControlType.Allow));
+                    WellKnownSidType.WorldSid, null),
+                PipeAccessRights.ReadWrite |
+                    PipeAccessRights.CreateNewInstance |
+                    PipeAccessRights.Synchronize,
+                AccessControlType.Allow));
             return new NamedPipeServerStream(pipeName, PipeDirection.InOut,
                 NamedPipeServerStream.MaxAllowedServerInstances,
                 PipeTransmissionMode.Byte, PipeOptions.Asynchronous,
@@ -607,6 +613,20 @@ namespace TimeCardControlCenter
                 }
             });
             return administrator;
+        }
+
+        private static bool IsClientAuthenticated(NamedPipeServerStream pipe)
+        {
+            bool authenticated = false;
+            pipe.RunAsClient(() =>
+            {
+                using (WindowsIdentity identity = WindowsIdentity.GetCurrent())
+                {
+                    authenticated = identity != null &&
+                        identity.IsAuthenticated && !identity.IsAnonymous;
+                }
+            });
+            return authenticated;
         }
 
         private static bool IsLocalClient(NamedPipeServerStream pipe)

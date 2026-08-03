@@ -964,13 +964,15 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 
     if (context->BoardProfile == TIMECARD_BOARD_ART) {
         /*
-         * ART gateware keeps the mRO-50 UART disconnected until this board
-         * configuration bit is asserted.  This is also done by the upstream
-         * Linux ptp_ocp ART initializer.
+         * ART board-config bit zero selects the direct FPGA mRO-50 bridge
+         * used by oscillatord; bit one routes the optional diagnostic UART
+         * and makes the direct fine/coarse bridge stop responding. Linux
+         * leaves this bit clear for normal discipline and changes it only
+         * when an operator explicitly requests the serial route.
          */
         if (context->ArtBoardConfig != NULL) {
             WdfWaitLockAcquire(context->RegisterLock, NULL);
-            WRITE_REGISTER_ULONG((PULONG)context->ArtBoardConfig, 1u);
+            WRITE_REGISTER_ULONG((PULONG)context->ArtBoardConfig, 0u);
             WdfWaitLockRelease(context->RegisterLock);
         }
 

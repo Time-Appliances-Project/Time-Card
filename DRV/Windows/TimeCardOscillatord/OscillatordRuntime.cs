@@ -17,7 +17,7 @@ namespace TimeCardControlCenter
 
     internal sealed class OscillatordRuntime : IDisposable
     {
-        public const string ServiceVersion = "1.42.0";
+        public const string ServiceVersion = "1.43.0";
         private readonly object deviceGate = new object();
         private readonly object snapshotGate = new object();
         private readonly SemaphoreSlim lifecycle = new SemaphoreSlim(1, 1);
@@ -279,6 +279,10 @@ namespace TimeCardControlCenter
             string token, MonitoringOrigin origin)
         {
             OscillatordSnapshot response = CurrentSnapshot();
+            /* Report authorization for this caller/transport, not merely the
+             * server-wide TCP policy. This makes local Administrator status
+             * and remote token status truthful before controls are enabled. */
+            response.ControlEnabled = ControlAuthorized(token, origin);
             bool readEeprom = request == OscillatordRequest.ReadEeprom;
             if (request == OscillatordRequest.Status)
                 return response;

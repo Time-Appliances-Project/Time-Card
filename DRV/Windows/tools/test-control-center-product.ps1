@@ -29,7 +29,7 @@ if ($windowXaml -notmatch
     $windowXaml -notmatch 'Protected named pipe' -or
     $windowXaml -notmatch 'Remote TCP traffic is not encrypted' -or
     $oscillatordWindowSource -notmatch
-        'RequestLocalAsync\(request,\s*string\.Empty\)' -or
+        'RequestLocalWithFallbackAsync\(\s*request,\s*string\.Empty\)' -or
     $oscillatordWindowSource -notmatch
         'RequestAsync\(host,\s*port,\s*request' -or
     $oscillatordWindowSource -match 'RequestPreferredAsync' -or
@@ -64,6 +64,14 @@ if ($topologySource -notmatch 'GetSmaLaneWidth' -or
     $topologySource -notmatch 'ActualWidth\s*<\s*520' -or
     $topologySource -notmatch 'nodeAreaRight\s*=\s*board\.Right\s*-\s*smaLaneWidth') {
     throw 'Control Center product test failed: spaced SMA topology lane is incomplete.'
+}
+if ($topologySource -notmatch
+        'titleText\.Width\s*>\s*titleWidth' -or
+    $topologySource -notmatch
+        'Text\("mRO-50",\s*10' -or
+    $topologySource -notmatch
+        'dc\.PushClip\(new RectangleGeometry') {
+    throw 'Control Center product test failed: compact topology labels can overflow their nodes.'
 }
 if ($windowSource -notmatch 'UpdateImuCubeOrientation' -or
     $windowSource -notmatch 'UpdateImuCubeFromReading' -or

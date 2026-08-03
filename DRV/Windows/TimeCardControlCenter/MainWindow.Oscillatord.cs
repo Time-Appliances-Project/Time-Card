@@ -32,7 +32,7 @@ namespace TimeCardControlCenter
                 NativeDisciplineConnectionText.Foreground =
                     (Brush)FindResource("AccentBrush");
                 NativeDisciplineBoardText.Text = "Orolia/Safran ART";
-                NativeDisciplineOscillatorText.Text = "Microchip mRO-50";
+                NativeDisciplineOscillatorText.Text = "Safran mRO-50";
                 NativeDisciplineCapabilityText.Text =
                     "Paired GNSS/internal PPS · direct fine/coarse steering · PHC phase correction · miniCOD 3.6.0";
                 ApplyNativeDisciplineStatus(new NativeDisciplineStatus
@@ -330,7 +330,7 @@ namespace TimeCardControlCenter
                 "REMOTE OSCILLATORD" : "LOCAL WINDOWS SERVICE";
             OscillatordEndpointSummaryText.Text = remote ?
                 "Explicit TCP connection to oscillatord on another Windows or Linux host." :
-                "Protected named pipe · no IP address, TCP port, shared token, or WSL required.";
+                "Automatic local service connection · protected pipe first with a read-only local fallback · no settings, token, or WSL required.";
             OscillatordRefreshButton.Content = remote ?
                 "Connect remote" : "Connect local service";
             if (!remote)
@@ -388,13 +388,19 @@ namespace TimeCardControlCenter
                 }
                 else
                 {
+                    string transport = oscillatordClient.LastRequestUsedLocalPipe ?
+                        "the protected named pipe" :
+                        "the automatic read-only local fallback";
                     OscillatordResultText.Text = string.Format(CultureInfo.InvariantCulture,
-                        "{0:u}  Local Windows service responded over the protected named pipe. Protocol {1}; {2}.",
-                        DateTime.UtcNow, snapshot.ProtocolVersion,
-                        HasAdministratorAccess() ? "administrator control available" : "telemetry is read-only until the app is elevated");
+                        "{0:u}  Local Windows service responded over {1}. Protocol {2}; {3}.",
+                        DateTime.UtcNow, transport, snapshot.ProtocolVersion,
+                        oscillatordClient.LastRequestUsedLocalPipe &&
+                        HasAdministratorAccess() ?
+                            "administrator control available" :
+                            "telemetry is read-only until the protected pipe is available to an elevated app");
                     Log(string.Format(CultureInfo.InvariantCulture,
-                        "oscillatord {0} responded through the protected local Windows service pipe.",
-                        snapshot.Version ?? "unknown"));
+                        "oscillatord {0} responded through {1}.",
+                        snapshot.Version ?? "unknown", transport));
                 }
             }
             catch (Exception ex)
@@ -504,7 +510,8 @@ namespace TimeCardControlCenter
             {
                 host = string.Empty;
                 port = 0;
-                return oscillatordClient.RequestLocalAsync(request, string.Empty);
+                return oscillatordClient.RequestLocalWithFallbackAsync(
+                    request, string.Empty);
             }
 
             host = OscillatordHostTextBox.Text.Trim();
@@ -568,6 +575,7 @@ namespace TimeCardControlCenter
                 "{0} {1} · protocol {2}", snapshot.Service ?? "oscillatord",
                 snapshot.Version ?? "unknown", snapshot.ProtocolVersion);
             bool controlAllowed = remote ? snapshot.ControlEnabled :
+                oscillatordClient.LastRequestUsedLocalPipe &&
                 HasAdministratorAccess();
             if (remote)
             {
@@ -577,9 +585,21 @@ namespace TimeCardControlCenter
             }
             else
             {
-                OscillatordControlPolicyText.Text = controlAllowed ?
-                    "Protected local pipe. This elevated app can request guarded state changes; every operation is still confirmed." :
-                    "Protected local pipe permits telemetry. Restart the app as Administrator to enable guarded state changes; no token is used.";
+                if (controlAllowed)
+                {
+                    OscillatordControlPolicyText.Text =
+                        "Protected local pipe. This elevated app can request guarded state changes; every operation is still confirmed.";
+                }
+                else if (oscillatordClient.LastRequestUsedLocalPipe)
+                {
+                    OscillatordControlPolicyText.Text =
+                        "Protected local pipe permits telemetry. Restart the app as Administrator to enable guarded state changes; no token is used.";
+                }
+                else
+                {
+                    OscillatordControlPolicyText.Text =
+                        "Local telemetry fallback is active and read-only. Restart the app as Administrator to use guarded controls through the protected pipe.";
+                }
             }
             OscillatordControlPolicyText.Foreground = (Brush)FindResource(
                 controlAllowed ? "GoldBrush" : "MutedBrush");

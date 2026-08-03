@@ -4,7 +4,7 @@ The Time Card Control Center is a dependency-free Windows desktop dashboard
 for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
-Driver 1.42 / ABI 15 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
+Driver 1.43 / ABI 15 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
 ART profiles from the Linux driver. The Celestica workspace uses its actual
 LM75B, SHT3x, ICP-10100, and BNO08x population rather than presenting the
 Meta-only BME280 and INA219 devices. On ART, the application switches to a
@@ -167,7 +167,7 @@ write IOCTLs. The application opens normally so its interface and diagnostics
 remain available; when access is denied, select **Restart as administrator**.
 Drivers that predate the multi-card device-interface inventory remain
 discoverable through the legacy `\\.\TimeCard0` compatibility path. Installing
-driver 1.42 is still recommended to expose the complete ABI 15 feature set.
+driver 1.43 is still recommended to expose the complete ABI 15 feature set.
 
 The driver and card must already be installed. The dashboard reconnects every
 five seconds if the card is temporarily unavailable.
@@ -488,9 +488,10 @@ confirmation. The application does not invent a Celsius conversion for the
 raw temperature word because ART FPGA v0.0.9 does not publish its scale.
 
 The optional ART 16550 mRO serial route remains configured for 9,600 baud, 8N1
-when implemented. The direct bridge is authoritative and continues to work on
-the tested FPGA v0.0.9 image even though its mRO UART block reports line status
-`0x00`.
+when implemented. It is disabled by default because ART board-config bit one
+disconnects the authoritative direct bridge needed by oscillatord. Use the
+serial route only for diagnostics while discipline is stopped, then restore
+the direct route before starting discipline.
 
 Digital tuning and discipline settings take effect immediately. Enabling PPS
 disciplining can initiate a JamSync and move the 1PPS phase; the application
@@ -569,7 +570,11 @@ with the integrated Linux
 shows service and protocol versions, phase offset and clock class, disciplining
 state and convergence, holdover readiness, mRO-50 lock/temperature/fine/coarse
 controls, and GNSS fix, satellites, accuracy, survey, leap-second, and antenna
-state. The native service and Linux service both use TCP port 2958 by default.
+state. Local mode tries the protected Windows named pipe first and automatically
+uses the service's read-only loopback endpoint when Windows integrity policy
+denies a normal desktop process access to the LocalSystem-created pipe. No host,
+port, token, or WSL setting is exposed for this fallback. The native service and
+Linux service both use TCP port 2958 by default.
 
 The remote token is held only in the password field for the current process,
 is cleared when returning to local mode, and is never written to application

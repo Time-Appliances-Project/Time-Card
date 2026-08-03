@@ -49,6 +49,15 @@ TimeCardTimestampExtendedSurface(PDEVICE_CONTEXT context)
     return context->BoardProfile != TIMECARD_BOARD_ART;
 }
 
+static BOOLEAN
+TimeCardTimestampCoreUsable(PDEVICE_CONTEXT context, ULONG version)
+{
+    /* ART's upstream basic core has no reliable common version register. */
+    return context->BoardProfile == TIMECARD_BOARD_ART ||
+           (TimeCardTimestampVersionPresent(version) &&
+            TimeCardTimestampVersionAtLeast(version, 1u, 3u));
+}
+
 static ULONG
 TimeCardTimestampMessageForChannel(PDEVICE_CONTEXT context, ULONG channel)
 {
@@ -177,8 +186,7 @@ TimeCardTimestampQueryLocked(PDEVICE_CONTEXT context, ULONG channel,
     if (!context->HardwareReady || reg == NULL)
         return STATUS_NOT_SUPPORTED;
     version = READ_REGISTER_ULONG((PULONG)&reg->Version);
-    if (!TimeCardTimestampVersionPresent(version) ||
-        !TimeCardTimestampVersionAtLeast(version, 1u, 3u))
+    if (!TimeCardTimestampCoreUsable(context, version))
         return STATUS_NOT_SUPPORTED;
 
     RtlZeroMemory(control, sizeof(*control));
@@ -192,15 +200,16 @@ TimeCardTimestampQueryLocked(PDEVICE_CONTEXT context, ULONG channel,
          TIMECARD_TIMESTAMP_ENABLE_MASK) != 0u) {
         control->Flags |= TIMECARD_TIMESTAMP_FLAG_ENABLED;
     }
-    if (TimeCardTimestampVersionAtLeast(version, 1u, 2u)) {
+    if (context->BoardProfile == TIMECARD_BOARD_ART ||
+        TimeCardTimestampVersionAtLeast(version, 1u, 2u)) {
         control->Status = READ_REGISTER_ULONG((PULONG)&reg->Error);
         if ((control->Status & TIMECARD_TIMESTAMP_ERROR_MASK) != 0u)
             control->Flags |= TIMECARD_TIMESTAMP_FLAG_DROP_ERROR;
     }
     rawPolarity = READ_REGISTER_ULONG((PULONG)&reg->Polarity) & 1u;
     control->Polarity = rawPolarity != 0u ?
-        TIMECARD_TIMESTAMP_POLARITY_RISING :
-        TIMECARD_TIMESTAMP_POLARITY_FALLING;
+        TIMECARD_TIMESTAMP_POLARITY_FALLING :
+        TIMECARD_TIMESTAMP_POLARITY_RISING;
     control->Interrupt = READ_REGISTER_ULONG((PULONG)&reg->Interrupt) & 1u;
     control->InterruptMask = READ_REGISTER_ULONG(
         (PULONG)&reg->InterruptMask) & 1u;
@@ -311,8 +320,7 @@ TimeCardTimestampSet(PDEVICE_CONTEXT context,
         goto done;
     }
     version = READ_REGISTER_ULONG((PULONG)&reg->Version);
-    if (!TimeCardTimestampVersionPresent(version) ||
-        !TimeCardTimestampVersionAtLeast(version, 1u, 3u)) {
+    if (!TimeCardTimestampCoreUsable(context, version)) {
         status = STATUS_NOT_SUPPORTED;
         goto done;
     }
@@ -323,6 +331,7 @@ TimeCardTimestampSet(PDEVICE_CONTEXT context,
         goto done;
     }
     if ((request->Flags & TIMECARD_TIMESTAMP_FLAG_CLEAR_ERROR) != 0u &&
+        context->BoardProfile != TIMECARD_BOARD_ART &&
         !TimeCardTimestampVersionAtLeast(version, 1u, 2u)) {
         status = STATUS_NOT_SUPPORTED;
         goto done;
@@ -336,7 +345,7 @@ TimeCardTimestampSet(PDEVICE_CONTEXT context,
 
     WRITE_REGISTER_ULONG((PULONG)&reg->InterruptMask, 0u);
     WRITE_REGISTER_ULONG((PULONG)&reg->Enable, 0u);
-    rawPolarity = request->Polarity == TIMECARD_TIMESTAMP_POLARITY_RISING ?
+    rawPolarity = request->Polarity == TIMECARD_TIMESTAMP_POLARITY_FALLING ?
         1u : 0u;
     WRITE_REGISTER_ULONG((PULONG)&reg->Polarity,
         (oldPolarity & ~1u) | rawPolarity);
@@ -491,6 +500,25 @@ TimeCardHandleTimestampInterrupt(PDEVICE_CONTEXT context, ULONG messageId)
     ULONG index;
 
     channel = TimeCardTimestampChannelForMessage(context, messageId);
+    if (context->BoardProfile == TIMECARD_BOARD_ART &&
+        context->PhaseCaptureEnabled &&
+        (channel == TIMECARD_TIMESTAMP_GNSS1 ||
+         channel == TIMECARD_TIMESTAMP_PHC)) {
+        reg = channel == TIMECARD_TIMESTAMP_GNSS1 ?
+            context->PhaseReference : context->PhaseOscillator;
+        if (reg == NULL ||
+            (READ_REGISTER_ULONG((PULONG)&reg->Interrupt) & 1u) == 0u) {
+            return FALSE;
+        }
+        TimeCardRecordPhaseTimestamp(
+            context, channel,
+            READ_REGISTER_ULONG((PULONG)&reg->Error),
+            READ_REGISTER_ULONG((PULONG)&reg->TimeNanoseconds),
+            READ_REGISTER_ULONG((PULONG)&reg->TimeSeconds));
+        WRITE_REGISTER_ULONG((PULONG)&reg->Interrupt,
+                             TIMECARD_TIMESTAMP_IRQ_MASK);
+        return TRUE;
+    }
     if (channel == MAXULONG ||
         (context->TimestampInterruptMask & (1u << channel)) == 0u)
         return FALSE;
@@ -554,8 +582,7 @@ TimeCardTimestampInitialize(PDEVICE_CONTEXT context)
         {
             ULONG version = READ_REGISTER_ULONG((PULONG)&reg->Version);
 
-            if (!TimeCardTimestampVersionPresent(version) ||
-                !TimeCardTimestampVersionAtLeast(version, 1u, 3u)) {
+            if (!TimeCardTimestampCoreUsable(context, version)) {
                 context->Timestamp[channel] = NULL;
                 continue;
             }
@@ -614,11 +641,10 @@ TimeCardTimestampPowerUp(PDEVICE_CONTEXT context)
             continue;
         }
         version = READ_REGISTER_ULONG((PULONG)&reg->Version);
-        if (!TimeCardTimestampVersionPresent(version) ||
-            !TimeCardTimestampVersionAtLeast(version, 1u, 3u))
+        if (!TimeCardTimestampCoreUsable(context, version))
             continue;
         polarity = context->TimestampRequestedPolarity[channel] ==
-            TIMECARD_TIMESTAMP_POLARITY_RISING ? 1u : 0u;
+            TIMECARD_TIMESTAMP_POLARITY_FALLING ? 1u : 0u;
         WRITE_REGISTER_ULONG((PULONG)&reg->Polarity, polarity);
         if (TimeCardTimestampExtendedSurface(context)) {
             WRITE_REGISTER_ULONG(
