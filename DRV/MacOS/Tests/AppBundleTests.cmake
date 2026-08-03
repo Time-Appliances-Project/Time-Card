@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: BSD-3-Clause
+
+if(NOT IS_DIRECTORY "${TIMECARD_APP_BUNDLE}")
+    message(FATAL_ERROR "TimeCardMacOS app bundle not found: ${TIMECARD_APP_BUNDLE}")
+endif()
+
+set(extensions_dir
+    "${TIMECARD_APP_BUNDLE}/Contents/Library/SystemExtensions")
+file(GLOB dext_bundles LIST_DIRECTORIES true "${extensions_dir}/*.dext")
+list(LENGTH dext_bundles dext_count)
+if(NOT dext_count EQUAL 1)
+    message(FATAL_ERROR
+        "expected exactly one embedded DriverKit extension, found ${dext_count}")
+endif()
+
+list(GET dext_bundles 0 dext_bundle)
+get_filename_component(dext_filename "${dext_bundle}" NAME)
+string(REGEX REPLACE "\\.dext$" "" dext_filename_identifier
+    "${dext_filename}")
+
+set(dext_info_plist "${dext_bundle}/Info.plist")
+if(NOT EXISTS "${dext_info_plist}")
+    message(FATAL_ERROR "embedded DEXT Info.plist not found: ${dext_info_plist}")
+endif()
+
+function(read_plist_key output_variable key)
+    execute_process(
+        COMMAND /usr/libexec/PlistBuddy -c "Print :${key}" "${dext_info_plist}"
+        RESULT_VARIABLE plist_result
+        OUTPUT_VARIABLE plist_value
+        ERROR_VARIABLE plist_error
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT plist_result EQUAL 0)
+        message(FATAL_ERROR "cannot read DEXT ${key}: ${plist_error}")
+    endif()
+    set(${output_variable} "${plist_value}" PARENT_SCOPE)
+endfunction()
+
+read_plist_key(bundle_identifier CFBundleIdentifier)
+read_plist_key(bundle_executable CFBundleExecutable)
+read_plist_key(bundle_package_type CFBundlePackageType)
+read_plist_key(usage_description OSBundleUsageDescription)
+
+if(NOT bundle_identifier STREQUAL "org.opentimeserver.timecard.macos.driver")
+    message(FATAL_ERROR "unexpected DEXT bundle identifier: ${bundle_identifier}")
+endif()
+if(NOT dext_filename_identifier STREQUAL bundle_identifier)
+    message(FATAL_ERROR
+        "DEXT filename must match its bundle identifier: ${dext_filename}")
+endif()
+if(NOT bundle_executable STREQUAL bundle_identifier)
+    message(FATAL_ERROR
+        "unexpected DEXT executable name: ${bundle_executable}")
+endif()
+if(NOT bundle_package_type STREQUAL "DEXT")
+    message(FATAL_ERROR "unexpected DEXT package type: ${bundle_package_type}")
+endif()
+if(usage_description STREQUAL "")
+    message(FATAL_ERROR "DEXT usage description must not be empty")
+endif()
+if(NOT EXISTS "${dext_bundle}/${bundle_executable}")
+    message(FATAL_ERROR
+        "embedded DEXT executable not found: ${dext_bundle}/${bundle_executable}")
+endif()

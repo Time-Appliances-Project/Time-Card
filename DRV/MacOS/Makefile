@@ -8,9 +8,14 @@ check:
 	ctest --test-dir .build/cmake --output-on-failure
 
 build-app:
+	cmake -E remove_directory \
+		"$(CURDIR)/.build/xcode-app/Build/Products/Debug/TimeCardMacOS.app"
 	xcodebuild -project TimeCardMacOS.xcodeproj -scheme TimeCardMacOS \
 		-configuration Debug -derivedDataPath .build/xcode-app \
-		CODE_SIGNING_ALLOWED=NO build
+		ARCHS="$(ARCHS)" ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
+	cmake \
+		-DTIMECARD_APP_BUNDLE="$(CURDIR)/.build/xcode-app/Build/Products/Debug/TimeCardMacOS.app" \
+		-P Tests/AppBundleTests.cmake
 
 build-cli-app:
 	xcodebuild -project TimeCardMacOS.xcodeproj -scheme timecardctl \

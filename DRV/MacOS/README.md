@@ -72,9 +72,17 @@ xcodebuild \
   -scheme TimeCardMacOS \
   -configuration Debug \
   -derivedDataPath .build/xcode-app \
+  ARCHS=x86_64 \
+  ONLY_ACTIVE_ARCH=NO \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
+
+The equivalent convenience command for the Intel Mac Pro build is
+`make build-app ARCHS=x86_64`. It also checks that the embedded extension is
+named `org.opentimeserver.timecard.macos.driver.dext`. DriverKit requires the
+DEXT filename, without the `.dext` suffix, to exactly match its bundle
+identifier.
 
 An unsigned build validates the Swift, C, C++, IIG, linking, plist, and bundle
 layout. It cannot activate the system extension.
