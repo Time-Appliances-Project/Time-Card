@@ -6,6 +6,11 @@ check:
 	cmake -S . -B .build/cmake -DCMAKE_BUILD_TYPE=Debug
 	cmake --build .build/cmake --parallel
 	ctest --test-dir .build/cmake --output-on-failure
+	xcrun swiftc -parse-as-library -swift-version 5 \
+		App/TimeCardClient.swift Tests/TimeCardClientTests.swift \
+		-framework IOKit -framework CoreFoundation \
+		-o .build/cmake/timecard-control-center-model-tests
+	.build/cmake/timecard-control-center-model-tests
 
 build-app:
 	cmake -E remove_directory \

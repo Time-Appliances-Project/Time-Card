@@ -1,8 +1,8 @@
 # OCP Time Card for macOS
 
-This repository contains the first native macOS driver foundation for the OCP
-Time Card. It uses PCIDriverKit, packages the driver in a SwiftUI host app, and
-provides a small command-line diagnostic client.
+This repository contains the native macOS driver and Control Center for the OCP
+Time Card. It uses PCIDriverKit, packages the driver in a SwiftUI monitoring
+app, and provides a small command-line diagnostic client.
 
 ## Current milestone
 
@@ -23,7 +23,13 @@ The current implementation provides:
 - Version-gated clock and TOD status reads
 - Capability and field-validity reporting for absent or gated registers
 - A versioned, size-checked user-client ABI v2
-- A host app for driver activation and removal
+- A native SwiftUI Control Center with:
+  - driver activation, update, and removal
+  - live card discovery and explicit multi-card selection
+  - PCI identity, board profile, register-map, BAR, and capability views
+  - raw card time, clock status, ToD status, and cross-timestamp telemetry
+  - a rolling bracketed sampling-window chart
+  - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, and `set-card-from-system`
 
 The common PHC block is available on every matched profile. ART uses its own
@@ -47,21 +53,20 @@ future EEPROM/I2C work.
 ## Project layout
 
 ```text
-App/       SwiftUI driver installer
+App/       SwiftUI Control Center and driver lifecycle manager
 CLI/       timecardctl diagnostic client, packaged as a macOS app
 Driver/    PCIDriverKit extension and user client
 Shared/    Stable C ABI and hardware register definitions
-Tests/     Host-side register-map tests
+Tests/     Register-map, safety, bundle, and Swift model tests
 ```
 
 ## Build and test without signing
 
-Run the portable register-map tests and build the CLI:
+Run the portable driver tests, build the CLI, and run the Swift Control Center
+model tests:
 
 ```sh
-cmake -S . -B .build/cmake -DCMAKE_BUILD_TYPE=Debug
-cmake --build .build/cmake --parallel
-ctest --test-dir .build/cmake --output-on-failure
+make check
 ```
 
 On macOS, CMake places the executable in the unsigned wrapper at
@@ -169,9 +174,11 @@ development provisioning profile at
 4. Build and activate the signed host app.
 5. Approve the extension in System Settings if prompted.
 6. Confirm activation with `systemextensionsctl list`.
-7. Run `timecardctl.app/Contents/MacOS/timecardctl status`, followed by the
+7. Open the Control Center and verify that the Overview, Precision Clock, and
+   Hardware pages show the selected card.
+8. Run `timecardctl.app/Contents/MacOS/timecardctl status`, followed by the
    same executable with `get`.
-8. Compare the reported card time, core versions, and available status fields
+9. Compare the reported card time, core versions, and available status fields
    with the Linux reference setup.
 
 Do not use `set-card-from-system` until read-only status and time access have
@@ -187,6 +194,8 @@ and it does not yet apply a UTC/TAI correction.
   flash, frequency counters, and signal generators are not implemented.
 - Optional UTC, leap, GNSS, and satellite registers are deliberately gated
   until an exact per-card FPGA image contract is implemented.
+- The Control Center labels card time as raw and does not calculate a card to
+  macOS offset until the driver exposes a trusted UTC-to-TAI contract.
 - The driver does not create a Linux-style `/dev/ptpN` device.
 - No daemon currently disciplines the macOS system clock.
 - `timecardctl` refuses ambiguous access when multiple cards are present;

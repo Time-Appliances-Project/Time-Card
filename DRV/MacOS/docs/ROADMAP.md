@@ -13,6 +13,8 @@ physical validation of the remaining profiles is pending.
 - PHC read and set
 - Bracketed cross timestamp
 - Versioned user-client ABI
+- Native SwiftUI read-only Control Center with multi-card discovery,
+  capability-aware status, and sampling-window history
 - CLI and host-side tests
 
 Exit criteria:
@@ -40,7 +42,8 @@ Exit criteria:
 - IRIG-B and DCF configuration
 - Periodic outputs and signal generators
 - Frequency counters and timestamp channels
-- SwiftUI monitoring and configuration views
+- SwiftUI configuration views; the read-only monitoring foundation is in
+  milestone 1
 
 ## Milestone 4: system integration
 

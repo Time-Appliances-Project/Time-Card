@@ -4,6 +4,51 @@ if(NOT IS_DIRECTORY "${TIMECARD_APP_BUNDLE}")
     message(FATAL_ERROR "TimeCardMacOS app bundle not found: ${TIMECARD_APP_BUNDLE}")
 endif()
 
+set(app_info_plist "${TIMECARD_APP_BUNDLE}/Contents/Info.plist")
+set(app_executable "${TIMECARD_APP_BUNDLE}/Contents/MacOS/TimeCardMacOS")
+if(NOT EXISTS "${app_info_plist}")
+    message(FATAL_ERROR "Control Center Info.plist not found: ${app_info_plist}")
+endif()
+if(NOT EXISTS "${app_executable}")
+    message(FATAL_ERROR "Control Center executable not found: ${app_executable}")
+endif()
+
+function(read_app_plist_key output_variable key)
+    execute_process(
+        COMMAND /usr/libexec/PlistBuddy -c "Print :${key}" "${app_info_plist}"
+        RESULT_VARIABLE app_plist_result
+        OUTPUT_VARIABLE app_plist_value
+        ERROR_VARIABLE app_plist_error
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT app_plist_result EQUAL 0)
+        message(FATAL_ERROR "cannot read Control Center ${key}: ${app_plist_error}")
+    endif()
+    set(${output_variable} "${app_plist_value}" PARENT_SCOPE)
+endfunction()
+
+read_app_plist_key(app_bundle_identifier CFBundleIdentifier)
+read_app_plist_key(app_display_name CFBundleDisplayName)
+read_app_plist_key(app_marketing_version CFBundleShortVersionString)
+read_app_plist_key(app_build_version CFBundleVersion)
+
+if(NOT app_bundle_identifier STREQUAL "org.opentimeserver.timecard.macos")
+    message(FATAL_ERROR
+        "unexpected Control Center bundle identifier: ${app_bundle_identifier}")
+endif()
+if(NOT app_display_name STREQUAL "OCP Time Card Control Center")
+    message(FATAL_ERROR
+        "unexpected Control Center display name: ${app_display_name}")
+endif()
+if(NOT app_marketing_version STREQUAL "0.2.0")
+    message(FATAL_ERROR
+        "unexpected Control Center version: ${app_marketing_version}")
+endif()
+if(NOT app_build_version STREQUAL "2")
+    message(FATAL_ERROR
+        "unexpected Control Center build: ${app_build_version}")
+endif()
+
 set(extensions_dir
     "${TIMECARD_APP_BUNDLE}/Contents/Library/SystemExtensions")
 file(GLOB dext_bundles LIST_DIRECTORIES true "${extensions_dir}/*.dext")

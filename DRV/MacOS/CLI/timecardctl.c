@@ -173,7 +173,8 @@ command_status(io_connect_t connection)
     else
         printf("Clock status:     unavailable for this core version\n");
     if ((info.validFields & kTimeCardInfoValidClockSelect) != 0)
-        printf("Clock source:     0x%04x\n", info.clockSelect >> 16);
+        printf("Clock source:     0x%02x\n",
+               TimeCardConfiguredClockSource(info.clockSelect));
     else
         printf("Clock source:     unavailable\n");
 

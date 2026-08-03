@@ -64,3 +64,39 @@ if(explicit_set_command EQUAL -1 OR NOT ambiguous_set_command EQUAL -1)
     message(FATAL_ERROR
         "CLI must use the explicit set-card-from-system command name")
 endif()
+
+string(FIND "${cli}"
+    "TimeCardConfiguredClockSource(info.clockSelect)" cli_low_byte_source)
+if(cli_low_byte_source EQUAL -1)
+    message(FATAL_ERROR
+        "CLI must report the configured low-byte clock source")
+endif()
+
+set(control_center_source "${TIMECARD_SOURCE_DIR}/App/TimeCardClient.swift")
+if(NOT EXISTS "${control_center_source}")
+    message(FATAL_ERROR
+        "Control Center IOKit client not found: ${control_center_source}")
+endif()
+file(READ "${control_center_source}" control_center)
+
+foreach(required_selector IN ITEMS "selector: 0" "selector: 3")
+    string(FIND "${control_center}" "${required_selector}" selector_offset)
+    if(selector_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Control Center must use read-only ${required_selector}")
+    endif()
+endforeach()
+
+foreach(forbidden_operation IN ITEMS
+        "selector: 2"
+        "IOConnectCallScalarMethod"
+        "clock_settime"
+        "settimeofday"
+        "adjtime(")
+    string(FIND "${control_center}" "${forbidden_operation}" operation_offset)
+    if(NOT operation_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Control Center contains forbidden write operation: "
+            "${forbidden_operation}")
+    endif()
+endforeach()
