@@ -19,9 +19,14 @@ find_package(PkgConfig REQUIRED)
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-pkg_check_modules(oscillator-disciplining REQUIRED liboscillator-disciplining)
-pkg_check_modules(ubloxcfg REQUIRED ubloxcfg ff)
+pkg_check_modules(oscillator-disciplining REQUIRED IMPORTED_TARGET liboscillator-disciplining)
+pkg_check_modules(ubloxcfg REQUIRED IMPORTED_TARGET ubloxcfg ff)
 pkg_check_modules(json-c REQUIRED json-c)
+
+# Keep the complete pkg-config link interface, including non-system library
+# directories used by tools/build-timecard.sh's private dependency prefix.
+set(oscillator-disciplining_LIBRARIES PkgConfig::oscillator-disciplining)
+set(ubloxcfg_LIBRARIES PkgConfig::ubloxcfg)
 
 ADD_DEFINITIONS( -DPACKAGE_VERSION=\"${PACKAGE_VERSION}\" )
 

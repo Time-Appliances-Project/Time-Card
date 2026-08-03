@@ -85,13 +85,17 @@ The [`R4006`](R4006) directory provides the PCA9546 mux, standard hwmon and
 IIO sensor enumeration, IS32FL3207 multicolor LED support, the automatic GNSS
 and SMA LED policy, CentOS Stream 10 backports, and the USB-C EEPROM utility.
 
-## Qt Control Center
+## Qt and terminal Control Center
 
 [`TimeCardControlCenter`](TimeCardControlCenter) provides a native Qt 6 Linux
-dashboard for PHC telemetry, TAI-aware system offset, GNSS and clock status,
-device endpoints, capability discovery, and read-only `oscillatord`
-monitoring. It includes a hardware simulation mode for development without a
-card. Build and safety details are in its
+dashboard and a Qt Core plus ncurses terminal interface. Both front ends show
+PHC telemetry, TAI-aware system offset, GNSS and clock status, device
+endpoints, timing I/O, FPGA engine status attributes, R4006 sensors and LEDs,
+common `oscillatord` v1 telemetry, and a bounded session log. Direct Time Card
+hardware access is read-only and scoped to the selected PCI device;
+`oscillatord` remains scoped to its configured endpoint because protocol v1
+does not identify a card. The built-in simulation mode supports development
+without hardware. Build, headless TUI, and safety details are in its
 [`README.md`](TimeCardControlCenter/README.md).
 
 ## FPGA timing-core controls

@@ -11,6 +11,7 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QTextStream>
 #include <QTimer>
 
 #include <memory>
@@ -19,7 +20,7 @@ int main(int argc, char *argv[])
 {
     QGuiApplication application(argc, argv);
     QCoreApplication::setApplicationName(QStringLiteral("Time Card Control Center"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.2.0"));
     QCoreApplication::setOrganizationName(QStringLiteral("Open Time Server"));
     QGuiApplication::setDesktopFileName(
         QStringLiteral("org.opentimeserver.TimeCardControlCenter"));
@@ -38,6 +39,21 @@ int main(int argc, char *argv[])
         QStringLiteral("Override /sys/class/timecard for testing."),
         QStringLiteral("path"),
         qEnvironmentVariable("TIMECARD_SYSFS_ROOT", QStringLiteral("/sys/class/timecard")));
+    QCommandLineOption hwmonRootOption(
+        QStringLiteral("hwmon-root"),
+        QStringLiteral("Override /sys/class/hwmon for testing."),
+        QStringLiteral("path"),
+        qEnvironmentVariable("TIMECARD_HWMON_ROOT", QStringLiteral("/sys/class/hwmon")));
+    QCommandLineOption iioRootOption(
+        QStringLiteral("iio-root"),
+        QStringLiteral("Override /sys/bus/iio/devices for testing."),
+        QStringLiteral("path"),
+        qEnvironmentVariable("TIMECARD_IIO_ROOT", QStringLiteral("/sys/bus/iio/devices")));
+    QCommandLineOption ledsRootOption(
+        QStringLiteral("leds-root"),
+        QStringLiteral("Override /sys/class/leds for testing."),
+        QStringLiteral("path"),
+        qEnvironmentVariable("TIMECARD_LEDS_ROOT", QStringLiteral("/sys/class/leds")));
     QCommandLineOption oscillatordHostOption(
         QStringLiteral("oscillatord-host"),
         QStringLiteral("oscillatord monitoring host."),
@@ -54,7 +70,7 @@ int main(int argc, char *argv[])
         QStringLiteral("path"));
     QCommandLineOption pageOption(
         QStringLiteral("page"),
-        QStringLiteral("Open overview, gnss, or oscillatord."),
+        QStringLiteral("Open overview, timing-io, sensors, gnss, or oscillatord."),
         QStringLiteral("name"),
         QStringLiteral("overview"));
     QCommandLineOption quitAfterOption(
@@ -62,20 +78,46 @@ int main(int argc, char *argv[])
         QStringLiteral("Exit after the specified number of milliseconds."),
         QStringLiteral("milliseconds"));
 
-    parser.addOptions({mockOption, sysfsRootOption, oscillatordHostOption,
-        oscillatordPortOption, screenshotOption, pageOption, quitAfterOption});
+    parser.addOptions({mockOption, sysfsRootOption, hwmonRootOption, iioRootOption,
+        ledsRootOption, oscillatordHostOption, oscillatordPortOption,
+        screenshotOption, pageOption, quitAfterOption});
     parser.process(application);
 
     bool portOk = false;
     const int portValue = parser.value(oscillatordPortOption).toInt(&portOk);
-    const quint16 oscillatordPort = portOk && portValue > 0 && portValue <= 65535
-        ? static_cast<quint16>(portValue) : 2958;
+    if (!portOk || portValue <= 0 || portValue > 65535) {
+        QTextStream(stderr) << "Invalid --oscillatord-port; expected 1 through 65535.\n";
+        return 2;
+    }
+    const quint16 oscillatordPort = static_cast<quint16>(portValue);
+
+    const QString requestedPage = parser.value(pageOption).trimmed().toLower();
+    int pageIndex = 0;
+    if (requestedPage == QStringLiteral("timing")
+        || requestedPage == QStringLiteral("timing-io")
+        || requestedPage == QStringLiteral("io")
+        || requestedPage == QStringLiteral("fpga")) {
+        pageIndex = 1;
+    } else if (requestedPage == QStringLiteral("sensors")) {
+        pageIndex = 2;
+    } else if (requestedPage == QStringLiteral("gnss")) {
+        pageIndex = 3;
+    } else if (requestedPage == QStringLiteral("oscillatord")
+        || requestedPage == QStringLiteral("oscillator")) {
+        pageIndex = 4;
+    } else if (requestedPage != QStringLiteral("overview")) {
+        QTextStream(stderr)
+            << "Invalid --page; expected overview, timing-io, sensors, gnss, or oscillatord.\n";
+        return 2;
+    }
 
     std::unique_ptr<TimeCardBackend> backend;
     if (parser.isSet(mockOption)) {
         backend = std::make_unique<MockTimeCardBackend>();
     } else {
-        backend = std::make_unique<LinuxTimeCardBackend>(parser.value(sysfsRootOption));
+        backend = std::make_unique<LinuxTimeCardBackend>(
+            parser.value(sysfsRootOption), parser.value(hwmonRootOption),
+            parser.value(iioRootOption), parser.value(ledsRootOption));
     }
 
     AppController controller(
@@ -92,12 +134,6 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty())
         return 1;
 
-    const QString requestedPage = parser.value(pageOption).trimmed().toLower();
-    int pageIndex = 0;
-    if (requestedPage == QStringLiteral("gnss"))
-        pageIndex = 1;
-    else if (requestedPage == QStringLiteral("oscillatord"))
-        pageIndex = 2;
     engine.rootObjects().constFirst()->setProperty("currentPage", pageIndex);
 
     const QString screenshotPath = parser.value(screenshotOption);

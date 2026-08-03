@@ -1,9 +1,13 @@
 #include "AppController.h"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
+#include <QStandardPaths>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace {
@@ -21,8 +25,30 @@ AppController::AppController(
 {
     m_refreshTimer.setInterval(1000);
     connect(&m_refreshTimer, &QTimer::timeout, this, &AppController::refresh);
-    connect(&m_oscillatord, &OscillatordClient::updated,
-        this, &AppController::snapshotChanged);
+    connect(&m_oscillatord, &OscillatordClient::updated, this, [this] {
+        const bool available = m_oscillatord.available();
+        const QString currentError = m_oscillatord.error();
+        if (!m_oscillatordObserved || available != m_previousOscillatordAvailable) {
+            appendLog(available ? SessionLogSeverity::Information
+                                : SessionLogSeverity::Warning,
+                QStringLiteral("Oscillator"),
+                available
+                    ? QStringLiteral("oscillatord %1 monitoring connected")
+                          .arg(m_oscillatord.serviceVersion())
+                    : QStringLiteral("oscillatord monitoring unavailable: %1")
+                          .arg(currentError),
+                QStringLiteral("oscillatord@%1").arg(m_oscillatord.endpoint()));
+        } else if (!available && !currentError.isEmpty()
+            && currentError != m_previousOscillatordError) {
+            appendLog(SessionLogSeverity::Warning, QStringLiteral("Oscillator"),
+                QStringLiteral("oscillatord monitoring error: %1").arg(currentError),
+                QStringLiteral("oscillatord@%1").arg(m_oscillatord.endpoint()));
+        }
+        m_oscillatordObserved = true;
+        m_previousOscillatordAvailable = available;
+        m_previousOscillatordError = currentError;
+        emit snapshotChanged();
+    });
     connect(&m_snapshotWatcher, &QFutureWatcher<TimeCardSnapshot>::finished,
         this, [this] {
             m_refreshInFlight = false;
@@ -34,6 +60,8 @@ AppController::AppController(
             }
         });
 
+    appendLog(SessionLogSeverity::Information, QStringLiteral("Application"),
+        QStringLiteral("Control Center session started in read-only mode"));
     refresh();
     m_refreshTimer.start();
     m_oscillatord.start();
@@ -53,6 +81,7 @@ QString AppController::selectedDevice() const
     return m_requestedDevice.isEmpty() ? m_snapshot.deviceId : m_requestedDevice;
 }
 QString AppController::serialNumber() const { return availableOr(m_snapshot.serialNumber); }
+QString AppController::boardProfile() const { return availableOr(m_snapshot.boardProfile); }
 QString AppController::sysfsPath() const { return availableOr(m_snapshot.sysfsPath); }
 QString AppController::ptpDevice() const { return availableOr(m_snapshot.ptpDevice); }
 QString AppController::ppsDevice() const { return availableOr(m_snapshot.ppsDevice); }
@@ -97,8 +126,30 @@ QString AppController::ttyGnss2() const { return availableOr(m_snapshot.ttyGnss2
 QString AppController::ttyMac() const { return availableOr(m_snapshot.ttyMac); }
 QString AppController::ttyNmea() const { return availableOr(m_snapshot.ttyNmea); }
 QStringList AppController::capabilities() const { return m_snapshot.capabilities; }
+QStringList AppController::smaStates() const { return m_snapshot.smaStates; }
+QStringList AppController::generatorStates() const { return m_snapshot.generatorStates; }
+QStringList AppController::frequencyCounterStates() const
+{
+    return m_snapshot.frequencyCounterStates;
+}
+QStringList AppController::fpgaEngineStates() const { return m_snapshot.fpgaEngineStates; }
+QStringList AppController::sensorStates() const { return m_snapshot.sensorStates; }
+QStringList AppController::ledStates() const { return m_snapshot.ledStates; }
+QString AppController::optionalImageContract() const
+{
+    return availableOr(m_snapshot.optionalImageContract);
+}
 QString AppController::error() const { return m_snapshot.error; }
 QString AppController::lastUpdated() const { return m_lastUpdated; }
+QStringList AppController::sessionLog() const { return m_sessionLog.textLines(12); }
+QString AppController::sessionLogStatus() const
+{
+    return m_sessionLogStatus.isEmpty()
+        ? QStringLiteral("%1 retained record(s), %2 dropped")
+              .arg(m_sessionLog.count())
+              .arg(m_sessionLog.droppedRecordCount())
+        : m_sessionLogStatus;
+}
 
 QString AppController::connectionState() const
 {
@@ -142,8 +193,11 @@ QString AppController::utcTaiOffset() const
 
 QString AppController::clockDrift() const
 {
-    return formatDuration(
-        m_snapshot.clockDriftNanoseconds, m_snapshot.clockDriftValid, true);
+    if (!m_snapshot.clockDriftPpbValid)
+        return QStringLiteral("Unavailable");
+    return QStringLiteral("%1%2 ppb")
+        .arg(m_snapshot.clockDriftPartsPerBillion >= 0 ? QStringLiteral("+") : QString())
+        .arg(m_snapshot.clockDriftPartsPerBillion);
 }
 
 QString AppController::clockOffset() const
@@ -152,20 +206,57 @@ QString AppController::clockOffset() const
         m_snapshot.clockOffsetNanoseconds, m_snapshot.clockOffsetValid, true);
 }
 
+bool AppController::oscillatordObserved() const { return m_oscillatordObserved; }
 bool AppController::oscillatordAvailable() const { return m_oscillatord.available(); }
+QString AppController::oscillatordEndpoint() const { return m_oscillatord.endpoint(); }
 QString AppController::oscillatordVersion() const
 {
     return m_oscillatord.available()
         ? QStringLiteral("oscillatord %1").arg(m_oscillatord.serviceVersion())
         : QStringLiteral("Not detected");
 }
+QString AppController::oscillatordActionRequested() const
+{
+    return availableOr(m_oscillatord.actionRequested());
+}
 bool AppController::disciplineAvailable() const { return m_oscillatord.disciplineAvailable(); }
 QString AppController::disciplineStatus() const
 {
     return availableOr(m_oscillatord.disciplineStatus());
 }
+QString AppController::disciplineProgressDetail() const
+{
+    if (!m_oscillatord.disciplineAvailable())
+        return QStringLiteral("Not reported by service");
+    const int current = m_oscillatord.currentConvergenceCount();
+    const int threshold = m_oscillatord.convergenceThreshold();
+    if (current >= 0 && threshold > 0) {
+        return QStringLiteral("%1% convergence, %2/%3 samples")
+            .arg(m_oscillatord.convergenceProgress(), 0, 'f', 1)
+            .arg(current)
+            .arg(threshold);
+    }
+    return QStringLiteral("%1% convergence")
+        .arg(m_oscillatord.convergenceProgress(), 0, 'f', 1);
+}
+QString AppController::holdoverReadiness() const
+{
+    if (!m_oscillatord.disciplineAvailable())
+        return QStringLiteral("Not reported by service");
+    return m_oscillatord.readyForHoldover()
+        ? QStringLiteral("Ready for holdover") : QStringLiteral("Not ready for holdover");
+}
 double AppController::convergenceProgress() const { return m_oscillatord.convergenceProgress(); }
 QString AppController::oscillatordError() const { return m_oscillatord.error(); }
+
+QString AppController::oscillatordClockSummary() const
+{
+    if (!m_oscillatord.available())
+        return QStringLiteral("No monitoring response");
+    return QStringLiteral("%1, %2")
+        .arg(availableOr(m_oscillatord.clockClass()),
+            formatDuration(m_oscillatord.clockOffsetNanoseconds(), true, true));
+}
 
 QString AppController::oscillatorSummary() const
 {
@@ -181,6 +272,20 @@ QString AppController::oscillatorSummary() const
         .arg(availableOr(m_oscillatord.oscillatorModel()), lock, temperatureText);
 }
 
+QString AppController::oscillatorControlSummary() const
+{
+    if (!m_oscillatord.available())
+        return QStringLiteral("Unavailable");
+    constexpr qint64 unavailableControl = std::numeric_limits<quint32>::max();
+    const QString fine = m_oscillatord.fineControl() < 0
+            || m_oscillatord.fineControl() == unavailableControl
+        ? QStringLiteral("unavailable") : QString::number(m_oscillatord.fineControl());
+    const QString coarse = m_oscillatord.coarseControl() < 0
+            || m_oscillatord.coarseControl() == unavailableControl
+        ? QStringLiteral("unavailable") : QString::number(m_oscillatord.coarseControl());
+    return QStringLiteral("fine %1, coarse %2").arg(fine, coarse);
+}
+
 QString AppController::oscillatordGnssSummary() const
 {
     if (!m_oscillatord.available())
@@ -193,6 +298,60 @@ QString AppController::oscillatordGnssSummary() const
             satellites);
 }
 
+QString AppController::oscillatordGnssDetail() const
+{
+    if (!m_oscillatord.available())
+        return QStringLiteral("Unavailable");
+    QStringList parts;
+    if (m_oscillatord.gnssFix() >= 0)
+        parts.append(QStringLiteral("fix %1").arg(m_oscillatord.gnssFix()));
+    if (m_oscillatord.timeAccuracyNanoseconds() >= 0) {
+        parts.append(QStringLiteral("accuracy %1").arg(
+            formatDuration(m_oscillatord.timeAccuracyNanoseconds(), true)));
+    }
+    if (m_oscillatord.surveyPositionErrorMeters() >= 0.0) {
+        parts.append(QStringLiteral("survey %1 m").arg(
+            m_oscillatord.surveyPositionErrorMeters(), 0, 'f', 2));
+    }
+    if (m_oscillatord.leapSeconds() >= 0) {
+        QString leapDetail = QStringLiteral("GPS-UTC %1 s")
+                                 .arg(m_oscillatord.leapSeconds());
+        if (m_oscillatord.leapSecondChange() != -10) {
+            leapDetail += QStringLiteral(", pending change %1")
+                              .arg(m_oscillatord.leapSecondChange());
+        }
+        parts.append(leapDetail);
+    }
+    return parts.isEmpty() ? QStringLiteral("Detailed GNSS data unavailable")
+                           : parts.join(QStringLiteral("  |  "));
+}
+
+QString AppController::oscillatordAntennaSummary() const
+{
+    if (!m_oscillatord.available()
+        || m_oscillatord.antennaStatus() < 0
+        || m_oscillatord.antennaPower() < 0) {
+        return QStringLiteral("Unavailable");
+    }
+    return QStringLiteral("status %1, power %2")
+        .arg(m_oscillatord.antennaStatus())
+        .arg(m_oscillatord.antennaPower());
+}
+
+QString AppController::oscillatordControlPolicy() const
+{
+    if (!m_oscillatord.available())
+        return QStringLiteral("Service unavailable");
+    QString summary = m_oscillatord.controlEnabled()
+        ? QStringLiteral("Service controls enabled; this client remains read-only")
+        : QStringLiteral("Service controls disabled; client is read-only");
+    if (m_snapshot.availableDevices.size() > 1) {
+        summary += QStringLiteral(
+            "; endpoint status is not correlated to the selected card");
+    }
+    return summary;
+}
+
 void AppController::setSelectedDevice(const QString &deviceId)
 {
     if (!m_snapshot.availableDevices.contains(deviceId)
@@ -200,6 +359,8 @@ void AppController::setSelectedDevice(const QString &deviceId)
         return;
     }
     m_requestedDevice = deviceId;
+    appendLog(SessionLogSeverity::Information, QStringLiteral("Connection"),
+        QStringLiteral("Switching to Time Card %1").arg(deviceId));
     ++m_selectionGeneration;
     m_offsetHistory.clear();
     m_windowHistory.clear();
@@ -233,10 +394,12 @@ void AppController::refresh()
 
 void AppController::applySnapshot(TimeCardSnapshot snapshot)
 {
+    const bool hadSnapshot = !m_lastUpdated.isEmpty();
     const bool wasConnected = m_snapshot.connected;
     const bool wasOffsetValid = m_snapshot.offsetValid;
     const bool wasSampleWindowValid = m_snapshot.sampleWindowValid;
     const QString oldDevice = m_snapshot.deviceId;
+    const QString oldError = m_snapshot.error;
     m_snapshot = std::move(snapshot);
     if (!m_requestedDevice.isEmpty()
         && (m_snapshot.deviceId == m_requestedDevice
@@ -258,6 +421,30 @@ void AppController::applySnapshot(TimeCardSnapshot snapshot)
         appendBounded(&m_windowHistory,
             static_cast<double>(m_snapshot.sampleWindowNanoseconds), 60);
 
+    if (!hadSnapshot) {
+        appendLog(m_snapshot.connected ? SessionLogSeverity::Information
+                                       : SessionLogSeverity::Warning,
+            QStringLiteral("Connection"),
+            m_snapshot.connected
+                ? QStringLiteral("Connected to %1 (%2)")
+                      .arg(m_snapshot.deviceId, availableOr(m_snapshot.boardProfile))
+                : QStringLiteral("No Time Card detected"));
+    } else if (wasConnected != m_snapshot.connected) {
+        appendLog(m_snapshot.connected ? SessionLogSeverity::Information
+                                       : SessionLogSeverity::Warning,
+            QStringLiteral("Connection"),
+            m_snapshot.connected
+                ? QStringLiteral("Time Card %1 connected").arg(m_snapshot.deviceId)
+                : QStringLiteral("Time Card disconnected"));
+    } else if (oldDevice != m_snapshot.deviceId && m_snapshot.connected) {
+        appendLog(SessionLogSeverity::Information, QStringLiteral("Connection"),
+            QStringLiteral("Active Time Card changed to %1").arg(m_snapshot.deviceId));
+    }
+    if (!m_snapshot.error.isEmpty() && m_snapshot.error != oldError) {
+        appendLog(SessionLogSeverity::Warning, QStringLiteral("Telemetry"),
+            m_snapshot.error);
+    }
+
     m_lastUpdated = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
     emit snapshotChanged();
 }
@@ -265,6 +452,47 @@ void AppController::applySnapshot(TimeCardSnapshot snapshot)
 void AppController::refreshOscillatord()
 {
     m_oscillatord.poll();
+}
+
+void AppController::clearSessionLog()
+{
+    m_sessionLog.clear();
+    m_sessionLogStatus = QStringLiteral("Session log cleared");
+    appendLog(SessionLogSeverity::Information, QStringLiteral("Diagnostics"),
+        QStringLiteral("Session log cleared"));
+    emit snapshotChanged();
+}
+
+void AppController::exportSessionLogToDocuments()
+{
+    QString directory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (directory.isEmpty())
+        directory = QDir::homePath();
+    QDir().mkpath(directory);
+    const QString stem = QStringLiteral("timecard-session-%1").arg(
+        QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz")));
+    QString path = QDir(directory).filePath(stem + QStringLiteral(".json"));
+    int suffix = 1;
+    while (QFileInfo::exists(path)) {
+        path = QDir(directory).filePath(
+            QStringLiteral("%1-%2.json").arg(stem).arg(suffix++));
+    }
+    QString errorMessage;
+    if (writeSessionLog(path, &errorMessage)) {
+        m_sessionLogStatus = QStringLiteral("Exported %1").arg(path);
+        appendLog(SessionLogSeverity::Information, QStringLiteral("Diagnostics"),
+            QStringLiteral("Session log exported to %1").arg(path));
+    } else {
+        m_sessionLogStatus = QStringLiteral("Export failed: %1").arg(errorMessage);
+        appendLog(SessionLogSeverity::Error, QStringLiteral("Diagnostics"),
+            m_sessionLogStatus);
+    }
+    emit snapshotChanged();
+}
+
+bool AppController::writeSessionLog(const QString &path, QString *error) const
+{
+    return m_sessionLog.writeJson(path, error);
 }
 
 QString AppController::formatTimestamp(qint64 nanoseconds, bool valid)
@@ -309,4 +537,18 @@ void AppController::appendBounded(QVariantList *history, double value, qsizetype
     history->append(value);
     while (history->size() > capacity)
         history->removeFirst();
+}
+
+QString AppController::logCardContext() const
+{
+    const QString device = selectedDevice();
+    return device.isEmpty() ? QStringLiteral("offline") : device;
+}
+
+void AppController::appendLog(
+    SessionLogSeverity severity, const QString &category, const QString &message,
+    const QString &context)
+{
+    m_sessionLog.append(severity, category,
+        context.isEmpty() ? logCardContext() : context, message);
 }

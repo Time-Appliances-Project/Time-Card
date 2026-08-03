@@ -6,7 +6,11 @@
 
 class LinuxTimeCardBackend final : public TimeCardBackend {
 public:
-    explicit LinuxTimeCardBackend(QString sysfsRoot = QStringLiteral("/sys/class/timecard"));
+    explicit LinuxTimeCardBackend(
+        QString sysfsRoot = QStringLiteral("/sys/class/timecard"),
+        QString hwmonRoot = QStringLiteral("/sys/class/hwmon"),
+        QString iioRoot = QStringLiteral("/sys/bus/iio/devices"),
+        QString ledsRoot = QStringLiteral("/sys/class/leds"));
 
     QString backendName() const override;
     QString selectedDevice() const override;
@@ -21,12 +25,21 @@ public:
 
 private:
     static bool readInteger(const QString &path, qint64 *value);
+    static bool readOptionalTextFile(const QString &path, QString *value);
     static qint64 currentSystemUtcNanoseconds();
     static void discoverPciIdentity(const QString &cardPath, TimeCardSnapshot *snapshot);
     static void samplePhc(TimeCardSnapshot *snapshot);
     static void addCapabilityIfPresent(
         const QString &cardPath, const QString &relativePath,
         const QString &capability, QStringList *capabilities);
+    static QString inferBoardProfile(const TimeCardSnapshot &snapshot);
+
+    void readTimingIo(TimeCardSnapshot *snapshot) const;
+    void readFpgaEngines(TimeCardSnapshot *snapshot) const;
+    void readStandardSensors(TimeCardSnapshot *snapshot) const;
+    void readStandardLeds(TimeCardSnapshot *snapshot) const;
+    bool subsystemEntryBelongsToCard(
+        const QString &entryPath, const QString &pciAddress) const;
 
     void invalidateIdentityCache();
     void refreshIdentityCache();
@@ -34,6 +47,9 @@ private:
     QString cardPath(const QString &deviceId) const;
 
     QString m_sysfsRoot;
+    QString m_hwmonRoot;
+    QString m_iioRoot;
+    QString m_ledsRoot;
     QString m_selectedDevice;
     QString m_cachedIdentityDevice;
     TimeCardSnapshot m_cachedIdentity;

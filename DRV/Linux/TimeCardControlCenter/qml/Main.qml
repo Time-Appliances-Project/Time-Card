@@ -92,7 +92,7 @@ ApplicationWindow {
 
                 NavButton {
                     Layout.fillWidth: true
-                    text: "GNSS and UART"
+                    text: "Timing I/O"
                     symbol: "⌁"
                     selected: window.currentPage === 1
                     onClicked: window.currentPage = 1
@@ -100,10 +100,26 @@ ApplicationWindow {
 
                 NavButton {
                     Layout.fillWidth: true
-                    text: "oscillatord"
+                    text: "Sensors and LEDs"
                     symbol: "◇"
                     selected: window.currentPage === 2
                     onClicked: window.currentPage = 2
+                }
+
+                NavButton {
+                    Layout.fillWidth: true
+                    text: "GNSS status and serial"
+                    symbol: "⌁"
+                    selected: window.currentPage === 3
+                    onClicked: window.currentPage = 3
+                }
+
+                NavButton {
+                    Layout.fillWidth: true
+                    text: "oscillatord"
+                    symbol: "◇"
+                    selected: window.currentPage === 4
+                    onClicked: window.currentPage = 4
                 }
 
                 Item { Layout.fillHeight: true }
@@ -165,13 +181,15 @@ ApplicationWindow {
                     ColumnLayout {
                         spacing: 2
                         Label {
-                            text: ["Precision timing overview", "GNSS and serial endpoints", "Oscillator discipline"][window.currentPage]
+                            text: ["Precision timing overview", "FPGA timing I/O", "R4006 sensors and status LEDs", "GNSS and serial endpoints", "Oscillator discipline"][window.currentPage]
                             color: "#edf9fb"
                             font.pixelSize: 20
                             font.weight: Font.DemiBold
                         }
                         Label {
-                            text: window.appController.selectedDevice + "  •  " + window.appController.pciIdentity
+                            text: window.currentPage === 4
+                                ? "Endpoint  " + window.appController.oscillatordEndpoint
+                                : window.appController.selectedDevice + "  •  " + window.appController.pciIdentity
                             color: "#6f909c"
                             font.pixelSize: 11
                         }
@@ -273,6 +291,7 @@ ApplicationWindow {
                                 accent: "#5fb8ff"
 
                                 KeyValueRow { label: "Device"; value: window.appController.selectedDevice }
+                                KeyValueRow { label: "Board profile"; value: window.appController.boardProfile }
                                 KeyValueRow { label: "PCI identity"; value: window.appController.pciIdentity }
                                 KeyValueRow { label: "Serial"; value: window.appController.serialNumber }
                                 KeyValueRow { label: "PTP node"; value: window.appController.ptpDevice }
@@ -319,7 +338,6 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.leftMargin: 24
                             Layout.rightMargin: 24
-                            Layout.bottomMargin: 24
                             visible: window.appController.error.length > 0
                             title: "Diagnostic"
                             accent: "#f0bf65"
@@ -329,6 +347,330 @@ ApplicationWindow {
                                 text: window.appController.error
                                 color: "#dfbd81"
                                 wrapMode: Text.Wrap
+                            }
+                        }
+
+                        Panel {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 24
+                            Layout.rightMargin: 24
+                            Layout.bottomMargin: 24
+                            title: "Session log"
+                            subtitle: window.appController.sessionLogStatus
+                            accent: "#b794f6"
+
+                            Label {
+                                Layout.fillWidth: true
+                                visible: window.appController.sessionLog.length === 0
+                                text: "No session records"
+                                color: "#7796a2"
+                            }
+                            Repeater {
+                                model: window.appController.sessionLog
+                                delegate: Label {
+                                    required property string modelData
+                                    Layout.fillWidth: true
+                                    text: modelData
+                                    color: modelData.indexOf("[ERROR]") >= 0 ? "#f28b82" : (modelData.indexOf("[WARN]") >= 0 ? "#dfbd81" : "#9ab4bd")
+                                    font.family: Qt.platform.os === "osx" ? "Menlo" : "monospace"
+                                    font.pixelSize: 10
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Item { Layout.fillWidth: true }
+                                Button {
+                                    text: "Clear"
+                                    onClicked: window.appController.clearSessionLog()
+                                }
+                                Button {
+                                    text: "Export JSON"
+                                    onClicked: window.appController.exportSessionLogToDocuments()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ScrollView {
+                    id: timingScroll
+                    clip: true
+                    contentWidth: availableWidth
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                    ColumnLayout {
+                        width: timingScroll.availableWidth
+                        spacing: 16
+
+                        Item { Layout.preferredHeight: 8 }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 24
+                            Layout.rightMargin: 24
+                            spacing: 14
+
+                            MetricTile {
+                                Layout.fillWidth: true
+                                label: "SMA routes"
+                                value: window.appController.smaStates.length + " detected"
+                                detail: "Current routing, read-only"
+                                tone: "#31d7d1"
+                            }
+                            MetricTile {
+                                Layout.fillWidth: true
+                                label: "Signal generators"
+                                value: window.appController.generatorStates.length + " detected"
+                                detail: "Runtime and waveform state"
+                                tone: "#5fb8ff"
+                            }
+                            MetricTile {
+                                Layout.fillWidth: true
+                                label: "Frequency counters"
+                                value: window.appController.frequencyCounterStates.length + " detected"
+                                detail: "Gate and latest reading"
+                                tone: "#b794f6"
+                            }
+                            MetricTile {
+                                Layout.fillWidth: true
+                                label: "FPGA status groups"
+                                value: window.appController.fpgaEngineStates.length + " readable"
+                                detail: "PPS, NMEA, ToD, IRIG and DCF"
+                                tone: "#f0bf65"
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 24
+                            Layout.rightMargin: 24
+                            spacing: 16
+
+                            Panel {
+                                Layout.fillWidth: true
+                                title: "SMA connector routing"
+                                subtitle: "Successful ptp_ocp sysfs reads"
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: window.appController.smaStates.length === 0
+                                    text: "No readable SMA routing attributes"
+                                    color: "#7796a2"
+                                }
+                                Repeater {
+                                    model: window.appController.smaStates
+                                    delegate: KeyValueRow {
+                                        required property string modelData
+                                        property int separator: modelData.indexOf(" | ")
+                                        label: separator < 0 ? modelData : modelData.slice(0, separator)
+                                        value: separator < 0 ? "" : modelData.slice(separator + 3)
+                                    }
+                                }
+                            }
+
+                            Panel {
+                                Layout.fillWidth: true
+                                title: "Frequency counters"
+                                subtitle: "Empty readings mean the gate has not completed"
+                                accent: "#b794f6"
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: window.appController.frequencyCounterStates.length === 0
+                                    text: "No readable counter attributes"
+                                    color: "#7796a2"
+                                }
+                                Repeater {
+                                    model: window.appController.frequencyCounterStates
+                                    delegate: KeyValueRow {
+                                        required property string modelData
+                                        property int separator: modelData.indexOf(" | ")
+                                        label: separator < 0 ? modelData : modelData.slice(0, separator)
+                                        value: separator < 0 ? "" : modelData.slice(separator + 3)
+                                    }
+                                }
+                            }
+                        }
+
+                        Panel {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 24
+                            Layout.rightMargin: 24
+                            title: "Signal generators"
+                            subtitle: "Waveform, start, repeat, polarity and cable-delay inventory"
+                            accent: "#5fb8ff"
+
+                            Label {
+                                Layout.fillWidth: true
+                                visible: window.appController.generatorStates.length === 0
+                                text: "No readable generator attributes"
+                                color: "#7796a2"
+                            }
+                            Repeater {
+                                model: window.appController.generatorStates
+                                delegate: KeyValueRow {
+                                    required property string modelData
+                                    property int separator: modelData.indexOf(" | ")
+                                    label: separator < 0 ? modelData : modelData.slice(0, separator)
+                                    value: separator < 0 ? "" : modelData.slice(separator + 3)
+                                }
+                            }
+                        }
+
+                        Panel {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 24
+                            Layout.rightMargin: 24
+                            title: "FPGA engine status"
+                            subtitle: "Unsupported optional attributes are omitted"
+                            accent: "#f0bf65"
+
+                            Label {
+                                Layout.fillWidth: true
+                                visible: window.appController.fpgaEngineStates.length === 0
+                                text: "No extended FPGA engine status attributes are readable"
+                                color: "#7796a2"
+                            }
+                            Repeater {
+                                model: window.appController.fpgaEngineStates
+                                delegate: KeyValueRow {
+                                    required property string modelData
+                                    property int separator: modelData.indexOf(" | ")
+                                    label: separator < 0 ? modelData : modelData.slice(0, separator)
+                                    value: separator < 0 ? "" : modelData.slice(separator + 3)
+                                }
+                            }
+                            KeyValueRow {
+                                label: "Image contract"
+                                value: window.appController.optionalImageContract
+                                valueColor: "#dfbd81"
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 24
+                            Layout.rightMargin: 24
+                            Layout.bottomMargin: 24
+                            text: "This workspace performs reads only. Root-owned sysfs writes and sticky-fault acknowledgements are never issued by the dashboard."
+                            color: "#7897a3"
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                }
+
+                ScrollView {
+                    id: sensorsScroll
+                    clip: true
+                    contentWidth: availableWidth
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                    ColumnLayout {
+                        width: sensorsScroll.availableWidth
+                        spacing: 16
+
+                        Item { Layout.preferredHeight: 8 }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 24
+                            Layout.rightMargin: 24
+                            spacing: 14
+
+                            MetricTile {
+                                Layout.fillWidth: true
+                                label: "Peripheral profile"
+                                value: window.appController.boardProfile
+                                detail: "PCI identity and peripheral topology"
+                                tone: "#31d7d1"
+                            }
+                            MetricTile {
+                                Layout.fillWidth: true
+                                label: "Sensor channels"
+                                value: window.appController.sensorStates.length + " readings"
+                                detail: "Linux hwmon and IIO"
+                                tone: "#5fb8ff"
+                            }
+                            MetricTile {
+                                Layout.fillWidth: true
+                                label: "Status LEDs"
+                                value: window.appController.ledStates.length + " detected"
+                                detail: "Selected PCI function only"
+                                tone: "#b794f6"
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 24
+                            Layout.rightMargin: 24
+                            spacing: 16
+
+                            Panel {
+                                Layout.fillWidth: true
+                                title: "Environmental sensors"
+                                subtitle: "LM75B, SHT3x and ICP-10100 standard interfaces"
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: window.appController.sensorStates.length === 0
+                                    text: "No supported R4006 sensor routes are readable for this Time Card"
+                                    color: "#7796a2"
+                                    wrapMode: Text.Wrap
+                                }
+                                Repeater {
+                                    model: window.appController.sensorStates
+                                    delegate: KeyValueRow {
+                                        required property string modelData
+                                        property int separator: modelData.indexOf(" | ")
+                                        label: separator < 0 ? modelData : modelData.slice(0, separator)
+                                        value: separator < 0 ? "" : modelData.slice(separator + 3)
+                                    }
+                                }
+                            }
+
+                            Panel {
+                                Layout.fillWidth: true
+                                title: "Front-panel LEDs"
+                                subtitle: "Brightness and RGB intensity, read-only"
+                                accent: "#b794f6"
+
+                                Label {
+                                    Layout.fillWidth: true
+                                    visible: window.appController.ledStates.length === 0
+                                    text: "No BDF-scoped Time Card LED classes are readable"
+                                    color: "#7796a2"
+                                    wrapMode: Text.Wrap
+                                }
+                                Repeater {
+                                    model: window.appController.ledStates
+                                    delegate: KeyValueRow {
+                                        required property string modelData
+                                        property int separator: modelData.indexOf(" | ")
+                                        label: separator < 0 ? modelData : modelData.slice(0, separator)
+                                        value: separator < 0 ? "" : modelData.slice(separator + 3)
+                                    }
+                                }
+                            }
+                        }
+
+                        Panel {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 24
+                            Layout.rightMargin: 24
+                            Layout.bottomMargin: 24
+                            title: "Read-only scope"
+                            subtitle: "Selected-card telemetry without hardware writes"
+                            accent: "#f0bf65"
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: "This dashboard never writes LED state. Sensor and LED reads are scoped to the selected Time Card PCI function, and missing supported telemetry is reported as unavailable rather than as a GNSS fault."
+                                color: "#9ab4bd"
+                                wrapMode: Text.Wrap
+                                lineHeight: 1.35
                             }
                         }
                     }
@@ -471,14 +813,14 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 label: "Monitoring service"
                                 value: window.appController.oscillatordVersion
-                                detail: window.appController.oscillatordAvailable ? "127.0.0.1 monitoring API" : window.appController.oscillatordError
+                                detail: window.appController.oscillatordAvailable ? window.appController.oscillatordEndpoint : window.appController.oscillatordError
                                 tone: window.appController.oscillatordAvailable ? "#66e3aa" : "#f0bf65"
                             }
                             MetricTile {
                                 Layout.fillWidth: true
                                 label: "Discipline state"
                                 value: window.appController.disciplineStatus
-                                detail: window.appController.disciplineAvailable ? Math.round(window.appController.convergenceProgress) + "% convergence" : "Not reported by service"
+                                detail: window.appController.disciplineProgressDetail
                                 tone: "#31d7d1"
                             }
                             MetricTile {
@@ -498,9 +840,18 @@ ApplicationWindow {
                             subtitle: "Read-only status request { request: 0 }"
 
                             KeyValueRow { label: "Service"; value: window.appController.oscillatordVersion }
+                            KeyValueRow { label: "Endpoint"; value: window.appController.oscillatordEndpoint }
+                            KeyValueRow { label: "Status action"; value: window.appController.oscillatordActionRequested }
                             KeyValueRow { label: "State"; value: window.appController.disciplineStatus }
+                            KeyValueRow { label: "Holdover"; value: window.appController.holdoverReadiness }
+                            KeyValueRow { label: "Clock"; value: window.appController.oscillatordClockSummary }
+                            KeyValueRow { label: "Convergence"; value: window.appController.disciplineProgressDetail }
                             KeyValueRow { label: "Oscillator"; value: window.appController.oscillatorSummary }
+                            KeyValueRow { label: "Controls"; value: window.appController.oscillatorControlSummary }
                             KeyValueRow { label: "GNSS"; value: window.appController.oscillatordGnssSummary }
+                            KeyValueRow { label: "GNSS quality"; value: window.appController.oscillatordGnssDetail }
+                            KeyValueRow { label: "Antenna"; value: window.appController.oscillatordAntennaSummary }
+                            KeyValueRow { label: "Control policy"; value: window.appController.oscillatordControlPolicy; valueColor: "#dfbd81" }
 
                             ProgressBar {
                                 Layout.fillWidth: true
@@ -527,7 +878,9 @@ ApplicationWindow {
 
                             Label {
                                 Layout.fillWidth: true
-                                text: "Start oscillatord with monitoring enabled on 127.0.0.1:2958, or pass --oscillatord-host and --oscillatord-port. Control requests remain disabled in this milestone."
+                                text: "Start oscillatord with monitoring enabled at "
+                                      + window.appController.oscillatordEndpoint
+                                      + ", or pass --oscillatord-host and --oscillatord-port. This client never sends control requests."
                                 color: "#dfbd81"
                                 wrapMode: Text.Wrap
                             }

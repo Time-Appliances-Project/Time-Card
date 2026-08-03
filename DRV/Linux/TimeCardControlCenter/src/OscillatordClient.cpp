@@ -7,6 +7,13 @@
 
 namespace {
 constexpr qsizetype maximumResponseBytes = 1024 * 1024;
+
+qint64 optionalInteger(
+    const QJsonObject &object, const QString &name, qint64 fallback)
+{
+    const QJsonValue value = object.value(name);
+    return value.isDouble() ? value.toVariant().toLongLong() : fallback;
+}
 }
 
 OscillatordClient::OscillatordClient(QString host, quint16 port, QObject *parent)
@@ -49,18 +56,46 @@ OscillatordClient::OscillatordClient(QString host, quint16 port, QObject *parent
 }
 
 bool OscillatordClient::available() const { return m_available; }
+QString OscillatordClient::endpoint() const
+{
+    QString displayHost = m_host;
+    if (displayHost.contains(QLatin1Char(':'))
+        && !displayHost.startsWith(QLatin1Char('['))) {
+        displayHost = QLatin1Char('[') + displayHost + QLatin1Char(']');
+    }
+    return QStringLiteral("%1:%2").arg(displayHost).arg(m_port);
+}
 QString OscillatordClient::serviceVersion() const { return m_serviceVersion; }
+QString OscillatordClient::actionRequested() const { return m_actionRequested; }
+bool OscillatordClient::controlEnabled() const { return m_controlEnabled; }
 QString OscillatordClient::clockClass() const { return m_clockClass; }
 qint64 OscillatordClient::clockOffsetNanoseconds() const { return m_clockOffsetNanoseconds; }
 bool OscillatordClient::disciplineAvailable() const { return m_disciplineAvailable; }
 QString OscillatordClient::disciplineStatus() const { return m_disciplineStatus; }
+int OscillatordClient::currentConvergenceCount() const { return m_currentConvergenceCount; }
+int OscillatordClient::convergenceThreshold() const { return m_convergenceThreshold; }
 double OscillatordClient::convergenceProgress() const { return m_convergenceProgress; }
 bool OscillatordClient::readyForHoldover() const { return m_readyForHoldover; }
 QString OscillatordClient::oscillatorModel() const { return m_oscillatorModel; }
+qint64 OscillatordClient::fineControl() const { return m_fineControl; }
+qint64 OscillatordClient::coarseControl() const { return m_coarseControl; }
 bool OscillatordClient::oscillatorLocked() const { return m_oscillatorLocked; }
 double OscillatordClient::oscillatorTemperature() const { return m_oscillatorTemperature; }
+int OscillatordClient::gnssFix() const { return m_gnssFix; }
 bool OscillatordClient::gnssFixOk() const { return m_gnssFixOk; }
+int OscillatordClient::antennaPower() const { return m_antennaPower; }
+int OscillatordClient::antennaStatus() const { return m_antennaStatus; }
+int OscillatordClient::leapSecondChange() const { return m_leapSecondChange; }
+int OscillatordClient::leapSeconds() const { return m_leapSeconds; }
 int OscillatordClient::satellites() const { return m_satellites; }
+double OscillatordClient::surveyPositionErrorMeters() const
+{
+    return m_surveyPositionErrorMeters;
+}
+qint64 OscillatordClient::timeAccuracyNanoseconds() const
+{
+    return m_timeAccuracyNanoseconds;
+}
 QString OscillatordClient::error() const { return m_error; }
 
 void OscillatordClient::start()
@@ -126,6 +161,8 @@ void OscillatordClient::applyResponse(const QByteArray &response)
 
     m_disciplineAvailable = false;
     m_disciplineStatus.clear();
+    m_currentConvergenceCount = -1;
+    m_convergenceThreshold = -1;
     m_convergenceProgress = 0.0;
     m_readyForHoldover = false;
     const QJsonValue disciplineValue = root.value(QStringLiteral("disciplining"));
@@ -143,6 +180,10 @@ void OscillatordClient::applyResponse(const QByteArray &response)
         }
         m_disciplineAvailable = true;
         m_disciplineStatus = discipline.value(QStringLiteral("status")).toString();
+        m_currentConvergenceCount = discipline.value(
+            QStringLiteral("current_phase_convergence_count")).toInt(-1);
+        m_convergenceThreshold = discipline.value(
+            QStringLiteral("valid_phase_convergence_threshold")).toInt(-1);
         m_convergenceProgress = qBound(0.0, discipline.value(
             QStringLiteral("convergence_progress")).toDouble(), 100.0);
         m_readyForHoldover = discipline.value(
@@ -151,13 +192,26 @@ void OscillatordClient::applyResponse(const QByteArray &response)
 
     m_available = true;
     m_serviceVersion = root.value(QStringLiteral("version")).toString();
+    m_actionRequested = root.value(QStringLiteral("Action requested")).toString();
+    m_controlEnabled = root.value(QStringLiteral("control_enabled")).toBool(false);
     m_clockClass = clock.value(QStringLiteral("class")).toString();
     m_clockOffsetNanoseconds = clock.value(QStringLiteral("offset")).toVariant().toLongLong();
     m_oscillatorModel = oscillator.value(QStringLiteral("model")).toString();
+    m_fineControl = optionalInteger(oscillator, QStringLiteral("fine_ctrl"), -1);
+    m_coarseControl = optionalInteger(oscillator, QStringLiteral("coarse_ctrl"), -1);
     m_oscillatorLocked = oscillator.value(QStringLiteral("lock")).toBool();
     m_oscillatorTemperature = oscillator.value(QStringLiteral("temperature")).toDouble();
+    m_gnssFix = gnss.value(QStringLiteral("fix")).toInt(-1);
     m_gnssFixOk = gnss.value(QStringLiteral("fixOk")).toBool();
-    m_satellites = gnss.value(QStringLiteral("satellites_count")).toInt();
+    m_antennaPower = gnss.value(QStringLiteral("antenna_power")).toInt(-1);
+    m_antennaStatus = gnss.value(QStringLiteral("antenna_status")).toInt(-1);
+    m_leapSecondChange = gnss.value(QStringLiteral("lsChange")).toInt(-10);
+    m_leapSeconds = gnss.value(QStringLiteral("leap_seconds")).toInt(-1);
+    m_satellites = gnss.value(QStringLiteral("satellites_count")).toInt(-1);
+    m_surveyPositionErrorMeters = gnss.value(
+        QStringLiteral("survey_in_position_error")).toDouble(-1.0);
+    m_timeAccuracyNanoseconds = optionalInteger(
+        gnss, QStringLiteral("time_accuracy"), -1);
     m_error = root.value(QStringLiteral("error")).toString();
     emit updated();
 }
@@ -166,10 +220,24 @@ void OscillatordClient::fail(const QString &message)
 {
     m_timeoutTimer.stop();
     m_available = false;
+    m_actionRequested.clear();
+    m_controlEnabled = false;
     m_disciplineAvailable = false;
     m_disciplineStatus.clear();
+    m_currentConvergenceCount = -1;
+    m_convergenceThreshold = -1;
     m_convergenceProgress = 0.0;
     m_readyForHoldover = false;
+    m_fineControl = -1;
+    m_coarseControl = -1;
+    m_gnssFix = -1;
+    m_antennaPower = -1;
+    m_antennaStatus = -1;
+    m_leapSecondChange = -10;
+    m_leapSeconds = -1;
+    m_satellites = -1;
+    m_surveyPositionErrorMeters = -1.0;
+    m_timeAccuracyNanoseconds = -1;
     m_error = message;
     emit updated();
 }

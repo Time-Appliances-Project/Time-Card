@@ -16,6 +16,7 @@ struct TimeCardSnapshot {
     QString pciVendor;
     QString pciDevice;
     QString serialNumber;
+    QString boardProfile;
 
     QString clockSource;
     QString gnssState;
@@ -33,8 +34,9 @@ struct TimeCardSnapshot {
     bool utcTaiOffsetValid = false;
     int utcTaiOffsetSeconds = 0;
     bool utcTaiOffsetFromKernel = false;
-    bool clockDriftValid = false;
-    qint64 clockDriftNanoseconds = 0;
+    bool clockDriftPpbValid = false;
+    qint64 clockDriftPartsPerBillion = 0;
+    bool r4006TopologyDetected = false;
     bool clockOffsetValid = false;
     qint64 clockOffsetNanoseconds = 0;
 
@@ -50,5 +52,12 @@ struct TimeCardSnapshot {
 
     QStringList availableDevices;
     QStringList capabilities;
+    QStringList smaStates;
+    QStringList generatorStates;
+    QStringList frequencyCounterStates;
+    QStringList fpgaEngineStates;
+    QStringList sensorStates;
+    QStringList ledStates;
+    QString optionalImageContract;
     QString error;
 };

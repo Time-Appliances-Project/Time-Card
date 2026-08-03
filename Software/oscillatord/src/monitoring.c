@@ -582,9 +582,11 @@ static void json_add_oscillator_data(struct json_object *resp, struct monitoring
 	struct json_object* oscillator = json_object_new_object();
 	json_object_object_add(oscillator, "model", json_object_new_string(monitoring->oscillator_model));
 	json_object_object_add(oscillator, "fine_ctrl",
-		json_object_new_int64(monitoring->ctrl_values.fine_ctrl));
+		json_object_new_int64(monitoring->ctrl_values.fine_ctrl == UINT32_MAX
+			? (int64_t)-1 : (int64_t)monitoring->ctrl_values.fine_ctrl));
 	json_object_object_add(oscillator, "coarse_ctrl",
-		json_object_new_int64(monitoring->ctrl_values.coarse_ctrl));
+		json_object_new_int64(monitoring->ctrl_values.coarse_ctrl == UINT32_MAX
+			? (int64_t)-1 : (int64_t)monitoring->ctrl_values.coarse_ctrl));
 	json_object_object_add(oscillator, "lock", json_object_new_boolean(monitoring->osc_attributes.locked));
 	json_object_object_add(oscillator, "temperature", json_object_new_double_s(monitoring->osc_attributes.temperature, fix_sized));
 
@@ -615,9 +617,9 @@ static void json_add_gnss_data(struct json_object *resp, struct monitoring *moni
 	json_object_object_add(gnss, "satellites_count",
 		json_object_new_int(monitoring->gnss_info.satellites_count));
 	json_object_object_add(gnss, "survey_in_position_error",
-		json_object_new_int(monitoring->gnss_info.survey_in_position_error));
+		json_object_new_double(monitoring->gnss_info.survey_in_position_error));
 	json_object_object_add(gnss, "time_accuracy",
-		json_object_new_int(monitoring->gnss_info.time_accuracy));
+		json_object_new_int64(monitoring->gnss_info.time_accuracy));
 
 	json_object_object_add(resp, "gnss", gnss);
 }
