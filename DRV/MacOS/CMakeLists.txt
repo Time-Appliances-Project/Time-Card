@@ -31,6 +31,18 @@ endif()
 
 enable_testing()
 add_test(NAME register_map COMMAND timecard_register_tests)
+add_test(
+    NAME driver_metadata
+    COMMAND ${CMAKE_COMMAND}
+        "-DTIMECARD_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/Tests/DriverMetadataTests.cmake"
+)
+add_test(
+    NAME driver_safety
+    COMMAND ${CMAKE_COMMAND}
+        "-DTIMECARD_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/Tests/DriverSafetyTests.cmake"
+)
 
 if(APPLE)
     add_test(

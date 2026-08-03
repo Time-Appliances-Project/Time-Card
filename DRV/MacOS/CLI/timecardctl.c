@@ -11,6 +11,7 @@
 #include <time.h>
 
 #include "TimeCardABI.h"
+#include "TimeCardRegisters.h"
 
 static void
 print_usage(FILE *stream)
@@ -18,7 +19,7 @@ print_usage(FILE *stream)
     fprintf(stream,
             "usage: timecardctl status\n"
             "       timecardctl get\n"
-            "       timecardctl set-system\n");
+            "       timecardctl set-card-from-system\n");
 }
 
 static io_connect_t
@@ -26,7 +27,9 @@ open_timecard(void)
 {
     CFMutableDictionaryRef matching = IOServiceMatching("IOUserService");
     CFMutableDictionaryRef propertyMatch = NULL;
+    io_iterator_t iterator = IO_OBJECT_NULL;
     io_service_t service;
+    io_service_t secondService;
     io_connect_t connection = IO_OBJECT_NULL;
     kern_return_t result;
 
@@ -48,11 +51,30 @@ open_timecard(void)
     CFDictionarySetValue(matching, CFSTR(kIOPropertyMatchKey), propertyMatch);
     CFRelease(propertyMatch);
 
-    service = IOServiceGetMatchingService(kIOMainPortDefault, matching);
+    result = IOServiceGetMatchingServices(kIOMainPortDefault, matching,
+                                           &iterator);
+    if (result != KERN_SUCCESS) {
+        fprintf(stderr, "timecardctl: service enumeration failed: 0x%08x\n",
+                result);
+        exit(1);
+    }
+
+    service = IOIteratorNext(iterator);
     if (service == IO_OBJECT_NULL) {
+        IOObjectRelease(iterator);
         fprintf(stderr,
                 "timecardctl: Time Card service not found; install the driver "
                 "and verify PCI enumeration\n");
+        exit(1);
+    }
+    secondService = IOIteratorNext(iterator);
+    IOObjectRelease(iterator);
+    if (secondService != IO_OBJECT_NULL) {
+        IOObjectRelease(secondService);
+        IOObjectRelease(service);
+        fprintf(stderr,
+                "timecardctl: multiple Time Cards found; explicit device "
+                "selection is required before opening one\n");
         exit(1);
     }
 
@@ -117,22 +139,58 @@ command_status(io_connect_t connection)
     }
 
     printf("PCI device:       %04x:%04x\n", info.vendorID, info.deviceID);
+    printf("PCI revision:     %02x\n", info.pciRevision & 0xffu);
+    printf("Board profile:    %s\n",
+           TimeCardBoardProfileName(info.boardProfile));
     printf("Driver version:   %u.%u\n", info.driverVersion >> 16,
            info.driverVersion & 0xffffu);
     printf("BAR0 size:        0x%" PRIx64 "\n", info.barSize);
-    printf("Interrupts:       %u\n", info.interruptVectors);
+    if (info.advertisedMSIXVectors != 0) {
+        printf("MSI-X capacity:   %u advertised (not configured)\n",
+               info.advertisedMSIXVectors);
+    } else {
+        printf("MSI-X capacity:   not advertised; interrupts not configured\n");
+    }
     printf("Register layout:  %s\n",
-           info.layout == kTimeCardLayoutMSIX ? "MSI-X" : "MSI");
+           TimeCardRegisterLayoutName(info.layout));
+    printf("Capabilities:     %s%s%s%s\n",
+           (info.capabilities & kTimeCardCapabilityReadClock) != 0 ?
+               "clock-read" : "no-clock-read",
+           (info.capabilities & kTimeCardCapabilitySetClock) != 0 ?
+               ", clock-set" : "",
+           (info.capabilities & kTimeCardCapabilityCrossTimestamp) != 0 ?
+               ", cross-timestamp" : "",
+           (info.capabilities & kTimeCardCapabilityTOD) != 0 ?
+               ", TOD" : "");
     printf("Clock offset:     0x%" PRIx64 "\n", info.clockOffset);
-    printf("Clock version:    0x%08x\n", info.clockVersion);
-    printf("Clock status:     0x%08x (%s)\n", info.clockStatus,
-           (info.clockStatus & 1u) ? "in sync" : "not in sync");
-    printf("Clock source:     0x%04x\n", info.clockSelect >> 16);
-    printf("TOD/GNSS status:  0x%08x / 0x%08x\n", info.todStatus,
-           info.gnssStatus);
-    printf("UTC/leap:         0x%08x / 0x%08x\n", info.utcStatus,
-           info.leap);
-    printf("Satellites:       0x%08x\n", info.satellites);
+    if ((info.validFields & kTimeCardInfoValidClockVersion) != 0)
+        printf("Clock version:    0x%08x\n", info.clockVersion);
+    else
+        printf("Clock version:    unavailable\n");
+    if ((info.validFields & kTimeCardInfoValidClockStatus) != 0)
+        printf("Clock status:     0x%08x (%s)\n", info.clockStatus,
+               (info.clockStatus & 1u) ? "in sync" : "not in sync");
+    else
+        printf("Clock status:     unavailable for this core version\n");
+    if ((info.validFields & kTimeCardInfoValidClockSelect) != 0)
+        printf("Clock source:     0x%04x\n", info.clockSelect >> 16);
+    else
+        printf("Clock source:     unavailable\n");
+
+    if ((info.capabilities & kTimeCardCapabilityTOD) == 0) {
+        printf("TOD block:        not present on this board profile\n");
+    } else {
+        printf("TOD offset:       0x%" PRIx64 "\n", info.todOffset);
+        if ((info.validFields & kTimeCardInfoValidTODVersion) != 0)
+            printf("TOD version:      0x%08x\n", info.todVersion);
+        else
+            printf("TOD version:      unavailable\n");
+        if ((info.validFields & kTimeCardInfoValidTODStatus) != 0)
+            printf("TOD status:       0x%08x\n", info.todStatus);
+        else
+            printf("TOD status:       unavailable for this core version\n");
+    }
+    printf("Optional GNSS:    gated pending an exact FPGA image contract\n");
     return 0;
 }
 
@@ -152,7 +210,7 @@ command_get(io_connect_t connection)
 }
 
 static int
-command_set_system(io_connect_t connection)
+command_set_card_from_system(io_connect_t connection)
 {
     struct timespec now;
     TimeCardTime cardTime = {0};
@@ -194,8 +252,8 @@ main(int argc, char **argv)
         status = command_status(connection);
     else if (strcmp(argv[1], "get") == 0)
         status = command_get(connection);
-    else if (strcmp(argv[1], "set-system") == 0)
-        status = command_set_system(connection);
+    else if (strcmp(argv[1], "set-card-from-system") == 0)
+        status = command_set_card_from_system(connection);
     else {
         print_usage(stderr);
         status = 2;

@@ -2,11 +2,13 @@
 
 ## Milestone 1: core PHC access
 
-Status: implemented in source, awaiting signed hardware validation.
+Status: implemented and signed-hardware validated on the classic Meta profile;
+physical validation of the remaining profiles is pending.
 
 - Driver activation app
-- PCI matching and BAR validation
-- MSI and MSI-X layout discovery
+- Exact PCI matching, board profiles, and BAR validation
+- Classic, repository LitePCIe shifted, ART, and ADVA layout selection
+- Capability and field-validity reporting for profile-specific blocks
 - Clock and TOD status
 - PHC read and set
 - Bracketed cross timestamp
@@ -16,9 +18,12 @@ Status: implemented in source, awaiting signed hardware validation.
 Exit criteria:
 
 - The driver starts on both older MSI and newer MSI-X gateware.
-- `timecardctl status` returns plausible versions and GNSS state.
+- `timecardctl status` returns plausible versions and only supported status
+  fields.
 - Repeated `timecardctl get` calls return monotonic card timestamps.
 - No driver crash occurs during open, close, sleep, wake, or disconnect.
+- The common PHC passes read-only validation on Celestica, ART, ADVA, and ADVA
+  X1 hardware without touching absent or synthesis-optional registers.
 
 ## Milestone 2: serial and event access
 
@@ -52,6 +57,6 @@ Exit criteria:
 - I2C EEPROM and board identity
 - SPI gateware update with recovery protections
 - Multiple Time Cards
-- Celestica validation
-- Orolia ART resource-map support
+- Physical Celestica, Orolia ART, ADVA, and ADVA X1 validation
+- Board-specific R4006, ART, and ADVA peripheral support
 - Signed, notarized release packaging

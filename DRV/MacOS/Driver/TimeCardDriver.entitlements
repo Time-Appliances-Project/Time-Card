@@ -7,8 +7,8 @@
     <key>com.apple.developer.driverkit.transport.pci</key>
     <array>
         <dict>
-            <key>IOPCIMatch</key>
-            <string>0x04001d9b 0x100818d4</string>
+            <key>IOPCIPrimaryMatch</key>
+            <string>0x04001d9b 0x100818d4 0xa0001ad7 0x0400ad5a 0x0410ad5a</string>
         </dict>
     </array>
 </dict>

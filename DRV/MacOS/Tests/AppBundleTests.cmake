@@ -41,6 +41,8 @@ read_plist_key(bundle_identifier CFBundleIdentifier)
 read_plist_key(bundle_executable CFBundleExecutable)
 read_plist_key(bundle_package_type CFBundlePackageType)
 read_plist_key(usage_description OSBundleUsageDescription)
+read_plist_key(pci_matches
+    "IOKitPersonalities:'OCP Time Card':IOPCIPrimaryMatch")
 
 if(NOT bundle_identifier STREQUAL "org.opentimeserver.timecard.macos.driver")
     message(FATAL_ERROR "unexpected DEXT bundle identifier: ${bundle_identifier}")
@@ -58,6 +60,11 @@ if(NOT bundle_package_type STREQUAL "DEXT")
 endif()
 if(usage_description STREQUAL "")
     message(FATAL_ERROR "DEXT usage description must not be empty")
+endif()
+set(expected_pci_matches
+    "0x04001d9b 0x100818d4 0xa0001ad7 0x0400ad5a 0x0410ad5a")
+if(NOT pci_matches STREQUAL expected_pci_matches)
+    message(FATAL_ERROR "unexpected DEXT PCI match set: ${pci_matches}")
 endif()
 if(NOT EXISTS "${dext_bundle}/${bundle_executable}")
     message(FATAL_ERROR

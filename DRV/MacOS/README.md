@@ -8,19 +8,41 @@ provides a small command-line diagnostic client.
 
 The current implementation provides:
 
-- PCI matching for the Meta/Facebook Time Card (`1d9b:0400`) and compatible
-  Celestica card (`18d4:1008`)
-- BAR0 discovery and bounds checking
-- MSI versus MSI-X register-layout selection
+- Exact PCI matching and board profiles for:
+  - Meta/Facebook Time Card (`1d9b:0400`)
+  - Celestica R4006 (`18d4:1008`)
+  - Orolia/Safran ART (`1ad7:a000`)
+  - upstream Linux ADVA Time Card (`ad5a:0400`)
+  - upstream Linux ADVA Time Card X1 (`ad5a:0410`)
+- BAR0 discovery and per-profile bounds checking
+- PCI-revision and MSI-X-signature selection of the classic and repository
+  LitePCIe shifted maps
+- Fixed ART and ADVA common-clock resource-map handling
 - PHC time read and set operations
 - Bracketed card/system cross timestamps
-- Clock, TOD, UTC, leap, GNSS, and satellite status reads
-- A versioned, size-checked user-client ABI
+- Version-gated clock and TOD status reads
+- Capability and field-validity reporting for absent or gated registers
+- A versioned, size-checked user-client ABI v2
 - A host app for driver activation and removal
-- `timecardctl` commands for `status`, `get`, and `set-system`
+- `timecardctl` commands for `status`, `get`, and `set-card-from-system`
 
-The Orolia ART card is intentionally not matched yet because it uses a
-different resource map.
+The common PHC block is available on every matched profile. ART uses its own
+fixed layout and has no standard TOD block, so the driver never reads one.
+ADVA profiles use the fixed common clock/TOD addresses published by current
+upstream Linux, independent of their interrupt capability. The UTC, leap,
+GNSS, and satellite telemetry registers are synthesis-optional. They remain
+untouched until a future exact-image contract can prove that a specific FPGA
+image implements them.
+
+Current upstream Linux defines the classic Meta/Celestica map and the fixed ART
+and ADVA maps. The shifted revision-02 map comes from this repository's
+LitePCIe gateware and Windows/Linux support; it is not currently in upstream
+Linux. The Meta/Facebook classic profile is hardware-validated on an Intel Mac
+Pro. Every other profile is covered by host-side layout and safety tests but
+still requires physical-card validation before a production release. Celestica
+cards programmed with the generic Meta PCI identity continue to receive safe
+common-PHC support, but board-specific R4006 identification will require the
+future EEPROM/I2C work.
 
 ## Project layout
 
@@ -112,6 +134,20 @@ The development DriverKit PCI profile authorizes Apple's wildcard
 entitlements. `Driver/Info.plist` remains restricted to the supported Time
 Card PCI identifiers at runtime.
 
+A distribution DriverKit profile must authorize every PCI primary match that
+will ship. Keep the entitlement and runtime personality synchronized with this
+exact list:
+
+```text
+0x04001d9b 0x100818d4 0xa0001ad7 0x0400ad5a 0x0410ad5a
+```
+
+The build tests extract and compare the single `IOPCIPrimaryMatch` value in
+each file against the canonical match set in `Shared/TimeCardRegisters.h`.
+Extra matches, wildcards, and missing values fail the test. Using the primary
+match key also prevents subsystem IDs with the same encoded value from entering
+the runtime match set.
+
 The configured identifiers are:
 
 ```text
@@ -135,10 +171,13 @@ development provisioning profile at
 6. Confirm activation with `systemextensionsctl list`.
 7. Run `timecardctl.app/Contents/MacOS/timecardctl status`, followed by the
    same executable with `get`.
-8. Compare the reported time and PPS output with the Linux reference setup.
+8. Compare the reported card time, core versions, and available status fields
+   with the Linux reference setup.
 
-Do not use `set-system` until read-only status and time access have been
-validated on the target card.
+Do not use `set-card-from-system` until read-only status and time access have
+been validated on the target card. This command copies raw macOS
+`CLOCK_REALTIME` seconds into the card. It does not set the macOS system clock,
+and it does not yet apply a UTC/TAI correction.
 
 ## Known limitations
 
@@ -146,9 +185,13 @@ validated on the target card.
   samples. PCIe PTM support is not implemented.
 - UARTs, PPS interrupts, external timestamp inputs, SMA routing, I2C, SPI
   flash, frequency counters, and signal generators are not implemented.
+- Optional UTC, leap, GNSS, and satellite registers are deliberately gated
+  until an exact per-card FPGA image contract is implemented.
 - The driver does not create a Linux-style `/dev/ptpN` device.
 - No daemon currently disciplines the macOS system clock.
-- Sleep, wake, Thunderbolt disconnect, and multiple-card behavior require
-  physical hardware testing.
+- `timecardctl` refuses ambiguous access when multiple cards are present;
+  explicit per-card selection is not implemented yet.
+- Sleep, wake, Thunderbolt disconnect, all non-Meta profiles, and multiple-card
+  behavior require physical hardware testing.
 
 See [ROADMAP.md](docs/ROADMAP.md) for the staged implementation plan.

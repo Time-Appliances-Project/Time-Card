@@ -46,7 +46,12 @@ extension DriverManager: OSSystemExtensionRequestDelegate {
         _ request: OSSystemExtensionRequest
     ) {
         Task { @MainActor in
-            status = "Approval required in System Settings, Privacy & Security"
+            if #available(macOS 26.0, *) {
+                status = "Approval required in System Settings > General > " +
+                    "Login Items & Extensions > Driver Extensions"
+            } else {
+                status = "Approval required in System Settings > Privacy & Security"
+            }
         }
     }
 
