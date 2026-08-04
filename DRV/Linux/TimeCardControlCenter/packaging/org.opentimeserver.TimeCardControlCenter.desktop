@@ -7,3 +7,5 @@ Icon=org.opentimeserver.TimeCardControlCenter
 Terminal=false
 Categories=System;Monitor;
 Keywords=PTP;PHC;GNSS;Timing;Time Card;
+StartupNotify=true
+StartupWMClass=org.opentimeserver.TimeCardControlCenter

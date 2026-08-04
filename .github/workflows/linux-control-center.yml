@@ -13,186 +13,139 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  CONTROL_CENTER: DRV/Linux/TimeCardControlCenter
+
 jobs:
-  qt-gui:
+  core:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Qt and build dependencies
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.CONTROL_CENTER }} -> target
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path "$CONTROL_CENTER/Cargo.toml" --all -- --check
+
+      - name: Test the GTK-independent core
+        run: >-
+          cargo test
+          --manifest-path "$CONTROL_CENTER/Cargo.toml"
+          --locked
+          --no-default-features
+          --all-targets
+
+      - name: Lint the GTK-independent core
+        run: >-
+          cargo clippy
+          --manifest-path "$CONTROL_CENTER/Cargo.toml"
+          --locked
+          --no-default-features
+          --all-targets
+          -- -D warnings
+
+  native-gui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GTK4, libadwaita, and packaging tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            appstream \
             build-essential \
-            cmake \
+            dbus-x11 \
+            desktop-file-utils \
+            libadwaita-1-dev \
+            libgtk-4-dev \
             linux-libc-dev \
-            ninja-build \
             pkg-config \
-            qt6-base-dev \
-            qt6-declarative-dev \
-            qt6-declarative-dev-tools \
-            qml6-module-qtqml \
-            qml6-module-qtqml-models \
-            qml6-module-qtqml-workerscript \
-            qml6-module-qtquick \
-            qml6-module-qtquick-controls \
-            qml6-module-qtquick-layouts \
-            qml6-module-qtquick-templates \
-            qml6-module-qtquick-window
+            xauth \
+            xvfb
 
-      - name: Configure
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          components: clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.CONTROL_CENTER }} -> target
+
+      - name: Lint the complete application
         run: >-
-          cmake
-          -S DRV/Linux/TimeCardControlCenter
-          -B build/linux-control-center
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DTIMECARD_BUILD_TUI=OFF
-          -DBUILD_TESTING=ON
+          cargo clippy
+          --manifest-path "$CONTROL_CENTER/Cargo.toml"
+          --locked
+          --all-features
+          --all-targets
+          -- -D warnings
 
-      - name: Build
-        run: cmake --build build/linux-control-center --parallel
-
-      - name: QML lint
-        run: cmake --build build/linux-control-center --target timecard_control_center_qmllint
-
-      - name: Test
+      - name: Test the complete application
         env:
-          QT_QPA_PLATFORM: offscreen
-          QSG_RHI_BACKEND: software
-        run: ctest --test-dir build/linux-control-center --output-on-failure
+          GTK_A11Y: none
+        run: >-
+          xvfb-run -a dbus-run-session --
+          cargo test
+          --manifest-path "$CONTROL_CENTER/Cargo.toml"
+          --locked
+          --all-features
+
+      - name: Build release binary
+        run: >-
+          cargo build
+          --manifest-path "$CONTROL_CENTER/Cargo.toml"
+          --locked
+          --release
+          --all-features
+
+      - name: Validate desktop metadata
+        run: |
+          desktop-file-validate \
+            "$CONTROL_CENTER/packaging/org.opentimeserver.TimeCardControlCenter.desktop"
+          appstreamcli validate --no-net \
+            "$CONTROL_CENTER/packaging/org.opentimeserver.TimeCardControlCenter.metainfo.xml"
 
       - name: Stage install
-        run: >-
-          cmake --install build/linux-control-center
-          --prefix "${{ runner.temp }}/timecard-install"
+        run: |
+          install_root="$RUNNER_TEMP/timecard-install"
+          install -Dm0755 \
+            "$CONTROL_CENTER/target/release/timecard-control-center" \
+            "$install_root/usr/bin/timecard-control-center"
+          install -Dm0644 \
+            "$CONTROL_CENTER/packaging/org.opentimeserver.TimeCardControlCenter.desktop" \
+            "$install_root/usr/share/applications/org.opentimeserver.TimeCardControlCenter.desktop"
+          install -Dm0644 \
+            "$CONTROL_CENTER/packaging/org.opentimeserver.TimeCardControlCenter.svg" \
+            "$install_root/usr/share/icons/hicolor/scalable/apps/org.opentimeserver.TimeCardControlCenter.svg"
+          install -Dm0644 \
+            "$CONTROL_CENTER/packaging/org.opentimeserver.TimeCardControlCenter.metainfo.xml" \
+            "$install_root/usr/share/metainfo/org.opentimeserver.TimeCardControlCenter.metainfo.xml"
+          install -Dm0644 \
+            "$CONTROL_CENTER/packaging/70-timecard-control-center.rules" \
+            "$install_root/usr/lib/udev/rules.d/70-timecard-control-center.rules"
 
       - name: Mock dashboard smoke test
+        working-directory: DRV/Linux/TimeCardControlCenter
         env:
-          QT_QPA_PLATFORM: offscreen
-          QSG_RHI_BACKEND: software
+          GTK_A11Y: none
         run: >-
-          build/linux-control-center/timecard-control-center
+          xvfb-run -a dbus-run-session --
+          target/release/timecard-control-center
           --mock
           --quit-after 1500
-
-  headless-tui:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Qt Base and terminal build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            bsdutils \
-            build-essential \
-            cmake \
-            libncurses-dev \
-            linux-libc-dev \
-            ninja-build \
-            pkg-config \
-            python3-minimal \
-            qt6-base-dev
-
-      - name: Configure headless terminal build
-        run: >-
-          cmake
-          -S DRV/Linux/TimeCardControlCenter
-          -B build/linux-control-center-tui
-          -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DTIMECARD_BUILD_GUI=OFF
-          -DTIMECARD_BUILD_TUI=ON
-          -DBUILD_TESTING=ON
-
-      - name: Build headless terminal dashboard
-        run: cmake --build build/linux-control-center-tui --parallel
-
-      - name: Test headless terminal build
-        run: ctest --test-dir build/linux-control-center-tui --output-on-failure
-
-      - name: Stage headless terminal install
-        run: >-
-          cmake --install build/linux-control-center-tui
-          --prefix "${{ runner.temp }}/timecard-tui-install"
-
-      - name: Plain terminal dashboard smoke test
-        run: >-
-          build/linux-control-center-tui/timecard-control-center-tui
-          --mock
-          --plain
-          --page timing-io
-          --quit-after 2500
-
-      - name: Delayed oscillatord plain terminal smoke test
-        run: |
-          ready_file="${RUNNER_TEMP}/timecard-oscillatord-ready"
-          python3 - "$ready_file" <<'PY' &
-          import socket
-          import sys
-          import time
-
-          response = (
-              b'{"service":"oscillatord","version":"9.9.0",'
-              b'"protocol_version":1,"Action requested":"None",'
-              b'"clock":{"class":"locked","offset":1},'
-              b'"oscillator":{"model":"test","lock":true,"temperature":40},'
-              b'"gnss":{"fixOk":true,"satellites_count":8}}'
-          )
-          server = socket.socket()
-          server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-          server.settimeout(5)
-          server.bind(("127.0.0.1", 32958))
-          server.listen(1)
-          with open(sys.argv[1], "w", encoding="ascii") as ready:
-              ready.write("ready\n")
-          connection, _ = server.accept()
-          connection.recv(4096)
-          time.sleep(0.5)
-          connection.sendall(response)
-          connection.close()
-          server.close()
-          PY
-          server_pid=$!
-          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-          for _ in $(seq 1 50); do
-            if [[ -s "$ready_file" ]]; then
-              break
-            fi
-            sleep 0.1
-          done
-          test -s "$ready_file"
-          build/linux-control-center-tui/timecard-control-center-tui \
-            --mock --plain --page oscillatord --oscillatord-port 32958 \
-            > "${RUNNER_TEMP}/timecard-oscillatord-plain.txt"
-          wait "$server_pid"
-          trap - EXIT
-          grep -q "oscillatord 9.9.0" \
-            "${RUNNER_TEMP}/timecard-oscillatord-plain.txt"
-          grep -q "Status action.*None" \
-            "${RUNNER_TEMP}/timecard-oscillatord-plain.txt"
-
-      - name: Interactive terminal dashboard PTY smoke test
-        env:
-          LC_ALL: C.UTF-8
-          TERM: xterm-256color
-        run: |
-          # shellcheck disable=SC2016
-          timeout 8s script -q -e -c '
-            set -eu
-            before=$(stty -g)
-            build/linux-control-center-tui/timecard-control-center-tui \
-              --mock </dev/tty >/dev/tty 2>&1 &
-            pid=$!
-            sleep 0.4
-            kill -WINCH "$pid"
-            sleep 0.2
-            kill -INT "$pid"
-            wait "$pid"
-            test "$(stty -g)" = "$before"
-          ' /dev/null

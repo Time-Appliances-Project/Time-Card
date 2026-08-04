@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.opentimeserver.TimeCardControlCenter</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Time Card Control Center</name>
+  <summary>Inspect OCP Time Card precision timing hardware</summary>
+  <description>
+    <p>
+      Time Card Control Center discovers Linux ptp_ocp devices and presents
+      TAI-aware precision-clock, GNSS, timing I/O, FPGA, sensor, LED, and
+      oscillator-discipline telemetry.
+    </p>
+    <p>
+      Hardware monitoring is read-only and runs without administrator access.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.opentimeserver.TimeCardControlCenter.desktop</launchable>
+  <provides>
+    <binary>timecard-control-center</binary>
+  </provides>
+  <categories>
+    <category>System</category>
+    <category>Monitor</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.3.0" date="2026-08-03">
+      <description>
+        <p>Initial native Rust, Relm4, GTK4, and libadwaita release.</p>
+      </description>
+    </release>
+  </releases>
+  <url type="homepage">https://www.timecard.com</url>
+</component>
