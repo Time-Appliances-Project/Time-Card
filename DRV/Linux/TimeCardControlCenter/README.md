@@ -1,8 +1,9 @@
 # Time Card Control Center for Linux
 
-Time Card Control Center is a native Rust desktop application for the OCP Time
-Card. Its interface uses Relm4, GTK4, and libadwaita. It has no Qt, QML, C++, or
-.NET runtime dependency.
+Time Card Control Center is a native Rust application for the OCP Time Card. It
+provides a Relm4, GTK4, and libadwaita desktop interface plus a Ratatui terminal
+interface for headless Linux systems. It has no Qt, QML, C++, or .NET runtime
+dependency.
 
 The current Linux hardware surface is intentionally read-only. The application
 discovers `ptp_ocp` cards, samples their precision hardware clocks, inventories
@@ -21,10 +22,41 @@ an `oscillatord` protocol v1 endpoint.
 - Oscillatord with clock, oscillator, GNSS, antenna, convergence, holdover, and
   control-policy telemetry
 
-Telemetry acquisition runs in a Relm4 worker, never on the GTK main thread.
-The app polls card telemetry once per second and the endpoint-scoped
-`oscillatord` service every five seconds. `--mock` provides two simulated cards
-for development and demonstrations.
+Telemetry acquisition never runs on an interface thread. The desktop and
+terminal applications use independent workers for card telemetry and the
+endpoint-scoped `oscillatord` service. They poll the card once per second and
+the service every five seconds. `--mock` provides two simulated cards for
+development and demonstrations.
+
+## Terminal interface
+
+Build and run the terminal interface without GTK development packages:
+
+```sh
+cargo build --release --no-default-features --features tui \
+  --bin timecard-control-center-tui
+cargo run --release --no-default-features --features tui \
+  --bin timecard-control-center-tui -- --mock
+```
+
+It provides Overview, Timing I/O, Sensors, GNSS, oscillatord, and Help
+workspaces. Useful keys are:
+
+- Left/Right, `h`/`l`, or Tab to change workspaces
+- `1` through `5` to open a telemetry workspace directly
+- Up/Down or `j`/`k` to highlight a card, then Enter to select it
+- PageUp/PageDown to scroll, `r` to refresh the card, and `o` to refresh the
+  service
+- `x` to export the structured session log, `c` to clear it, and `?` for Help
+- `q`, Escape, or Ctrl+C to quit and restore the terminal
+
+For scripts, CI, SSH automation, or redirected output, use `--plain`. It prints
+one complete snapshot with no terminal escape sequences:
+
+```sh
+cargo run --quiet --no-default-features --features tui \
+  --bin timecard-control-center-tui -- --mock --plain --page timing-io
+```
 
 ## Linux dependencies
 
@@ -43,6 +75,7 @@ toolchain must be 1.93 or newer.
 ```sh
 cargo build --release
 cargo test --no-default-features
+cargo test --no-default-features --features tui --all-targets
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
@@ -65,6 +98,8 @@ Useful development options:
 --page PAGE                overview, timing-io, sensors, gnss, or oscillatord
 --quit-after MILLISECONDS  Exit after a bounded GUI smoke test
 ```
+
+The terminal binary also accepts `--page help` and `--plain`.
 
 Core logic can be built and tested on a host without GTK development packages:
 
@@ -132,4 +167,11 @@ sudo install -Dm0644 packaging/org.opentimeserver.TimeCardControlCenter.svg \
   /usr/local/share/icons/hicolor/scalable/apps/org.opentimeserver.TimeCardControlCenter.svg
 sudo install -Dm0644 packaging/org.opentimeserver.TimeCardControlCenter.metainfo.xml \
   /usr/local/share/metainfo/org.opentimeserver.TimeCardControlCenter.metainfo.xml
+```
+
+Install the terminal binary on a headless host after its release build:
+
+```sh
+sudo install -Dm0755 target/release/timecard-control-center-tui \
+  /usr/local/bin/timecard-control-center-tui
 ```

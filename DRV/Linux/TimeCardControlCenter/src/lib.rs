@@ -12,6 +12,9 @@ pub mod timing;
 #[cfg(feature = "gui")]
 pub mod app;
 
+#[cfg(feature = "tui")]
+pub mod tui;
+
 pub use backend::TimeCardBackend;
 pub use config::{AppConfig, Page};
 pub use linux::LinuxTimeCardBackend;

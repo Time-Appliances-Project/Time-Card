@@ -55,6 +55,66 @@ jobs:
           --all-targets
           -- -D warnings
 
+  headless-tui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          components: clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.CONTROL_CENTER }} -> target
+
+      - name: Lint the terminal application
+        run: >-
+          cargo clippy
+          --manifest-path "$CONTROL_CENTER/Cargo.toml"
+          --locked
+          --no-default-features
+          --features tui
+          --all-targets
+          -- -D warnings
+
+      - name: Test the terminal application
+        run: >-
+          cargo test
+          --manifest-path "$CONTROL_CENTER/Cargo.toml"
+          --locked
+          --no-default-features
+          --features tui
+          --all-targets
+
+      - name: Build the terminal release binary
+        run: >-
+          cargo build
+          --manifest-path "$CONTROL_CENTER/Cargo.toml"
+          --locked
+          --release
+          --no-default-features
+          --features tui
+          --bin timecard-control-center-tui
+
+      - name: Plain terminal smoke test
+        run: |
+          output_file="$RUNNER_TEMP/timecard-tui.txt"
+          timeout 5s \
+            "$CONTROL_CENTER/target/release/timecard-control-center-tui" \
+            --mock --plain --page timing-io > "$output_file"
+          grep -F "Timing I/O" "$output_file"
+          grep -F "mock0" "$output_file"
+          grep -F "IRIG/DCF" "$output_file"
+          if LC_ALL=C grep -q $'\033' "$output_file"; then
+            echo "plain terminal output contains an escape byte" >&2
+            exit 1
+          fi
+
   native-gui:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -87,16 +147,17 @@ jobs:
         with:
           workspaces: ${{ env.CONTROL_CENTER }} -> target
 
-      - name: Lint the complete application
+      - name: Lint the desktop application
         run: >-
           cargo clippy
           --manifest-path "$CONTROL_CENTER/Cargo.toml"
           --locked
-          --all-features
+          --no-default-features
+          --features gui
           --all-targets
           -- -D warnings
 
-      - name: Test the complete application
+      - name: Test the desktop application
         env:
           GTK_A11Y: none
         run: >-
@@ -104,7 +165,8 @@ jobs:
           cargo test
           --manifest-path "$CONTROL_CENTER/Cargo.toml"
           --locked
-          --all-features
+          --no-default-features
+          --features gui
 
       - name: Build release binary
         run: >-
@@ -127,6 +189,9 @@ jobs:
           install -Dm0755 \
             "$CONTROL_CENTER/target/release/timecard-control-center" \
             "$install_root/usr/bin/timecard-control-center"
+          install -Dm0755 \
+            "$CONTROL_CENTER/target/release/timecard-control-center-tui" \
+            "$install_root/usr/bin/timecard-control-center-tui"
           install -Dm0644 \
             "$CONTROL_CENTER/packaging/org.opentimeserver.TimeCardControlCenter.desktop" \
             "$install_root/usr/share/applications/org.opentimeserver.TimeCardControlCenter.desktop"
