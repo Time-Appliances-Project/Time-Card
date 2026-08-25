@@ -19,6 +19,7 @@
 #define MAX_SERIALNUM_LENGTH 11
 #define DIGITAL_TUNING_MAX 20000000LL
 #define DEFAULT_PHASELIMIT 100000 // Phase limit is 100us
+#define REQUIRED_PPS_WIDTH 80000000 // PPS output width is 80ms
 #define NO_GNSS_FIX_TIMEOUT 9 // seconds after last gnss Fix befor holdover
 #define BIT(nr)			(1UL << (nr))
 
@@ -48,6 +49,8 @@
 #define CMD_SET_DISCIPLINING          "{set,Disciplining,%d}"
 #define CMD_GET_PHASELIMIT            "{get,PhaseLimit}"
 #define CMD_SET_PHASELIMIT            "{set,PhaseLimit,%d}"
+#define CMD_GET_PPS_WIDTH             "{get,PpsWidth}"
+#define CMD_SET_PPS_WIDTH             "{set,PpsWidth,%d}"
 
 #define DISCIPLINING_PHASES 3
 
@@ -307,6 +310,28 @@ static int sa5x_oscillator_read_phase(int32_t *val, int size)
 	return res;
 }
 
+static void sa5x_oscillator_configure_pps_width(struct sa5x_oscillator *sa5x)
+{
+	int cmd_len, err, pps_width;
+
+	err = sa5x_oscillator_read_intval(&pps_width,
+		sa5x_oscillator_cmd(sa5x, CMD_GET_PPS_WIDTH,
+			sizeof(CMD_GET_PPS_WIDTH)));
+	if (err > 0 && pps_width == REQUIRED_PPS_WIDTH)
+		return;
+
+	if (err > 0)
+		log_info("SA5x reports PPS width %d ns, updating to %d ns",
+			pps_width, REQUIRED_PPS_WIDTH);
+	else
+		log_warn("SA5x: cannot get PPS width, applying the required value");
+
+	cmd_len = snprintf(answer_str, answer_len, CMD_SET_PPS_WIDTH,
+		REQUIRED_PPS_WIDTH);
+	if (sa5x_oscillator_cmd(sa5x, answer_str, cmd_len) == -1)
+		log_warn("SA5x: couldn't configure PPS width");
+}
+
 static int sa5x_oscillator_get_attributes(struct oscillator *oscillator, struct sa5x_attributes *a,
 										  unsigned int attributes_mask)
 {
@@ -460,6 +485,7 @@ static struct oscillator *sa5x_oscillator_new(struct devices_path *devices_path)
 	if (!sa5x_oscillator_get_attributes(oscillator, NULL, ATTR_FW_SERIAL)) {
 		log_debug("connected to MAC with serial %s, fw: %20s", sa5x->serial, sa5x->version);
 	}
+	sa5x_oscillator_configure_pps_width(sa5x);
 
 	sa5x->status.clock_class = SA5X_CLOCK_CLASS_CALIBRATING;
 	sa5x->status.status = SA5X_INIT;
