@@ -45,7 +45,7 @@ if(NOT app_marketing_version STREQUAL "0.2.0")
     message(FATAL_ERROR
         "unexpected Control Center version: ${app_marketing_version}")
 endif()
-if(NOT app_build_version STREQUAL "35")
+if(NOT app_build_version STREQUAL "37")
     message(FATAL_ERROR
         "unexpected Control Center build: ${app_build_version}")
 endif()

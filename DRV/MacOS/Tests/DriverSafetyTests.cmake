@@ -94,6 +94,8 @@ foreach(required_cli_sma IN ITEMS
         "command_uart_config("
         "command_uart_read("
         "command_uart_write_hex("
+        "command_ubx_poll_read("
+        "build_ubx_poll("
         "gnss_fix_name("
         "icp10100_pressure_pascals("
         "print_sensor_capabilities("
@@ -119,7 +121,8 @@ foreach(required_cli_sma IN ITEMS
         "\"uart-observe\""
         "\"uart-config\""
         "\"uart-read\""
-        "\"uart-write-hex\"")
+        "\"uart-write-hex\""
+        "\"ubx-poll-read\"")
     string(FIND "${cli}" "${required_cli_sma}" cli_sma_offset)
     if(cli_sma_offset EQUAL -1)
         message(FATAL_ERROR
@@ -268,6 +271,7 @@ foreach(required_control_center_view IN ITEMS
         "Read Hardware"
         "Send UBX Poll"
         "MON-VER"
+        "pendingUBXAutoload"
         "hardware-uart.txt"
         "Copy Session Log"
         "supportBundleManifestText"

@@ -128,6 +128,11 @@ private struct TimeCardLEDPolicyResult: Sendable {
     let routes: [TimeCardSMARoute]
 }
 
+private struct TimeCardUARTPollReadResult: Sendable {
+    let write: TimeCardUARTWriteResult
+    let read: TimeCardUARTReadResult?
+}
+
 private enum TimeCardSelfTestOutcome: Sendable {
     case success(
         snapshot: TimeCardDeviceSnapshot,
@@ -574,6 +579,94 @@ final class TimeCardMonitor: ObservableObject {
             case .failure(let error):
                 self.uartMessage =
                     "\(label) write failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "UART",
+                    message: self.uartMessage
+                )
+            }
+        }
+    }
+
+    func writeUARTAndRead(
+        port: TimeCardUARTPort,
+        bytes: [UInt8],
+        label: String,
+        writeTimeoutMilliseconds: UInt32 = 500,
+        readAttempts: Int = 6,
+        readTimeoutMilliseconds: UInt32 = 250
+    ) {
+        guard !uartOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            uartMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.supportsUARTWrite == true else {
+            uartMessage = "Hardware UART write requires DriverKit ABI v9."
+            return
+        }
+
+        uartOperationInProgress = true
+        uartMessage = "Sending \(label) and waiting for \(port.label) response..."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: uartMessage
+        )
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    let write = try TimeCardClient.writeUART(
+                        for: descriptor,
+                        port: port,
+                        bytes: bytes,
+                        timeoutMilliseconds: writeTimeoutMilliseconds
+                    )
+                    var lastRead: TimeCardUARTReadResult?
+                    if write.complete {
+                        for _ in 0..<max(1, readAttempts) {
+                            try await Task.sleep(nanoseconds: 150_000_000)
+                            let read = try TimeCardClient.readUART(
+                                for: descriptor,
+                                port: port,
+                                maximumBytes: 256,
+                                timeoutMilliseconds: readTimeoutMilliseconds
+                            )
+                            lastRead = read
+                            if read.byteCount > 0 {
+                                break
+                            }
+                        }
+                    }
+                    return Result<TimeCardUARTPollReadResult, Error>.success(
+                        TimeCardUARTPollReadResult(write: write, read: lastRead)
+                    )
+                } catch {
+                    return Result<TimeCardUARTPollReadResult, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.uartOperationInProgress = false
+            switch result {
+            case .success(let pollResult):
+                self.uartWriteResult = pollResult.write
+                if let read = pollResult.read {
+                    self.uartReadResult = read
+                }
+                let captured = pollResult.read?.byteCount ?? 0
+                self.uartMessage = captured > 0
+                    ? "\(label) sent; captured \(captured) response byte(s)."
+                    : "\(label) sent; no response bytes captured in the read window."
+                self.appendSessionLog(
+                    severity: captured > 0 ? .success : .warning,
+                    category: "UART",
+                    message: self.uartMessage
+                )
+            case .failure(let error):
+                self.uartMessage =
+                    "\(label) poll/read failed: \(error.localizedDescription)"
                 self.appendSessionLog(
                     severity: .error,
                     category: "UART",

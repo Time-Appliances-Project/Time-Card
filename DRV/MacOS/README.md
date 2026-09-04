@@ -53,15 +53,16 @@ The current implementation provides:
     temperature zones, pressure compensation, temperature history, raw sensor
     inventory, and IMU bring-up status
   - a Time Card hardware UART workspace for port selection, baud-rate
-    configuration, non-draining line-status observation, bounded reads, and
-    guarded UBX poll writes, and handoff into the NMEA and UBX decoder labs
+    configuration, non-draining line-status observation, bounded reads, guarded
+    UBX poll writes, bounded poll-response capture, and handoff into the NMEA
+    and UBX decoder labs
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
   `sma-set`, `led`, `led-set`, `led-sma-auto`, `led-gnss-auto`, `led-auto`,
   `i2c-status`, `i2c-scan`, `i2c-read`, `i2c-mux`, `sensors`,
-  `uart-observe`, `uart-config`, `uart-read`, and `uart-write-hex`, including
-  BNO08x SHTP-header and BNO055 chip-ID probe detail
+  `uart-observe`, `uart-config`, `uart-read`, `uart-write-hex`, and
+  `ubx-poll-read`, including BNO08x SHTP-header and BNO055 chip-ID probe detail
 
 The common PHC block is available on every matched profile. ART uses its own
 fixed layout and has no standard TOD block, so the driver never reads one.
@@ -228,7 +229,7 @@ the new driver build.
 8. Run `timecardctl.app/Contents/MacOS/timecardctl status`, followed by the
    same executable with `get`, `sma`, `led`, `led-auto`, `i2c-status`,
    `i2c-scan`, `i2c-read`, `i2c-mux`, `sensors`, `uart-observe`,
-   `uart-config`, `uart-read`, and `uart-write-hex`.
+   `uart-config`, `uart-read`, `uart-write-hex`, and `ubx-poll-read`.
 9. Compare the reported card time, core versions, and available status fields
    with the Linux reference setup.
 

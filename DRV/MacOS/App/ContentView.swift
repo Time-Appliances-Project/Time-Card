@@ -675,6 +675,7 @@ private struct UARTWorkspaceView: View {
     @State private var nmeaMessage = ""
     @State private var ubxInputText = ""
     @State private var ubxMessage = ""
+    @State private var pendingUBXAutoload = false
     private let serialBaudRates: [UInt32] = [
         9_600, 19_200, 38_400, 57_600, 115_200, 230_400,
     ]
@@ -1221,6 +1222,25 @@ private struct UARTWorkspaceView: View {
         .onChange(of: monitor.serialPorts) { _, ports in
             selectFirstSerialPortIfNeeded(ports)
         }
+        .onChange(of: monitor.uartReadResult) { _, transfer in
+            guard pendingUBXAutoload, let transfer else {
+                return
+            }
+            pendingUBXAutoload = false
+            guard !transfer.data.isEmpty else {
+                ubxMessage = "No hardware response captured after UBX poll."
+                return
+            }
+            ubxInputText = transfer.dataHex
+            ubxMessage =
+                "Captured \(transfer.byteCount) hardware UART byte(s) after UBX poll."
+        }
+        .onChange(of: monitor.uartOperationInProgress) { _, inProgress in
+            if !inProgress && pendingUBXAutoload {
+                pendingUBXAutoload = false
+                ubxMessage = "No hardware response captured after UBX poll."
+            }
+        }
     }
 
     private var serialState: String {
@@ -1315,13 +1335,14 @@ private struct UARTWorkspaceView: View {
     }
 
     private func sendUBXPoll(_ poll: TimeCardUBXPoll) {
-        monitor.writeUART(
+        pendingUBXAutoload = true
+        monitor.writeUARTAndRead(
             port: selectedUARTPort,
             bytes: poll.packet,
             label: "UBX \(poll.label) poll"
         )
         ubxInputText = poll.hexString
-        ubxMessage = "Sent \(poll.label) poll bytes. Run Read Hardware to capture the response."
+        ubxMessage = "Sent \(poll.label) poll bytes and waiting for response."
     }
 
     private func uartReadPreviewText(

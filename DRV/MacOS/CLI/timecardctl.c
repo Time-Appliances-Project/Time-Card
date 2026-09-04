@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #include "TimeCardABI.h"
@@ -42,7 +43,9 @@ print_usage(FILE *stream)
             "       timecardctl uart-observe port [timeout-ms]\n"
             "       timecardctl uart-config port baud\n"
             "       timecardctl uart-read port [max-bytes [timeout-ms]]\n"
-            "       timecardctl uart-write-hex port hex-string [timeout-ms]\n");
+            "       timecardctl uart-write-hex port hex-string [timeout-ms]\n"
+            "       timecardctl ubx-poll-read port mon-ver|mon-hw|nav-pvt|nav-sat "
+            "[baud [timeout-ms]]\n");
 }
 
 static io_connect_t
@@ -481,6 +484,51 @@ parse_uart_hex_bytes(const char *text, uint8_t *data)
     return length;
 }
 
+typedef struct TimeCardUBXPollSpec {
+    const char *name;
+    uint8_t messageClass;
+    uint8_t messageID;
+} TimeCardUBXPollSpec;
+
+static const TimeCardUBXPollSpec kTimeCardUBXPolls[] = {
+    {"mon-ver", 0x0au, 0x04u},
+    {"mon-hw", 0x0au, 0x09u},
+    {"nav-pvt", 0x01u, 0x07u},
+    {"nav-sat", 0x01u, 0x35u},
+};
+
+static const TimeCardUBXPollSpec *
+find_ubx_poll(const char *name)
+{
+    for (size_t i = 0;
+         i < sizeof(kTimeCardUBXPolls) / sizeof(kTimeCardUBXPolls[0]);
+         ++i) {
+        if (strcasecmp(name, kTimeCardUBXPolls[i].name) == 0)
+            return &kTimeCardUBXPolls[i];
+    }
+    return NULL;
+}
+
+static void
+build_ubx_poll(const TimeCardUBXPollSpec *poll, uint8_t packet[8])
+{
+    packet[0] = 0xb5u;
+    packet[1] = 0x62u;
+    packet[2] = poll->messageClass;
+    packet[3] = poll->messageID;
+    packet[4] = 0x00u;
+    packet[5] = 0x00u;
+
+    uint8_t checksumA = 0;
+    uint8_t checksumB = 0;
+    for (size_t i = 2; i < 6; ++i) {
+        checksumA = (uint8_t)(checksumA + packet[i]);
+        checksumB = (uint8_t)(checksumB + checksumA);
+    }
+    packet[6] = checksumA;
+    packet[7] = checksumB;
+}
+
 static void
 print_uart_observation(const TimeCardUARTObserve *observe)
 {
@@ -615,6 +663,96 @@ command_uart_write_hex(io_connect_t connection, int argc, char **argv)
         request.length, request.length == 1 ? "" : "s",
         response.lineStatus & 0xffu, response.timeoutMilliseconds);
     return response.length == request.length ? 0 : 1;
+}
+
+static int
+command_ubx_poll_read(io_connect_t connection, int argc, char **argv)
+{
+    if (argc < 4 || argc > 6)
+        return 2;
+    if (require_driver_abi(connection, TIMECARD_UART_WRITE_ABI_VERSION,
+                           "UBX poll/read"))
+        return 1;
+
+    const uint32_t port = parse_uart_port(argv[2]);
+    const TimeCardUBXPollSpec *poll = find_ubx_poll(argv[3]);
+    if (poll == NULL) {
+        fprintf(stderr,
+                "timecardctl: unknown UBX poll '%s'; expected mon-ver, "
+                "mon-hw, nav-pvt, or nav-sat\n",
+                argv[3]);
+        return 2;
+    }
+
+    TimeCardUARTConfig config = {
+        .port = port,
+        .baud = argc >= 5 ?
+            (uint32_t)parse_ulong(argv[4], "UART baud") : 115200u,
+    };
+    kern_return_t result = IOConnectCallStructMethod(
+        connection, kTimeCardMethodUARTConfigure,
+        &config, sizeof(config), NULL, NULL);
+    if (result != KERN_SUCCESS) {
+        fprintf(stderr, "timecardctl: UART configure failed: 0x%08x\n",
+                result);
+        return 1;
+    }
+
+    uint8_t packet[8];
+    build_ubx_poll(poll, packet);
+
+    TimeCardUARTTransfer writeRequest = {
+        .port = port,
+        .length = sizeof(packet),
+        .timeoutMilliseconds = 500u,
+    };
+    memcpy(writeRequest.data, packet, sizeof(packet));
+    TimeCardUARTTransfer writeResponse = {0};
+    if (call_inout(connection, kTimeCardMethodUARTWrite,
+                   &writeRequest, sizeof(writeRequest),
+                   &writeResponse, sizeof(writeResponse)))
+        return 1;
+
+    printf("UBX %s poll:   ", poll->name);
+    for (size_t i = 0; i < sizeof(packet); ++i)
+        printf("%s%02x", i == 0 ? "" : " ", packet[i]);
+    putchar('\n');
+    printf(
+        "UART %u (%s):    wrote %u/%u bytes, LSR 0x%02x\n",
+        writeResponse.port, uart_port_name(writeResponse.port),
+        writeResponse.length, writeRequest.length,
+        writeResponse.lineStatus & 0xffu);
+    if (writeResponse.length != writeRequest.length)
+        return 1;
+
+    const uint32_t timeoutMilliseconds = argc >= 6 ?
+        (uint32_t)parse_ulong(argv[5], "UBX read timeout") : 1500u;
+    uint32_t elapsed = 0;
+    TimeCardUARTTransfer lastRead = {0};
+    while (elapsed < timeoutMilliseconds) {
+        const uint32_t remaining = timeoutMilliseconds - elapsed;
+        const uint32_t chunk = remaining > 250u ? 250u : remaining;
+        TimeCardUARTReadRequest readRequest = {
+            .port = port,
+            .maximumBytes = TIMECARD_UART_MAX_TRANSFER,
+            .timeoutMilliseconds = chunk,
+        };
+        TimeCardUARTTransfer readResponse = {0};
+        if (call_inout(connection, kTimeCardMethodUARTRead,
+                       &readRequest, sizeof(readRequest),
+                       &readResponse, sizeof(readResponse)))
+            return 1;
+        lastRead = readResponse;
+        if (readResponse.length != 0u) {
+            print_uart_transfer(&readResponse);
+            return 0;
+        }
+        elapsed += chunk;
+    }
+
+    printf("UBX %s poll:   no response bytes within %u ms, last LSR 0x%02x\n",
+           poll->name, timeoutMilliseconds, lastRead.lineStatus & 0xffu);
+    return 0;
 }
 
 static int
@@ -1392,6 +1530,8 @@ main(int argc, char **argv)
         status = command_uart_read(connection, argc, argv);
     else if (strcmp(argv[1], "uart-write-hex") == 0)
         status = command_uart_write_hex(connection, argc, argv);
+    else if (strcmp(argv[1], "ubx-poll-read") == 0)
+        status = command_ubx_poll_read(connection, argc, argv);
     else {
         print_usage(stderr);
         status = 2;
