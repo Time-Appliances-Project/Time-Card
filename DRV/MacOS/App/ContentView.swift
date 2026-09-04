@@ -670,6 +670,8 @@ private struct UARTWorkspaceView: View {
     @State private var serialBaudRate: UInt32 = 115_200
     @State private var nmeaText = ""
     @State private var nmeaMessage = ""
+    @State private var ubxInputText = ""
+    @State private var ubxMessage = ""
     private let serialBaudRates: [UInt32] = [
         9_600, 19_200, 38_400, 57_600, 115_200, 230_400,
     ]
@@ -746,8 +748,8 @@ private struct UARTWorkspaceView: View {
                         )
                         FeatureRow(
                             name: "u-blox UBX receiver traffic",
-                            state: "Gated",
-                            note: "Needs guarded receiver stream access before UBX requests are sent."
+                            state: ubxCaptureState,
+                            note: "Decodes captured or pasted UBX frames; guarded receiver requests still need the DriverKit stream ABI."
                         )
                     }
                 }
@@ -894,6 +896,82 @@ private struct UARTWorkspaceView: View {
                 }
 
                 ControlCenterPanel(
+                    title: "u-blox UBX decoder lab",
+                    subtitle: "Decode binary receiver frames from capture bytes or pasted hex"
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextEditor(text: $ubxInputText)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(minHeight: 110)
+                            .padding(6)
+                            .background(
+                                Color.secondary.opacity(0.07),
+                                in: RoundedRectangle(cornerRadius: 10)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                            )
+
+                        HStack {
+                            Button("Load Capture Bytes") {
+                                ubxInputText = monitor.serialCapture?.data
+                                    .map { String(format: "%02x", $0) }
+                                    .joined(separator: " ") ?? ""
+                                ubxMessage = "Loaded serial capture bytes."
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(monitor.serialCapture?.data.isEmpty != false)
+
+                            Button("Load Pasteboard") {
+                                ubxInputText = NSPasteboard.general.string(
+                                    forType: .string
+                                ) ?? ""
+                                ubxMessage = "Loaded pasteboard text."
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Clear") {
+                                ubxInputText = ""
+                                ubxMessage = "UBX input cleared."
+                            }
+                            .buttonStyle(.bordered)
+
+                            Spacer()
+
+                            Text(ubxDecodeSummary)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if !ubxMessage.isEmpty {
+                            Text(ubxMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
+                        if decodedUBXFrames.isEmpty {
+                            Text(
+                                "Paste UBX hex bytes beginning with b5 62, "
+                                    + "or capture a receiver serial preview. "
+                                    + "The decoder verifies Fletcher checksums "
+                                    + "and summarizes common NAV, MON, TIM, "
+                                    + "and CFG messages."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        } else {
+                            VStack(spacing: 10) {
+                                ForEach(decodedUBXFrames) { frame in
+                                    UBXFrameRow(frame: frame)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ControlCenterPanel(
                     title: "NMEA decoder lab",
                     subtitle: "Paste GNSS receiver sentences and validate checksums"
                 ) {
@@ -991,6 +1069,10 @@ private struct UARTWorkspaceView: View {
         return decodedNMEASentences.isEmpty ? "Partial" : "Live"
     }
 
+    private var ubxCaptureState: String {
+        decodedUBXFrames.isEmpty ? "Partial" : "Live"
+    }
+
     private var selectedSerialPortPath: String? {
         if monitor.serialPorts.contains(where: { $0.calloutDevice == selectedSerialPortID }) {
             return selectedSerialPortID
@@ -1024,6 +1106,17 @@ private struct UARTWorkspaceView: View {
             .compactMap { NMEASentence.parse(String($0)) }
     }
 
+    private var decodedUBXFrames: [TimeCardUBXFrame] {
+        TimeCardUBXFrame.parseFrames(from: ubxInputBytes)
+    }
+
+    private var ubxInputBytes: [UInt8] {
+        if let bytes = parseHexBytes(ubxInputText), !bytes.isEmpty {
+            return bytes
+        }
+        return Array(ubxInputText.utf8)
+    }
+
     private var nmeaDecodeSummary: String {
         let sentences = decodedNMEASentences
         guard !sentences.isEmpty else {
@@ -1032,6 +1125,349 @@ private struct UARTWorkspaceView: View {
         let valid = sentences.filter(\.checksumValid).count
         let unchecked = sentences.filter { $0.expectedChecksum == nil }.count
         return "\(sentences.count) decoded, \(valid) checksum OK, \(unchecked) unchecked"
+    }
+
+    private var ubxDecodeSummary: String {
+        let frames = decodedUBXFrames
+        guard !frames.isEmpty else {
+            return "No decoded UBX frames"
+        }
+        let valid = frames.filter(\.checksumValid).count
+        return "\(frames.count) frame(s), \(valid) checksum OK"
+    }
+
+    private func parseHexBytes(_ text: String) -> [UInt8]? {
+        let compact = text
+            .replacingOccurrences(of: "0x", with: " ")
+            .replacingOccurrences(of: "0X", with: " ")
+        let tokens = compact.split { character in
+            character.isWhitespace || character == "," || character == ":"
+        }
+        if tokens.count > 1 {
+            var bytes: [UInt8] = []
+            for token in tokens {
+                guard token.count <= 2,
+                      let byte = UInt8(token, radix: 16) else {
+                    return nil
+                }
+                bytes.append(byte)
+            }
+            return bytes
+        }
+
+        let hexOnly = compact.filter { $0.isHexDigit }
+        guard !hexOnly.isEmpty, hexOnly.count % 2 == 0 else {
+            return nil
+        }
+        var bytes: [UInt8] = []
+        var index = hexOnly.startIndex
+        while index < hexOnly.endIndex {
+            let next = hexOnly.index(index, offsetBy: 2)
+            guard let byte = UInt8(hexOnly[index..<next], radix: 16) else {
+                return nil
+            }
+            bytes.append(byte)
+            index = next
+        }
+        return bytes
+    }
+}
+
+private struct TimeCardUBXFrame: Identifiable, Equatable {
+    let id = UUID()
+    let offset: Int
+    let messageClass: UInt8
+    let messageID: UInt8
+    let length: UInt16
+    let payload: [UInt8]
+    let expectedChecksumA: UInt8
+    let expectedChecksumB: UInt8
+    let actualChecksumA: UInt8
+    let actualChecksumB: UInt8
+
+    var checksumValid: Bool {
+        expectedChecksumA == actualChecksumA &&
+            expectedChecksumB == actualChecksumB
+    }
+
+    var messageText: String {
+        String(
+            format: "%@ 0x%02x/0x%02x",
+            messageName,
+            messageClass,
+            messageID
+        )
+    }
+
+    var checksumText: String {
+        String(
+            format: "expected %02x %02x, actual %02x %02x",
+            expectedChecksumA,
+            expectedChecksumB,
+            actualChecksumA,
+            actualChecksumB
+        )
+    }
+
+    var messageName: String {
+        switch (messageClass, messageID) {
+        case (0x01, 0x03): "NAV-STATUS"
+        case (0x01, 0x07): "NAV-PVT"
+        case (0x01, 0x35): "NAV-SAT"
+        case (0x01, 0x3B): "NAV-SVIN"
+        case (0x05, 0x01): "ACK-ACK"
+        case (0x05, 0x00): "ACK-NAK"
+        case (0x06, 0x08): "CFG-RATE"
+        case (0x06, 0x24): "CFG-NAV5"
+        case (0x0A, 0x04): "MON-VER"
+        case (0x0D, 0x01): "TIM-TP"
+        default: "UBX"
+        }
+    }
+
+    var summary: String {
+        switch (messageClass, messageID) {
+        case (0x01, 0x07):
+            return navPVTSummary
+        case (0x01, 0x03):
+            return navStatusSummary
+        case (0x01, 0x35):
+            return navSATSummary
+        case (0x01, 0x3B):
+            return navSVINSummary
+        case (0x06, 0x08):
+            return cfgRateSummary
+        case (0x0A, 0x04):
+            return monVersionSummary
+        case (0x0D, 0x01):
+            return timTPSummary
+        default:
+            return "Payload \(length) byte(s)."
+        }
+    }
+
+    private var navPVTSummary: String {
+        guard payload.count >= 92 else {
+            return "NAV-PVT payload is shorter than expected."
+        }
+        let year = Self.readUInt16(payload, at: 4)
+        let month = payload[6]
+        let day = payload[7]
+        let hour = payload[8]
+        let minute = payload[9]
+        let second = payload[10]
+        let fixType = payload[20]
+        let flags = payload[21]
+        let satellites = payload[23]
+        let lon = Double(Self.readInt32(payload, at: 24)) / 10_000_000
+        let lat = Double(Self.readInt32(payload, at: 28)) / 10_000_000
+        let hMSL = Double(Self.readInt32(payload, at: 36)) / 1_000
+        let hAcc = Double(Self.readUInt32(payload, at: 40)) / 1_000
+        let fixOK = (flags & 0x01) != 0
+        return String(
+            format: "UTC %04u-%02u-%02u %02u:%02u:%02u, fix %@ (%u), %u SV, lat %.7f, lon %.7f, hMSL %.3f m, hAcc %.3f m.",
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            fixOK ? "OK" : "not OK",
+            fixType,
+            satellites,
+            lat,
+            lon,
+            hMSL,
+            hAcc
+        )
+    }
+
+    private var navStatusSummary: String {
+        guard payload.count >= 16 else {
+            return "NAV-STATUS payload is shorter than expected."
+        }
+        let fixType = payload[4]
+        let flags = payload[5]
+        let fixOK = (flags & 0x01) != 0
+        let timeToFirstFix = Self.readUInt32(payload, at: 8)
+        return "Fix type \(fixType), fix \(fixOK ? "OK" : "not OK"), time-to-first-fix \(timeToFirstFix) ms."
+    }
+
+    private var navSATSummary: String {
+        guard payload.count >= 8 else {
+            return "NAV-SAT payload is shorter than expected."
+        }
+        return "Version \(payload[4]), \(payload[5]) satellite record(s)."
+    }
+
+    private var navSVINSummary: String {
+        guard payload.count >= 40 else {
+            return "NAV-SVIN payload is shorter than expected."
+        }
+        let duration = Self.readUInt32(payload, at: 8)
+        let observations = Self.readUInt32(payload, at: 12)
+        let meanAcc = Double(Self.readUInt32(payload, at: 28)) / 10_000
+        let valid = payload[36] != 0
+        let active = payload[37] != 0
+        return String(
+            format: "Survey-in %@, active %@, duration %u s, %u obs, mean accuracy %.4f m.",
+            valid ? "valid" : "not valid",
+            active ? "yes" : "no",
+            duration,
+            observations,
+            meanAcc
+        )
+    }
+
+    private var cfgRateSummary: String {
+        guard payload.count >= 6 else {
+            return "CFG-RATE payload is shorter than expected."
+        }
+        let measurementRate = Self.readUInt16(payload, at: 0)
+        let navigationRate = Self.readUInt16(payload, at: 2)
+        let timeRef = Self.readUInt16(payload, at: 4)
+        return "Measurement \(measurementRate) ms, navigation \(navigationRate), time reference \(timeRef)."
+    }
+
+    private var monVersionSummary: String {
+        guard payload.count >= 40 else {
+            return "MON-VER payload is shorter than expected."
+        }
+        let software = Self.cString(payload[0..<30])
+        let hardware = Self.cString(payload[30..<40])
+        return "Software \(software), hardware \(hardware)."
+    }
+
+    private var timTPSummary: String {
+        guard payload.count >= 16 else {
+            return "TIM-TP payload is shorter than expected."
+        }
+        let towMS = Self.readUInt32(payload, at: 0)
+        let towSubMS = Self.readUInt32(payload, at: 4)
+        let week = Self.readUInt16(payload, at: 8)
+        let flags = payload[14]
+        return "Time pulse TOW \(towMS) ms, sub-ms \(towSubMS), week \(week), flags 0x\(String(format: "%02x", flags))."
+    }
+
+    static func parseFrames(from bytes: [UInt8]) -> [TimeCardUBXFrame] {
+        guard bytes.count >= 8 else { return [] }
+        var frames: [TimeCardUBXFrame] = []
+        var offset = 0
+        while offset + 8 <= bytes.count {
+            guard bytes[offset] == 0xb5, bytes[offset + 1] == 0x62 else {
+                offset += 1
+                continue
+            }
+            let messageClass = bytes[offset + 2]
+            let messageID = bytes[offset + 3]
+            let length = UInt16(bytes[offset + 4]) |
+                (UInt16(bytes[offset + 5]) << 8)
+            let frameLength = Int(length) + 8
+            guard offset + frameLength <= bytes.count else {
+                break
+            }
+            let payloadStart = offset + 6
+            let payloadEnd = payloadStart + Int(length)
+            let payload = Array(bytes[payloadStart..<payloadEnd])
+            let expectedA = bytes[payloadEnd]
+            let expectedB = bytes[payloadEnd + 1]
+            let actual = checksum(
+                messageClass: messageClass,
+                messageID: messageID,
+                length: length,
+                payload: payload
+            )
+            frames.append(
+                TimeCardUBXFrame(
+                    offset: offset,
+                    messageClass: messageClass,
+                    messageID: messageID,
+                    length: length,
+                    payload: payload,
+                    expectedChecksumA: expectedA,
+                    expectedChecksumB: expectedB,
+                    actualChecksumA: actual.0,
+                    actualChecksumB: actual.1
+                )
+            )
+            offset += frameLength
+        }
+        return frames
+    }
+
+    private static func checksum(
+        messageClass: UInt8,
+        messageID: UInt8,
+        length: UInt16,
+        payload: [UInt8]
+    ) -> (UInt8, UInt8) {
+        var ckA: UInt8 = 0
+        var ckB: UInt8 = 0
+        func add(_ byte: UInt8) {
+            ckA &+= byte
+            ckB &+= ckA
+        }
+        add(messageClass)
+        add(messageID)
+        add(UInt8(length & 0xff))
+        add(UInt8(length >> 8))
+        for byte in payload {
+            add(byte)
+        }
+        return (ckA, ckB)
+    }
+
+    private static func readUInt16(_ bytes: [UInt8], at offset: Int) -> UInt16 {
+        UInt16(bytes[offset]) | (UInt16(bytes[offset + 1]) << 8)
+    }
+
+    private static func readUInt32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
+        UInt32(bytes[offset]) |
+            (UInt32(bytes[offset + 1]) << 8) |
+            (UInt32(bytes[offset + 2]) << 16) |
+            (UInt32(bytes[offset + 3]) << 24)
+    }
+
+    private static func readInt32(_ bytes: [UInt8], at offset: Int) -> Int32 {
+        Int32(bitPattern: readUInt32(bytes, at: offset))
+    }
+
+    private static func cString(_ bytes: ArraySlice<UInt8>) -> String {
+        let prefix = bytes.prefix { $0 != 0 }
+        guard !prefix.isEmpty else { return "Unavailable" }
+        return String(decoding: prefix, as: UTF8.self)
+    }
+}
+
+private struct UBXFrameRow: View {
+    let frame: TimeCardUBXFrame
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(frame.messageText)
+                    .font(.headline)
+                Spacer()
+                StatusPill(
+                    frame.checksumValid ? "Checksum OK" : "Checksum fail",
+                    frame.checksumValid ? .green : .red
+                )
+            }
+            Text("Offset \(frame.offset), length \(frame.length), \(frame.checksumText)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            Text(frame.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color.secondary.opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
     }
 }
 
