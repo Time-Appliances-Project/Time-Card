@@ -45,6 +45,7 @@ the bounded ABI v8 read path.
 - Expanded read-only UBX receiver polls and telemetry summaries
 - RTCM3 CRC24Q validation in the mixed receiver stream decoder
 - Receiver stream checksum health and RTCM3 correction summary cards
+- Read-only Windows built-in configuration profile planner on macOS
 - Continuous bounded polling capture in the SwiftUI app and CLI, with live
   app progress, raw capture save, and support-bundle export
 - Mixed UBX, NMEA, and RTCM3 receiver stream timeline

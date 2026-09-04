@@ -6152,6 +6152,13 @@ private struct OperationsView: View {
                 }
 
                 ControlCenterPanel(
+                    title: "Configuration profile planner",
+                    subtitle: "Windows built-in profiles mapped to macOS readiness"
+                ) {
+                    ConfigurationProfilePlannerView()
+                }
+
+                ControlCenterPanel(
                     title: "Production readiness self-test",
                     subtitle: "One-click read-only live check"
                 ) {
@@ -6268,7 +6275,7 @@ private struct OperationsView: View {
 
                         Text(
                             supportBundleMessage.isEmpty
-                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, hardware UART, raw UART capture bytes, mixed receiver decode, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
+                                ? "The ZIP includes diagnostics, self-test, configuration profiles, serial inventory, serial preview, hardware UART, raw UART capture bytes, mixed receiver decode, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
                                 : supportBundleMessage
                         )
                         .font(.caption)
@@ -6441,6 +6448,11 @@ private struct OperationsView: View {
         try writeSupportText(sessionLogText, named: "session-log.txt", into: stagingURL)
         try writeSupportText(liveSnapshotText, named: "live-snapshot.json", into: stagingURL)
         try writeSupportText(selfTestText, named: "self-test.txt", into: stagingURL)
+        try writeSupportText(
+            configurationProfilesText,
+            named: "configuration-profiles.txt",
+            into: stagingURL
+        )
         try writeSupportText(serialPortsCSVText, named: "serial-ports.csv", into: stagingURL)
         try writeSupportText(serialCaptureText, named: "serial-capture.txt", into: stagingURL)
         try writeSupportText(hardwareUARTText, named: "hardware-uart.txt", into: stagingURL)
@@ -6504,6 +6516,7 @@ private struct OperationsView: View {
             "session-log.txt",
             "live-snapshot.json",
             "self-test.txt",
+            "configuration-profiles.txt",
             "serial-ports.csv",
             "serial-capture.txt",
             "hardware-uart.txt",
@@ -6590,6 +6603,10 @@ private struct OperationsView: View {
             lines.append("\(item.state): \(item.name): \(item.detail)")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private var configurationProfilesText: String {
+        TimeCardConfigurationProfilePlan.reportText(for: monitor.snapshot)
     }
 
     private var sessionLogText: String {
@@ -6969,6 +6986,129 @@ private struct OperationsView: View {
     }
 }
 
+private struct ConfigurationProfilePlannerView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+    @State private var copiedPlan = false
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 300), spacing: 12)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(
+                    "Profiles mirror the Windows Control Center catalog. "
+                        + "This view is intentionally read-only until each "
+                        + "write path has readback, rollback, and persistence "
+                        + "warnings."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+                Spacer()
+
+                Button("Copy Profile Plan") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(
+                        TimeCardConfigurationProfilePlan.reportText(
+                            for: monitor.snapshot
+                        ),
+                        forType: .string
+                    )
+                    copiedPlan = true
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if copiedPlan {
+                Text("Profile plan copied.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+                ForEach(TimeCardConfigurationProfilePlan.plans(for: monitor.snapshot)) { plan in
+                    ConfigurationProfileCard(plan: plan)
+                }
+            }
+        }
+    }
+}
+
+private struct ConfigurationProfileCard: View {
+    let plan: TimeCardConfigurationProfilePlan
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(plan.name)
+                    .font(.headline)
+                Spacer()
+                StatusPill(plan.state, accent)
+            }
+
+            Text(plan.description)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            Text(plan.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Planned actions")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(plan.actions, id: \.self) { action in
+                    Label(action, systemImage: "checklist")
+                        .font(.caption)
+                        .textSelection(.enabled)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Before one-click apply")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(plan.blockers.isEmpty ? ["None"] : plan.blockers, id: \.self) { blocker in
+                    Label(
+                        blocker,
+                        systemImage: plan.blockers.isEmpty
+                            ? "checkmark.circle" : "lock"
+                    )
+                    .font(.caption)
+                    .textSelection(.enabled)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color.secondary.opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+    }
+
+    private var accent: Color {
+        switch plan.state {
+        case "Manual-ready", "UART-ready":
+            return .green
+        case "ABI needed", "Planning only", "Backend pending", "Planned":
+            return .orange
+        case "Blocked":
+            return .red
+        default:
+            return .secondary
+        }
+    }
+}
+
 private struct SubsystemMapView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
 
@@ -7234,6 +7374,151 @@ private struct DriverView: View {
                 + "> Driver Extensions"
         }
         return "System Settings > Privacy & Security"
+    }
+}
+
+private struct TimeCardConfigurationProfilePlan: Identifiable {
+    let id: String
+    let name: String
+    let description: String
+    let state: String
+    let detail: String
+    let actions: [String]
+    let blockers: [String]
+
+    static func plans(for snapshot: TimeCardDeviceSnapshot?) -> [Self] {
+        let connected = snapshot != nil
+        let capabilities = snapshot?.capabilityNames ?? []
+        let hasClockSet = capabilities.contains("Clock set")
+        let hasToD = capabilities.contains("ToD")
+        let hasSMA = capabilities.contains("SMA")
+        let hasUARTWrite = snapshot?.supportsUARTWrite == true
+        let hasGNSSSummary = snapshot?.gnssTelemetryAvailable == true
+
+        return [
+            TimeCardConfigurationProfilePlan(
+                id: "gnss-disciplined",
+                name: "GNSS disciplined",
+                description: "Use the GNSS Time-of-Day engine as the PHC reference.",
+                state: connected ? "Planning only" : "Waiting",
+                detail: connected
+                    ? "Matches the Windows built-in profile, but macOS still needs the trusted time-scale contract and discipline service before one-click apply."
+                    : "Connect to the Time Card driver to evaluate this profile.",
+                actions: [
+                    "Select GNSS as the PHC source.",
+                    "Verify ToD UTC, leap-second, NAV-PVT, NAV-TIMELS, and TIM-TP data.",
+                    "Start the macOS discipline service once the guarded service path lands.",
+                ],
+                blockers: missingProfileRequirements([
+                    (hasClockSet, "Clock set capability"),
+                    (hasToD, "ToD engine capability"),
+                    (hasGNSSSummary, "GNSS summary registers"),
+                ]) + [
+                    "Trusted UTC-to-TAI contract",
+                    "macOS PHC discipline daemon",
+                ]
+            ),
+            TimeCardConfigurationProfilePlan(
+                id: "external-pps",
+                name: "External PPS",
+                description: "Discipline the PHC from an external PPS reference.",
+                state: hasSMA && hasClockSet ? "ABI needed" :
+                    (connected ? "Blocked" : "Waiting"),
+                detail: hasSMA && hasClockSet
+                    ? "The card exposes SMA and clock-set paths, but PPS phase capture is not in the macOS ABI yet."
+                    : "Needs SMA input routing, clock set, and phase measurement support.",
+                actions: [
+                    "Route a selected SMA connector as PPS input.",
+                    "Pair the PPS edge with PHC phase samples.",
+                    "Enable a read-back-verified external PPS discipline loop.",
+                ],
+                blockers: missingProfileRequirements([
+                    (hasClockSet, "Clock set capability"),
+                    (hasSMA, "SMA routing capability"),
+                ]) + [
+                    "PPS phase measurement ABI",
+                    "external-reference discipline loop",
+                ]
+            ),
+            TimeCardConfigurationProfilePlan(
+                id: "ptp-disciplined",
+                name: "PTP disciplined",
+                description: "Use the PTP clock source exposed by the FPGA.",
+                state: connected ? "Planned" : "Waiting",
+                detail: "The current macOS driver does not expose a Linux-style /dev/ptpN device or a PTP source-control ABI.",
+                actions: [
+                    "Expose a macOS PHC or service-owned PTP discipline endpoint.",
+                    "Read back the FPGA PTP source selection.",
+                    "Start clock discipline only after source and time scale are verified.",
+                ],
+                blockers: connected
+                    ? ["PTP source ABI", "macOS PHC service surface"]
+                    : ["Time Card driver connection"]
+            ),
+            TimeCardConfigurationProfilePlan(
+                id: "nmea-service",
+                name: "NMEA service",
+                description: "Enable standard NMEA output at 115200 baud.",
+                state: hasUARTWrite ? "UART-ready" :
+                    (connected ? "Backend pending" : "Waiting"),
+                detail: hasUARTWrite
+                    ? "Safe UBX poll writes and bounded reads are available. Persistent receiver configuration is still intentionally gated."
+                    : "Needs the UART write ABI before macOS can safely talk to the receiver.",
+                actions: [
+                    "Use GNSS UART at 115200 baud.",
+                    "Poll MON-VER, NAV-PVT, NAV-SAT, NAV-TIMELS, and TIM-TP for validation.",
+                    "Apply CFG-VALSET NMEA output presets after persistent write confirmation exists.",
+                ],
+                blockers: hasUARTWrite
+                    ? ["Persistent u-blox configuration confirmation flow"]
+                    : ["UART write ABI"]
+            ),
+            TimeCardConfigurationProfilePlan(
+                id: "lab-timing-outputs",
+                name: "Lab timing outputs",
+                description: "Route GNSS PPS, PHC pulse, atomic clock, and 10 MHz reference to SMA 1-4.",
+                state: hasSMA ? "Manual-ready" :
+                    (connected ? "Backend pending" : "Waiting"),
+                detail: hasSMA
+                    ? "The SMA page can inspect and apply routes individually; this planner preserves the Windows one-click profile as an explicit checklist."
+                    : "Needs the SMA route ABI for this board profile.",
+                actions: [
+                    "SMA 1 output: GNSS PPS.",
+                    "SMA 2 output: PHC pulse.",
+                    "SMA 3 output: atomic clock.",
+                    "SMA 4 output: 10 MHz reference.",
+                ],
+                blockers: hasSMA
+                    ? ["One-click profile apply and rollback workflow"]
+                    : ["SMA routing capability"]
+            ),
+        ]
+    }
+
+    static func reportText(for snapshot: TimeCardDeviceSnapshot?) -> String {
+        var lines = ["Time Card macOS configuration profile planner"]
+        for plan in plans(for: snapshot) {
+            lines.append("")
+            lines.append("\(plan.name): \(plan.state)")
+            lines.append(plan.description)
+            lines.append(plan.detail)
+            lines.append("Actions:")
+            lines.append(contentsOf: plan.actions.map { "  - \($0)" })
+            lines.append("Blockers:")
+            lines.append(
+                contentsOf: (plan.blockers.isEmpty ? ["None"] : plan.blockers)
+                    .map { "  - \($0)" }
+            )
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func missingProfileRequirements(
+        _ requirements: [(Bool, String)]
+    ) -> [String] {
+        requirements.compactMap { available, name in
+            available ? nil : name
+        }
     }
 }
 

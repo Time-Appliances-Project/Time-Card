@@ -64,6 +64,9 @@ The current implementation provides:
   - read-only UBX polls and summaries for receiver version, monitor hardware,
     navigation status, PVT, DOP, receiver clock, GPS/UTC/leap-second time,
     satellite records, survey-in, and time-pulse telemetry
+  - a read-only Windows built-in profile planner for GNSS disciplined,
+    External PPS, PTP disciplined, NMEA service, and lab timing output profiles,
+    with live macOS readiness and support-bundle export
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
