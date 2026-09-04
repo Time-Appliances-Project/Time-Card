@@ -49,6 +49,7 @@ the bounded ABI v8 read path.
 - RTCM3 correction message names for common MSM, ephemeris, and base-station frames
 - Native SwiftUI subsystem topology diagram for Windows parity
 - FPGA core readiness matrix with support-bundle export
+- Receiver validation checklist for the Windows GNSS workflow
 - Continuous bounded polling capture in the SwiftUI app and CLI, with live
   app progress, raw capture save, and support-bundle export
 - Mixed UBX, NMEA, and RTCM3 receiver stream timeline

@@ -1239,6 +1239,20 @@ private struct UARTWorkspaceView: View {
                 }
 
                 ControlCenterPanel(
+                    title: "Receiver validation checklist",
+                    subtitle: "Windows GNSS workflow mapped to current capture evidence"
+                ) {
+                    ReceiverValidationChecklistView(
+                        nmeaSentences: decodedNMEASentences,
+                        ubxFrames: decodedUBXFrames,
+                        mixedMessages: receiverMixedMessages,
+                        hardwareUARTAvailable: hardwareUARTAvailable,
+                        hardwareUARTWriteAvailable: hardwareUARTWriteAvailable,
+                        sourceDescription: receiverMixedSourceDescription
+                    )
+                }
+
+                ControlCenterPanel(
                     title: "Receiver mixed stream decoder",
                     subtitle: "Protocol-aware UBX, NMEA, and RTCM3 timeline"
                 ) {
@@ -2874,6 +2888,432 @@ private struct ReceiverMixedStreamRow: View {
         case "RTCM3": .orange
         default: .secondary
         }
+    }
+}
+
+private struct ReceiverValidationChecklistView: View {
+    let nmeaSentences: [NMEASentence]
+    let ubxFrames: [TimeCardUBXFrame]
+    let mixedMessages: [ReceiverStreamMessage]
+    let hardwareUARTAvailable: Bool
+    let hardwareUARTWriteAvailable: Bool
+    let sourceDescription: String
+
+    private var items: [ReceiverValidationChecklistItem] {
+        ReceiverValidationChecklist.items(
+            nmeaSentences: nmeaSentences,
+            ubxFrames: ubxFrames,
+            mixedMessages: mixedMessages,
+            hardwareUARTAvailable: hardwareUARTAvailable,
+            hardwareUARTWriteAvailable: hardwareUARTWriteAvailable,
+            sourceDescription: sourceDescription
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                validationSummaryPill(
+                    "Verified",
+                    items.filter { $0.state == "Verified" }.count,
+                    .green
+                )
+                validationSummaryPill(
+                    "Ready",
+                    items.filter { $0.state == "Ready" }.count,
+                    .teal
+                )
+                validationSummaryPill(
+                    "Missing",
+                    items.filter { $0.state == "Missing" }.count,
+                    .orange
+                )
+                validationSummaryPill(
+                    "Attention",
+                    items.filter { $0.state == "Attention" }.count,
+                    .red
+                )
+                Spacer()
+                StatusPill(
+                    mixedMessages.isEmpty
+                        ? "No stream loaded"
+                        : "\(mixedMessages.count) message(s)",
+                    mixedMessages.isEmpty ? .secondary : .blue
+                )
+            }
+
+            VStack(spacing: 9) {
+                ForEach(items) { item in
+                    ReceiverValidationChecklistRow(item: item)
+                }
+            }
+
+            Text(
+                "Run the UBX polls from the hardware UART panel, capture a "
+                    + "bounded sample, then use this checklist to decide which "
+                    + "Windows GNSS validation steps are already proven."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+        }
+    }
+
+    private func validationSummaryPill(
+        _ label: String,
+        _ count: Int,
+        _ color: Color
+    ) -> some View {
+        HStack(spacing: 6) {
+            Text("\(count)")
+                .font(.caption.weight(.bold))
+                .monospacedDigit()
+            Text(label)
+                .font(.caption)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .foregroundStyle(color)
+        .background(color.opacity(0.12), in: Capsule())
+        .overlay(Capsule().stroke(color.opacity(0.24), lineWidth: 1))
+    }
+}
+
+private struct ReceiverValidationChecklistRow: View {
+    let item: ReceiverValidationChecklistItem
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: item.symbol)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(item.accent)
+                .frame(width: 32, height: 32)
+                .background(
+                    item.accent.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 9)
+                )
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.name)
+                        .font(.headline)
+                    StatusPill(item.state, item.accent)
+                    Spacer()
+                    Text(item.windowsStep)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+
+                Text(item.nextAction)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(
+            item.accent.opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(item.accent.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct ReceiverValidationChecklistItem: Identifiable {
+    let id: String
+    let name: String
+    let windowsStep: String
+    let state: String
+    let detail: String
+    let nextAction: String
+    let symbol: String
+
+    var accent: Color {
+        switch state {
+        case "Verified": .green
+        case "Ready": .teal
+        case "Partial", "Missing": .orange
+        case "Attention": .red
+        default: .secondary
+        }
+    }
+}
+
+private enum ReceiverValidationChecklist {
+    static func items(
+        nmeaSentences: [NMEASentence],
+        ubxFrames: [TimeCardUBXFrame],
+        mixedMessages: [ReceiverStreamMessage],
+        hardwareUARTAvailable: Bool,
+        hardwareUARTWriteAvailable: Bool,
+        sourceDescription: String
+    ) -> [ReceiverValidationChecklistItem] {
+        let validUBXNames = Set(
+            ubxFrames.filter(\.checksumValid).map(\.messageName)
+        )
+        let validNMEAFormatters = Set(
+            nmeaSentences.filter(\.checksumValid).map(\.formatter)
+        )
+        let nmeaFailures = nmeaSentences.filter {
+            $0.expectedChecksum != nil && !$0.checksumValid
+        }
+        let rtcmMessages = mixedMessages.filter { $0.protocolName == "RTCM3" }
+        let rtcmFailures = rtcmMessages.filter { $0.checksumState == .failed }
+        let hasStream = !mixedMessages.isEmpty
+
+        func missingOrWaiting() -> String {
+            hasStream ? "Missing" : "Waiting"
+        }
+
+        func ubxState(_ names: Set<String>) -> String {
+            if !validUBXNames.isDisjoint(with: names) { return "Verified" }
+            if hardwareUARTWriteAvailable { return "Ready" }
+            return missingOrWaiting()
+        }
+
+        func nmeaState(_ formatters: Set<String>) -> String {
+            if !validNMEAFormatters.isDisjoint(with: formatters) {
+                return "Verified"
+            }
+            return missingOrWaiting()
+        }
+
+        return [
+            ReceiverValidationChecklistItem(
+                id: "capture-source",
+                name: "Capture source",
+                windowsStep: "Load receiver stream",
+                state: hasStream ? "Verified" :
+                    (hardwareUARTAvailable ? "Ready" : "Waiting"),
+                detail: sourceDescription,
+                nextAction: hasStream
+                    ? "Use the decoded messages below to validate receiver state."
+                    : "Capture hardware UART or load serial preview, NMEA, or UBX bytes.",
+                symbol: "tray.and.arrow.down"
+            ),
+            ReceiverValidationChecklistItem(
+                id: "poll-path",
+                name: "UBX poll path",
+                windowsStep: "Receiver command channel",
+                state: hardwareUARTWriteAvailable ? "Ready" :
+                    (hardwareUARTAvailable ? "Partial" : "Waiting"),
+                detail: hardwareUARTWriteAvailable
+                    ? "Safe UBX poll writes are enabled for the GNSS UART."
+                    : "Hardware UART reads are available, but UBX poll writes are not fully enabled.",
+                nextAction: "Send MON-VER first, then NAV-PVT, NAV-SAT, NAV-TIMELS, and TIM-TP.",
+                symbol: "paperplane"
+            ),
+            ReceiverValidationChecklistItem(
+                id: "mon-ver",
+                name: "MON-VER identity",
+                windowsStep: "Receiver firmware",
+                state: ubxState(["MON-VER"]),
+                detail: latestUBXSummary(
+                    "MON-VER",
+                    frames: ubxFrames,
+                    fallback: "No valid UBX MON-VER frame decoded."
+                ),
+                nextAction: "Poll MON-VER to capture u-blox protocol and firmware identity.",
+                symbol: "cpu"
+            ),
+            ReceiverValidationChecklistItem(
+                id: "fix-position",
+                name: "Fix and position",
+                windowsStep: "NAV-PVT or NMEA fix",
+                state: fixState(
+                    validUBXNames: validUBXNames,
+                    validNMEAFormatters: validNMEAFormatters,
+                    hasStream: hasStream
+                ),
+                detail: latestReceiverSummary(
+                    ubxNames: ["NAV-PVT", "NAV-STATUS"],
+                    nmeaFormatters: ["GGA", "RMC", "GSA", "GLL", "GNS"],
+                    ubxFrames: ubxFrames,
+                    nmeaSentences: nmeaSentences,
+                    fallback: "No NAV-PVT, NAV-STATUS, GGA, RMC, GSA, GLL, or GNS data decoded."
+                ),
+                nextAction: "Poll NAV-PVT or load NMEA GGA/RMC/GSA data to prove fix state.",
+                symbol: "location.viewfinder"
+            ),
+            ReceiverValidationChecklistItem(
+                id: "satellite-table",
+                name: "Satellite table",
+                windowsStep: "NAV-SAT or GSV",
+                state: satelliteState(
+                    validUBXNames: validUBXNames,
+                    validNMEAFormatters: validNMEAFormatters,
+                    hasStream: hasStream
+                ),
+                detail: latestReceiverSummary(
+                    ubxNames: ["NAV-SAT"],
+                    nmeaFormatters: ["GSV", "GGA", "GNS"],
+                    ubxFrames: ubxFrames,
+                    nmeaSentences: nmeaSentences,
+                    fallback: "No NAV-SAT, GSV, GGA, or GNS satellite data decoded."
+                ),
+                nextAction: "Poll NAV-SAT or load GSV sentences to fill the sky map and satellite table.",
+                symbol: "antenna.radiowaves.left.and.right"
+            ),
+            ReceiverValidationChecklistItem(
+                id: "utc-leap",
+                name: "NAV-TIMELS UTC/leap",
+                windowsStep: "Leap second state",
+                state: validUBXNames.contains("NAV-TIMELS")
+                    ? "Verified" : nmeaState(["ZDA", "RMC"]),
+                detail: latestReceiverSummary(
+                    ubxNames: ["NAV-TIMELS", "NAV-TIMEUTC"],
+                    nmeaFormatters: ["ZDA", "RMC"],
+                    ubxFrames: ubxFrames,
+                    nmeaSentences: nmeaSentences,
+                    fallback: "No NAV-TIMELS, NAV-TIMEUTC, ZDA, or RMC time data decoded."
+                ),
+                nextAction: "Poll NAV-TIMELS to prove UTC offset and leap state before discipline.",
+                symbol: "calendar.badge.exclamationmark"
+            ),
+            ReceiverValidationChecklistItem(
+                id: "tim-tp",
+                name: "TIM-TP time pulse",
+                windowsStep: "Timing pulse",
+                state: ubxState(["TIM-TP"]),
+                detail: latestUBXSummary(
+                    "TIM-TP",
+                    frames: ubxFrames,
+                    fallback: "No valid UBX TIM-TP frame decoded."
+                ),
+                nextAction: "Poll TIM-TP to validate time-pulse quantization and reference flags.",
+                symbol: "waveform.path.ecg"
+            ),
+            ReceiverValidationChecklistItem(
+                id: "nmea-health",
+                name: "NMEA sentence health",
+                windowsStep: "NMEA checksum scan",
+                state: nmeaFailures.isEmpty
+                    ? (nmeaSentences.isEmpty ? missingOrWaiting() : "Verified")
+                    : "Attention",
+                detail: nmeaHealthDetail(
+                    sentences: nmeaSentences,
+                    failures: nmeaFailures
+                ),
+                nextAction: "Use valid checksums before trusting NMEA position, date, or satellite summaries.",
+                symbol: "checkmark.shield"
+            ),
+            ReceiverValidationChecklistItem(
+                id: "rtcm3-health",
+                name: "RTCM3 correction health",
+                windowsStep: "Correction stream",
+                state: rtcmFailures.isEmpty
+                    ? (rtcmMessages.isEmpty ? missingOrWaiting() : "Verified")
+                    : "Attention",
+                detail: ReceiverStreamDecoder.rtcmSummary(messages: mixedMessages),
+                nextAction: "Validate RTCM3 CRC24Q before using correction traffic for survey or rover tests.",
+                symbol: "dot.radiowaves.left.and.right"
+            ),
+        ]
+    }
+
+    static func reportText(
+        nmeaSentences: [NMEASentence],
+        ubxFrames: [TimeCardUBXFrame],
+        mixedMessages: [ReceiverStreamMessage],
+        hardwareUARTAvailable: Bool,
+        hardwareUARTWriteAvailable: Bool,
+        sourceDescription: String
+    ) -> String {
+        var lines = ["Time Card macOS receiver validation checklist"]
+        lines.append("Source: \(sourceDescription)")
+        for item in items(
+            nmeaSentences: nmeaSentences,
+            ubxFrames: ubxFrames,
+            mixedMessages: mixedMessages,
+            hardwareUARTAvailable: hardwareUARTAvailable,
+            hardwareUARTWriteAvailable: hardwareUARTWriteAvailable,
+            sourceDescription: sourceDescription
+        ) {
+            lines.append("")
+            lines.append("\(item.name): \(item.state)")
+            lines.append("Windows step: \(item.windowsStep)")
+            lines.append("Detail: \(item.detail)")
+            lines.append("Next: \(item.nextAction)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func fixState(
+        validUBXNames: Set<String>,
+        validNMEAFormatters: Set<String>,
+        hasStream: Bool
+    ) -> String {
+        if !validUBXNames.isDisjoint(with: ["NAV-PVT", "NAV-STATUS"]) ||
+            !validNMEAFormatters.isDisjoint(
+                with: ["GGA", "RMC", "GSA", "GLL", "GNS"]
+            ) {
+            return "Verified"
+        }
+        return hasStream ? "Missing" : "Waiting"
+    }
+
+    private static func satelliteState(
+        validUBXNames: Set<String>,
+        validNMEAFormatters: Set<String>,
+        hasStream: Bool
+    ) -> String {
+        if validUBXNames.contains("NAV-SAT") ||
+            !validNMEAFormatters.isDisjoint(with: ["GSV", "GGA", "GNS"]) {
+            return "Verified"
+        }
+        return hasStream ? "Missing" : "Waiting"
+    }
+
+    private static func latestUBXSummary(
+        _ name: String,
+        frames: [TimeCardUBXFrame],
+        fallback: String
+    ) -> String {
+        frames.last { $0.checksumValid && $0.messageName == name }?.summary ??
+            fallback
+    }
+
+    private static func latestReceiverSummary(
+        ubxNames: Set<String>,
+        nmeaFormatters: Set<String>,
+        ubxFrames: [TimeCardUBXFrame],
+        nmeaSentences: [NMEASentence],
+        fallback: String
+    ) -> String {
+        if let frame = ubxFrames.last(
+            where: { $0.checksumValid && ubxNames.contains($0.messageName) }
+        ) {
+            return frame.summary
+        }
+        if let sentence = nmeaSentences.last(
+            where: { $0.checksumValid && nmeaFormatters.contains($0.formatter) }
+        ) {
+            return sentence.summary
+        }
+        return fallback
+    }
+
+    private static func nmeaHealthDetail(
+        sentences: [NMEASentence],
+        failures: [NMEASentence]
+    ) -> String {
+        guard !sentences.isEmpty else {
+            return "No NMEA sentences decoded."
+        }
+        let valid = sentences.filter(\.checksumValid).count
+        let missing = sentences.filter { $0.expectedChecksum == nil }.count
+        if !failures.isEmpty {
+            return "\(failures.count) checksum failure(s), \(valid) valid, \(missing) without checksum."
+        }
+        return "\(sentences.count) sentence(s), \(valid) checksum OK, \(missing) without checksum."
     }
 }
 
@@ -6313,7 +6753,7 @@ private struct OperationsView: View {
 
                         Text(
                             supportBundleMessage.isEmpty
-                                ? "The ZIP includes diagnostics, self-test, configuration profiles, FPGA core readiness, serial inventory, serial preview, hardware UART, raw UART capture bytes, mixed receiver decode, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
+                                ? "The ZIP includes diagnostics, self-test, configuration profiles, FPGA core readiness, receiver validation, serial inventory, serial preview, hardware UART, raw UART capture bytes, mixed receiver decode, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
                                 : supportBundleMessage
                         )
                         .font(.caption)
@@ -6496,6 +6936,11 @@ private struct OperationsView: View {
             named: "fpga-core-readiness.txt",
             into: stagingURL
         )
+        try writeSupportText(
+            receiverValidationText,
+            named: "receiver-validation.txt",
+            into: stagingURL
+        )
         try writeSupportText(serialPortsCSVText, named: "serial-ports.csv", into: stagingURL)
         try writeSupportText(serialCaptureText, named: "serial-capture.txt", into: stagingURL)
         try writeSupportText(hardwareUARTText, named: "hardware-uart.txt", into: stagingURL)
@@ -6561,6 +7006,7 @@ private struct OperationsView: View {
             "self-test.txt",
             "configuration-profiles.txt",
             "fpga-core-readiness.txt",
+            "receiver-validation.txt",
             "serial-ports.csv",
             "serial-capture.txt",
             "hardware-uart.txt",
@@ -6655,6 +7101,30 @@ private struct OperationsView: View {
 
     private var fpgaCoreReadinessText: String {
         TimeCardFPGACoreReadiness.reportText(for: monitor.snapshot)
+    }
+
+    private var receiverValidationText: String {
+        let data = monitor.uartCapture?.data ??
+            monitor.uartReadResult?.data ??
+            monitor.serialCapture?.data ?? []
+        let messages = ReceiverStreamMessage.parse(from: data)
+        let nmeaText = String(decoding: data, as: UTF8.self)
+        let nmeaSentences = nmeaText
+            .split(whereSeparator: \.isNewline)
+            .compactMap { NMEASentence.parse(String($0)) }
+        let ubxFrames = TimeCardUBXFrame.parseFrames(from: data)
+        let sourceDescription = data.isEmpty
+            ? "No receiver stream bytes recorded in this support bundle."
+            : "Latest captured receiver stream data in this support bundle."
+        return ReceiverValidationChecklist.reportText(
+            nmeaSentences: nmeaSentences,
+            ubxFrames: ubxFrames,
+            mixedMessages: messages,
+            hardwareUARTAvailable: monitor.snapshot?.supportsUART == true,
+            hardwareUARTWriteAvailable:
+                monitor.snapshot?.supportsUARTWrite == true,
+            sourceDescription: sourceDescription
+        )
     }
 
     private var sessionLogText: String {

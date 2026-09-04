@@ -73,6 +73,9 @@ The current implementation provides:
     live capabilities
   - an FPGA core readiness matrix that mirrors the Windows FPGA Engines catalog
     and exports live, ready, ABI-needed, and roadmap state to support bundles
+  - a receiver validation checklist for the Windows GNSS workflow, covering
+    MON-VER, NAV-PVT/NAV-STATUS, NAV-SAT/GSV, NAV-TIMELS, TIM-TP, NMEA health,
+    and RTCM3 correction CRC status
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
