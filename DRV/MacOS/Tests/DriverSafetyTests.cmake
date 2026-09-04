@@ -278,14 +278,17 @@ foreach(required_control_center_view IN ITEMS
         "Time Card hardware UART"
         "Read Hardware"
         "Start Capture"
+        "Save Capture"
         "uartCaptureInProgress"
         "startUARTCapture"
         "Send UBX Poll"
         "MON-VER"
         "pendingUBXAutoload"
         "hardware-uart.txt"
+        "hardware-uart-capture.bin"
         "Copy Session Log"
         "supportBundleManifestText"
+        "writeSupportData"
         "writeSupportBundle")
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)

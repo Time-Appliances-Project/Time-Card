@@ -55,7 +55,8 @@ The current implementation provides:
   - a Time Card hardware UART workspace for port selection, baud-rate
     configuration, non-draining line-status observation, bounded reads, guarded
     UBX poll writes, bounded poll-response capture, continuous polling capture,
-    copy helpers, and handoff into the NMEA and UBX decoder labs
+    copy and raw capture export helpers, and handoff into the NMEA and UBX
+    decoder labs
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,

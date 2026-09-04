@@ -676,6 +676,7 @@ private struct UARTWorkspaceView: View {
     @State private var nmeaMessage = ""
     @State private var ubxInputText = ""
     @State private var ubxMessage = ""
+    @State private var uartCaptureSaveMessage = ""
     @State private var pendingUBXAutoload = false
     private let serialBaudRates: [UInt32] = [
         9_600, 19_200, 38_400, 57_600, 115_200, 230_400,
@@ -1055,6 +1056,19 @@ private struct UARTWorkspaceView: View {
                                     }
                                     .buttonStyle(.bordered)
                                     .disabled(capture.data.isEmpty)
+
+                                    Button("Save Capture") {
+                                        saveUARTCapture(capture)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(capture.data.isEmpty)
+                                }
+
+                                if !uartCaptureSaveMessage.isEmpty {
+                                    Text(uartCaptureSaveMessage)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
                                 }
 
                                 Text(uartCapturePreviewText(capture))
@@ -1505,6 +1519,39 @@ private struct UARTWorkspaceView: View {
             return String(capture.text.prefix(limit)) + "\n[preview truncated]"
         }
         return capture.hexDumpLines.prefix(64).joined(separator: "\n")
+    }
+
+    private func saveUARTCapture(_ capture: TimeCardUARTCapture) {
+        let panel = NSSavePanel()
+        panel.title = "Save Hardware UART Capture"
+        panel.nameFieldStringValue =
+            "TimeCardMacOS-UART-\(capture.port.rawValue)-"
+                + "\(uartCaptureTimestampForFilename).bin"
+        panel.allowedContentTypes = [.data]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            uartCaptureSaveMessage = "UART capture save canceled."
+            return
+        }
+
+        do {
+            try Data(capture.data).write(to: destinationURL, options: .atomic)
+            uartCaptureSaveMessage =
+                "Saved UART capture to \(destinationURL.path)."
+            NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
+        } catch {
+            uartCaptureSaveMessage =
+                "UART capture save failed: \(error.localizedDescription)"
+        }
+    }
+
+    private var uartCaptureTimestampForFilename: String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
     }
 
     private var uartHeaderText: String {
@@ -4635,7 +4682,7 @@ private struct OperationsView: View {
 
                         Text(
                             supportBundleMessage.isEmpty
-                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, hardware UART, sampling history, SMA, sensors, I2C, LEDs, and the session log."
+                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, hardware UART, raw UART capture bytes, sampling history, SMA, sensors, I2C, LEDs, and the session log."
                                 : supportBundleMessage
                         )
                         .font(.caption)
@@ -4811,6 +4858,11 @@ private struct OperationsView: View {
         try writeSupportText(serialPortsCSVText, named: "serial-ports.csv", into: stagingURL)
         try writeSupportText(serialCaptureText, named: "serial-capture.txt", into: stagingURL)
         try writeSupportText(hardwareUARTText, named: "hardware-uart.txt", into: stagingURL)
+        try writeSupportData(
+            Data(monitor.uartCapture?.data ?? []),
+            named: "hardware-uart-capture.bin",
+            into: stagingURL
+        )
         try writeSupportText(samplingHistoryCSVText, named: "sampling-history.csv", into: stagingURL)
         try writeSupportText(smaRoutesCSVText, named: "sma-routes.csv", into: stagingURL)
         try writeSupportText(sensorCSVText, named: "sensors.csv", into: stagingURL)
@@ -4843,6 +4895,17 @@ private struct OperationsView: View {
         )
     }
 
+    private func writeSupportData(
+        _ data: Data,
+        named fileName: String,
+        into directoryURL: URL
+    ) throws {
+        try data.write(
+            to: directoryURL.appendingPathComponent(fileName),
+            options: .atomic
+        )
+    }
+
     private var supportBundleManifestText: String {
         let files = [
             "diagnostics.txt",
@@ -4852,6 +4915,7 @@ private struct OperationsView: View {
             "serial-ports.csv",
             "serial-capture.txt",
             "hardware-uart.txt",
+            "hardware-uart-capture.bin",
             "sampling-history.csv",
             "sma-routes.csv",
             "sensors.csv",
@@ -5021,6 +5085,32 @@ private struct OperationsView: View {
             lines.append(read.data.isEmpty ? "No bytes arrived." : read.dataHex)
         } else {
             lines.append("No hardware UART read recorded.")
+        }
+        lines.append("")
+        if let capture = monitor.uartCapture {
+            lines.append("Capture")
+            lines.append("Port: \(capture.port.label)")
+            lines.append("Baud: \(capture.baudRate)")
+            lines.append("Captured at: \(TimeCardFormatting.date(capture.capturedAt))")
+            lines.append(
+                "Duration: \(String(format: "%.2f", capture.durationSeconds)) s"
+            )
+            lines.append(
+                "Requested duration: \(String(format: "%.2f", capture.requestedDurationSeconds)) s"
+            )
+            lines.append("Stop reason: \(capture.stopReason)")
+            lines.append("Bytes: \(capture.byteCount)")
+            lines.append("Read windows: \(capture.readCount)")
+            lines.append("Empty windows: \(capture.emptyReadCount)")
+            lines.append("Line status: \(capture.lineStatusText)")
+            lines.append("")
+            lines.append(
+                capture.data.isEmpty
+                    ? "No bytes arrived during the capture window."
+                    : capture.dataHex
+            )
+        } else {
+            lines.append("No hardware UART capture recorded.")
         }
         return lines.joined(separator: "\n")
     }
