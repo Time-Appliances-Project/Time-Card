@@ -1228,6 +1228,16 @@ private struct UARTWorkspaceView: View {
                 }
 
                 ControlCenterPanel(
+                    title: "Receiver stream summary",
+                    subtitle: "Roll-up of decoded UBX and NMEA capture data"
+                ) {
+                    ReceiverStreamSummaryView(
+                        nmeaSentences: decodedNMEASentences,
+                        ubxFrames: decodedUBXFrames
+                    )
+                }
+
+                ControlCenterPanel(
                     title: "u-blox UBX decoder lab",
                     subtitle: "Decode binary receiver frames from capture bytes or pasted hex"
                 ) {
@@ -1994,6 +2004,239 @@ private struct UBXFrameRow: View {
             Color.secondary.opacity(0.07),
             in: RoundedRectangle(cornerRadius: 12)
         )
+    }
+}
+
+private struct ReceiverStreamFact: Identifiable {
+    let id: String
+    let label: String
+    let value: String
+}
+
+private struct ReceiverStreamSummaryView: View {
+    let nmeaSentences: [NMEASentence]
+    let ubxFrames: [TimeCardUBXFrame]
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 220), spacing: 12)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LazyVGrid(columns: columns, spacing: 12) {
+                MetricCard(
+                    title: "Decoded stream",
+                    value: decodedStreamValue,
+                    detail: decodedStreamDetail,
+                    systemImage: "waveform.path.ecg",
+                    accent: decodedCount == 0 ? .secondary : .green
+                )
+                MetricCard(
+                    title: "Receiver version",
+                    value: receiverVersionValue,
+                    detail: receiverVersionDetail,
+                    systemImage: "cpu",
+                    accent: receiverVersionFrame == nil ? .secondary : .teal
+                )
+                MetricCard(
+                    title: "Fix and position",
+                    value: fixSourceValue,
+                    detail: fixDetail,
+                    systemImage: "location.viewfinder",
+                    accent: fixDetailAvailable ? .green : .orange
+                )
+                MetricCard(
+                    title: "Satellites",
+                    value: satelliteValue,
+                    detail: satelliteDetail,
+                    systemImage: "antenna.radiowaves.left.and.right",
+                    accent: satelliteDetailAvailable ? .mint : .secondary
+                )
+            }
+
+            if facts.isEmpty {
+                Text(
+                    "No receiver facts decoded yet. Load hardware UART capture, "
+                        + "serial preview bytes, paste NMEA, or paste UBX hex."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(facts) { fact in
+                        InfoRow(label: fact.label, value: fact.value)
+                    }
+                }
+            }
+        }
+    }
+
+    private var decodedCount: Int {
+        nmeaSentences.count + ubxFrames.count
+    }
+
+    private var decodedStreamValue: String {
+        decodedCount == 0 ? "Waiting" : "\(decodedCount)"
+    }
+
+    private var decodedStreamDetail: String {
+        let validUBX = ubxFrames.filter(\.checksumValid).count
+        let validNMEA = nmeaSentences.filter(\.checksumValid).count
+        return "\(nmeaSentences.count) NMEA (\(validNMEA) checksum OK), "
+            + "\(ubxFrames.count) UBX (\(validUBX) checksum OK)."
+    }
+
+    private var receiverVersionFrame: TimeCardUBXFrame? {
+        ubxFrames.last {
+            $0.checksumValid && $0.messageName == "MON-VER"
+        }
+    }
+
+    private var receiverVersionValue: String {
+        receiverVersionFrame == nil ? "Unknown" : "MON-VER"
+    }
+
+    private var receiverVersionDetail: String {
+        receiverVersionFrame?.summary ?? "No UBX MON-VER frame decoded."
+    }
+
+    private var fixFrame: TimeCardUBXFrame? {
+        ubxFrames.last {
+            $0.checksumValid &&
+                ($0.messageName == "NAV-PVT" || $0.messageName == "NAV-STATUS")
+        }
+    }
+
+    private var fixSentence: NMEASentence? {
+        nmeaSentences.last {
+            $0.formatter == "GGA" || $0.formatter == "RMC" ||
+                $0.formatter == "GSA"
+        }
+    }
+
+    private var fixSourceValue: String {
+        if fixFrame != nil { return "UBX" }
+        if fixSentence != nil { return "NMEA" }
+        return "No fix"
+    }
+
+    private var fixDetail: String {
+        fixFrame?.summary ??
+            fixSentence?.summary ??
+            "No NAV-PVT, NAV-STATUS, GGA, RMC, or GSA data decoded."
+    }
+
+    private var fixDetailAvailable: Bool {
+        fixFrame != nil || fixSentence != nil
+    }
+
+    private var satelliteFrame: TimeCardUBXFrame? {
+        ubxFrames.last {
+            $0.checksumValid && $0.messageName == "NAV-SAT"
+        }
+    }
+
+    private var satelliteSentence: NMEASentence? {
+        nmeaSentences.last {
+            $0.formatter == "GSV" || $0.formatter == "GGA"
+        }
+    }
+
+    private var satelliteValue: String {
+        if let frame = satelliteFrame {
+            return frame.messageName
+        }
+        if let sentence = satelliteSentence {
+            return sentence.label
+        }
+        return "Unknown"
+    }
+
+    private var satelliteDetail: String {
+        satelliteFrame?.summary ??
+            satelliteSentence?.summary ??
+            "No NAV-SAT, GSV, or GGA satellite data decoded."
+    }
+
+    private var satelliteDetailAvailable: Bool {
+        satelliteFrame != nil || satelliteSentence != nil
+    }
+
+    private var timingFrame: TimeCardUBXFrame? {
+        ubxFrames.last {
+            $0.checksumValid && $0.messageName == "TIM-TP"
+        }
+    }
+
+    private var timingSentence: NMEASentence? {
+        nmeaSentences.last {
+            $0.formatter == "ZDA" || $0.formatter == "RMC"
+        }
+    }
+
+    private var facts: [ReceiverStreamFact] {
+        var rows: [ReceiverStreamFact] = []
+        if let receiverVersionFrame {
+            rows.append(
+                ReceiverStreamFact(
+                    id: "receiver-version",
+                    label: "Receiver version",
+                    value: receiverVersionFrame.summary
+                )
+            )
+        }
+        if let fixFrame {
+            rows.append(
+                ReceiverStreamFact(
+                    id: "ubx-fix",
+                    label: "UBX fix",
+                    value: fixFrame.summary
+                )
+            )
+        } else if let fixSentence {
+            rows.append(
+                ReceiverStreamFact(
+                    id: "nmea-fix",
+                    label: "NMEA fix",
+                    value: fixSentence.summary
+                )
+            )
+        }
+        if let satelliteFrame {
+            rows.append(
+                ReceiverStreamFact(
+                    id: "ubx-satellites",
+                    label: "UBX satellites",
+                    value: satelliteFrame.summary
+                )
+            )
+        } else if let satelliteSentence {
+            rows.append(
+                ReceiverStreamFact(
+                    id: "nmea-satellites",
+                    label: "NMEA satellites",
+                    value: satelliteSentence.summary
+                )
+            )
+        }
+        if let timingFrame {
+            rows.append(
+                ReceiverStreamFact(
+                    id: "ubx-timing",
+                    label: "UBX timing",
+                    value: timingFrame.summary
+                )
+            )
+        } else if let timingSentence {
+            rows.append(
+                ReceiverStreamFact(
+                    id: "nmea-timing",
+                    label: "NMEA timing",
+                    value: timingSentence.summary
+                )
+            )
+        }
+        return rows
     }
 }
 
