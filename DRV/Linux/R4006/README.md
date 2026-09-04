@@ -1,9 +1,12 @@
-# R4006 I2C peripherals and status LEDs
+# Time Card I2C peripherals and status LEDs
 
 This directory contains the Linux support used by the production R4006 Time
 Card on CentOS Stream 10. It exposes the board's PCA9546 I2C topology,
 IS32FL3207 front-panel RGB LEDs, and detected environmental sensors through
-standard Linux subsystems.
+standard Linux subsystems. The same supplemental LED driver also supports the
+six-indicator Time Card V9 layout.
+
+## LED variants
 
 The board EEPROM selects the R4006 profile. The verified front-panel mapping
 is:
@@ -15,6 +18,24 @@ is:
 | `sma2` | 3 |
 | `sma3` | 0 |
 | `sma4` | 1 |
+
+The Facebook PCI profile selects the V9 mapping independently of whether the
+driver is using MSI or MSI-X. The V9 schematic wires all six RGB groups in
+sequential controller order at I2C address `0x37`:
+
+| Linux LED name | Physical controller index |
+| --- | ---: |
+| `gnss1` | 0 |
+| `gnss2` | 1 |
+| `sma1` | 2 |
+| `sma2` | 3 |
+| `sma3` | 4 |
+| `sma4` | 5 |
+
+The V9 schematic labels `sma1` through `sma4` as `IO 1` through `IO 4`.
+R4006 remains a five-indicator profile and never registers a `gnss2` LED.
+A V9 card must retain its own EEPROM identity. Programming an R4006 board ID
+onto it intentionally selects the five-indicator R4006 profile instead.
 
 The R4006 sensor topology is:
 
@@ -87,12 +108,25 @@ timecard-ledctl list
 
 `timecard-led-policy` polls the first Time Card once per second. It shows GNSS
 fixed as green, searching as amber, and no fix as red. SMA outputs are green,
-inputs are blue, and disabled or unknown connectors are amber. GNSS state is
+inputs are blue, and disabled or unknown connectors are amber. GNSS1 state is
 read from the local `oscillatord` monitoring socket when available, with the
 Time Card debugfs telemetry used as a fallback.
 
+On a six-indicator card, the policy also controls `gnss2`. A separate `gnss2`
+object in the monitoring response supplies its fix state. Current oscillatord
+releases report GNSS1 only, so GNSS2 is amber with `STATUS UNKNOWN` until an
+independent GNSS2 monitor supplies that object. The policy deliberately does
+not mirror GNSS1 onto the secondary receiver. On R4006, the optional GNSS2
+path is skipped without reporting a missing LED.
+
 Use `timecard-ledctl` for manual tests. The policy service will restore the
 configuration-derived color on its next poll.
+
+Run the policy unit tests with:
+
+```sh
+python3 -m unittest discover -s tests -v
+```
 
 ## EEPROM programming over USB-C
 

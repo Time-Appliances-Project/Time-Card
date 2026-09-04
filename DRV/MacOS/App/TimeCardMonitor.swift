@@ -41,6 +41,10 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var recoverySuggestion = ""
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var samplingWindowHistory: [SamplingWindowPoint] = []
+    @Published private(set) var commandInProgress = false
+    @Published private(set) var commandMessage = ""
+    @Published private(set) var smaRoutes: [TimeCardSMARoute] = []
+    @Published private(set) var smaMessage = ""
 
     private var refreshTimer: Timer?
     private var nextAutomaticAttempt = Date.distantPast
@@ -69,12 +73,132 @@ final class TimeCardMonitor: ObservableObject {
         selectionGeneration &+= 1
         snapshot = nil
         samplingWindowHistory.removeAll(keepingCapacity: true)
+        smaRoutes.removeAll(keepingCapacity: true)
         refresh()
     }
 
     func refresh() {
         nextAutomaticAttempt = .distantPast
         performRefresh()
+    }
+
+    func setCardFromSystem() {
+        guard !commandInProgress else { return }
+        guard let selectedServiceID else {
+            commandMessage = "No Time Card is selected."
+            return
+        }
+        guard let descriptor = services.first(where: { $0.id == selectedServiceID }) else {
+            commandMessage = "The selected Time Card is no longer available."
+            return
+        }
+
+        commandInProgress = true
+        commandMessage = "Setting Time Card from macOS system time..."
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    try TimeCardClient.setCardFromSystem(for: descriptor)
+                    return Result<Void, Error>.success(())
+                } catch {
+                    return Result<Void, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.commandInProgress = false
+            switch result {
+            case .success:
+                self.commandMessage = "Time Card clock was set from macOS system time."
+                self.refresh()
+            case .failure(let error):
+                self.commandMessage = "Set-time failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func refreshSMA() {
+        guard let descriptor = selectedDescriptor else {
+            smaMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.capabilityNames.contains("SMA") == true else {
+            smaRoutes = []
+            smaMessage = "SMA routing is not advertised by this driver."
+            return
+        }
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                do {
+                    return Result<[TimeCardSMARoute], Error>.success(
+                        try TimeCardClient.querySMARoutes(for: descriptor)
+                    )
+                } catch {
+                    return Result<[TimeCardSMARoute], Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            switch result {
+            case .success(let routes):
+                self.smaRoutes = routes
+                self.smaMessage = "SMA connector states refreshed."
+            case .failure(let error):
+                self.smaMessage = "SMA refresh failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func setSMARoute(
+        connector: UInt32,
+        direction: TimeCardSMADirection,
+        function: UInt32
+    ) {
+        guard !commandInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            smaMessage = "No Time Card is selected."
+            return
+        }
+
+        commandInProgress = true
+        smaMessage = "Applying SMA \(connector) route..."
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<TimeCardSMARoute, Error>.success(
+                        try TimeCardClient.setSMARoute(
+                            for: descriptor,
+                            connector: connector,
+                            direction: direction,
+                            function: function
+                        )
+                    )
+                } catch {
+                    return Result<TimeCardSMARoute, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.commandInProgress = false
+            switch result {
+            case .success(let route):
+                var routes = self.smaRoutes
+                if let index = routes.firstIndex(where: { $0.connector == route.connector }) {
+                    routes[index] = route
+                } else {
+                    routes.append(route)
+                    routes.sort { $0.connector < $1.connector }
+                }
+                self.smaRoutes = routes
+                self.smaMessage = "SMA \(route.connector) route applied and verified."
+                self.refresh()
+            case .failure(let error):
+                self.smaMessage = "SMA apply failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     private func automaticRefresh() {
@@ -171,6 +295,9 @@ final class TimeCardMonitor: ObservableObject {
             recoverySuggestion = ""
             lastUpdated = Date()
             appendSamplingWindow(current.sampleWindowNanoseconds)
+            if current.capabilityNames.contains("SMA") && smaRoutes.isEmpty {
+                refreshSMA()
+            }
             nextAutomaticAttempt = .distantPast
 
         case .failure(let discovered, let selected, let error):
@@ -210,6 +337,11 @@ final class TimeCardMonitor: ObservableObject {
             selectedServiceID = newServiceID
             samplingWindowHistory.removeAll(keepingCapacity: true)
         }
+    }
+
+    private var selectedDescriptor: TimeCardServiceDescriptor? {
+        guard let selectedServiceID else { return nil }
+        return services.first { $0.id == selectedServiceID }
     }
 
     var serviceDetected: Bool {

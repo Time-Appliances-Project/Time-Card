@@ -72,6 +72,18 @@ if(cli_low_byte_source EQUAL -1)
         "CLI must report the configured low-byte clock source")
 endif()
 
+foreach(required_cli_sma IN ITEMS
+        "command_sma("
+        "command_sma_set("
+        "\"sma\""
+        "\"sma-set\"")
+    string(FIND "${cli}" "${required_cli_sma}" cli_sma_offset)
+    if(cli_sma_offset EQUAL -1)
+        message(FATAL_ERROR
+            "CLI must expose SMA query and route commands")
+    endif()
+endforeach()
+
 set(control_center_source "${TIMECARD_SOURCE_DIR}/App/TimeCardClient.swift")
 if(NOT EXISTS "${control_center_source}")
     message(FATAL_ERROR
@@ -87,8 +99,27 @@ foreach(required_selector IN ITEMS "selector: 0" "selector: 3")
     endif()
 endforeach()
 
+string(FIND "${control_center}" "setCardFromSystem" guarded_set_time)
+string(FIND "${control_center}" "selector: 2" reviewed_set_selector)
+if(guarded_set_time EQUAL -1 OR reviewed_set_selector EQUAL -1)
+    message(FATAL_ERROR
+        "Control Center must expose set-time only through a named guarded path")
+endif()
+
+foreach(required_control_center_sma IN ITEMS
+        "querySMARoutes"
+        "setSMARoute"
+        "TimeCardSMARoute"
+        "selector: 4"
+        "selector: 5")
+    string(FIND "${control_center}" "${required_control_center_sma}" control_sma_offset)
+    if(control_sma_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Control Center must expose SMA query and route controls")
+    endif()
+endforeach()
+
 foreach(forbidden_operation IN ITEMS
-        "selector: 2"
         "IOConnectCallScalarMethod"
         "clock_settime"
         "settimeofday"

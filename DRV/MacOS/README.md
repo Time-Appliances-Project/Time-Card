@@ -22,15 +22,21 @@ The current implementation provides:
 - Bracketed card/system cross timestamps
 - Version-gated clock and TOD status reads
 - Capability and field-validity reporting for absent or gated registers
-- A versioned, size-checked user-client ABI v2
+- A versioned, size-checked user-client ABI v3
+- SMA connector query and guarded route setting through DriverKit, including
+  Linux-compatible fixed-route handling for FPGA images without writable SMA
+  routing GPIO
 - A native SwiftUI Control Center with:
   - driver activation, update, and removal
   - live card discovery and explicit multi-card selection
   - PCI identity, board profile, register-map, BAR, and capability views
   - raw card time, clock status, ToD status, and cross-timestamp telemetry
+  - live SMA connector status and route controls when the active FPGA image
+    exposes writable routing
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
-- `timecardctl` commands for `status`, `get`, and `set-card-from-system`
+- `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
+  and `sma-set`
 
 The common PHC block is available on every matched profile. ART uses its own
 fixed layout and has no standard TOD block, so the driver never reads one.
@@ -44,11 +50,11 @@ Current upstream Linux defines the classic Meta/Celestica map and the fixed ART
 and ADVA maps. The shifted revision-02 map comes from this repository's
 LitePCIe gateware and Windows/Linux support; it is not currently in upstream
 Linux. The Meta/Facebook classic profile is hardware-validated on an Intel Mac
-Pro. Every other profile is covered by host-side layout and safety tests but
-still requires physical-card validation before a production release. Celestica
-cards programmed with the generic Meta PCI identity continue to receive safe
-common-PHC support, but board-specific R4006 identification will require the
-future EEPROM/I2C work.
+Pro, including ABI v3 status and SMA fixed-route readback. Every other profile
+is covered by host-side layout and safety tests but still requires physical-card
+validation before a production release. Celestica cards programmed with the
+generic Meta PCI identity continue to receive safe common-PHC support, but
+board-specific R4006 identification will require the future EEPROM/I2C work.
 
 ## Project layout
 
@@ -166,6 +172,13 @@ The signed CLI bundle uses `CLI/timecardctl.entitlements`; place its matching
 development provisioning profile at
 `timecardctl.app/Contents/embedded.provisionprofile` before signing.
 
+For repeatable development installs, the host app accepts
+`--activate-driver`. Launching `/Applications/TimeCardMacOS.app` with this
+argument submits the DriverKit activation or replacement request for the
+embedded `org.opentimeserver.timecard.macos.driver` extension. macOS may still
+require approval in System Settings or a reboot before the PCI service binds to
+the new driver build.
+
 ## First hardware bring-up
 
 1. Verify the card and gateware on Linux using `ptp_ocp`.
@@ -177,7 +190,7 @@ development provisioning profile at
 7. Open the Control Center and verify that the Overview, Precision Clock, and
    Hardware pages show the selected card.
 8. Run `timecardctl.app/Contents/MacOS/timecardctl status`, followed by the
-   same executable with `get`.
+   same executable with `get` and `sma`.
 9. Compare the reported card time, core versions, and available status fields
    with the Linux reference setup.
 
@@ -190,8 +203,12 @@ and it does not yet apply a UTC/TAI correction.
 
 - Cross timestamps currently bracket the MMIO clock read with macOS realtime
   samples. PCIe PTM support is not implemented.
-- UARTs, PPS interrupts, external timestamp inputs, SMA routing, I2C, SPI
-  flash, frequency counters, and signal generators are not implemented.
+- UARTs, PPS interrupts, external timestamp inputs beyond SMA route readback,
+  I2C, SPI flash, frequency counters, and signal generators are not
+  implemented.
+- SMA routing is implemented for the classic, shifted LitePCIe, ART, and ADVA
+  register maps. FPGA images with absent or fixed route GPIO report fixed
+  direction and fixed function, and writable changes are rejected.
 - Optional UTC, leap, GNSS, and satellite registers are deliberately gated
   until an exact per-card FPGA image contract is implemented.
 - The Control Center labels card time as raw and does not calculate a card to

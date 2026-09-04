@@ -6,6 +6,8 @@
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
     <string>OCP Time Card Driver</string>
+    <key>CFBundleIconFile</key>
+    <string>TimeCardDriver</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>

@@ -15,6 +15,7 @@ physical validation of the remaining profiles is pending.
 - Versioned user-client ABI
 - Native SwiftUI read-only Control Center with multi-card discovery,
   capability-aware status, and sampling-window history
+- SMA route readback for fixed-route classic Meta gateware
 - CLI and host-side tests
 
 Exit criteria:
@@ -29,6 +30,11 @@ Exit criteria:
 
 ## Milestone 2: serial and event access
 
+Status: partially started. SMA route control moved here from milestone 3 and is
+implemented in ABI v3.
+
+- SMA input and output route query/set, with fixed-route fallback for older
+  FPGA images
 - GNSS, GNSS2, atomic-clock, and NMEA 16550 UARTs
 - MSI-X interrupt allocation and dispatch
 - PPS and external timestamp events
@@ -38,7 +44,6 @@ Exit criteria:
 ## Milestone 3: timing configuration
 
 - Clock-source selection
-- SMA input and output routing
 - IRIG-B and DCF configuration
 - Periodic outputs and signal generators
 - Frequency counters and timestamp channels

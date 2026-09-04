@@ -96,11 +96,102 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
         if (capabilities & (1 << 1)) != 0 { names.append("Clock set") }
         if (capabilities & (1 << 2)) != 0 { names.append("Cross timestamp") }
         if (capabilities & (1 << 3)) != 0 { names.append("ToD") }
+        if (capabilities & (1 << 4)) != 0 { names.append("SMA") }
         return names
     }
 
     func hasValidField(_ field: UInt64) -> Bool {
         (validFields & field) != 0
+    }
+}
+
+enum TimeCardSMADirection: UInt32, CaseIterable, Identifiable, Sendable {
+    case input = 0
+    case output = 1
+    case disabled = 2
+
+    var id: UInt32 { rawValue }
+
+    var label: String {
+        switch self {
+        case .input: "Input"
+        case .output: "Output"
+        case .disabled: "Disabled"
+        }
+    }
+}
+
+struct TimeCardSMAFunction: Identifiable, Hashable, Sendable {
+    let id: UInt32
+    let label: String
+}
+
+struct TimeCardSMARoute: Identifiable, Equatable, Sendable {
+    let connector: UInt32
+    let direction: TimeCardSMADirection
+    let function: UInt32
+    let flags: UInt32
+    let inputMap: UInt32
+    let outputMap: UInt32
+
+    var id: UInt32 { connector }
+
+    var isPresent: Bool { (flags & (1 << 0)) != 0 }
+    var isFixedDirection: Bool { (flags & (1 << 1)) != 0 }
+    var isDisabled: Bool { (flags & (1 << 2)) != 0 }
+    var isFixedFunction: Bool { (flags & (1 << 3)) != 0 }
+
+    var functionName: String {
+        TimeCardSMACatalog.name(for: function, direction: direction)
+    }
+}
+
+enum TimeCardSMACatalog {
+    static let inputFunctions: [TimeCardSMAFunction] = [
+        .init(id: 0x0000, label: "10 MHz"),
+        .init(id: 0x0001, label: "PPS 1"),
+        .init(id: 0x0002, label: "PPS 2"),
+        .init(id: 0x0004, label: "Timestamp 1"),
+        .init(id: 0x0008, label: "Timestamp 2"),
+        .init(id: 0x0010, label: "IRIG-B"),
+        .init(id: 0x0020, label: "DCF77"),
+        .init(id: 0x0040, label: "Timestamp 3"),
+        .init(id: 0x0080, label: "Timestamp 4"),
+        .init(id: 0x0100, label: "Frequency 1"),
+        .init(id: 0x0200, label: "Frequency 2"),
+        .init(id: 0x0400, label: "Frequency 3"),
+        .init(id: 0x0800, label: "Frequency 4"),
+    ]
+
+    static let outputFunctions: [TimeCardSMAFunction] = [
+        .init(id: 0x0000, label: "10 MHz"),
+        .init(id: 0x0001, label: "PHC"),
+        .init(id: 0x0002, label: "MAC"),
+        .init(id: 0x0004, label: "GNSS 1"),
+        .init(id: 0x0008, label: "GNSS 2"),
+        .init(id: 0x0010, label: "IRIG-B"),
+        .init(id: 0x0020, label: "DCF77"),
+        .init(id: 0x0040, label: "Generator 1"),
+        .init(id: 0x0080, label: "Generator 2"),
+        .init(id: 0x0100, label: "Generator 3"),
+        .init(id: 0x0200, label: "Generator 4"),
+        .init(id: 0x2000, label: "Ground"),
+        .init(id: 0x4000, label: "VCC"),
+    ]
+
+    static func functions(for direction: TimeCardSMADirection)
+        -> [TimeCardSMAFunction] {
+        switch direction {
+        case .input: inputFunctions
+        case .output: outputFunctions
+        case .disabled: []
+        }
+    }
+
+    static func name(for value: UInt32, direction: TimeCardSMADirection)
+        -> String {
+        functions(for: direction).first(where: { $0.id == value })?.label
+            ?? String(format: "0x%04x", value)
     }
 }
 
@@ -168,7 +259,7 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
 enum TimeCardClient {
     private static let serviceClass = "IOUserService"
     private static let userClassValue = "TimeCardDriver"
-    private static let supportedABIVersion: UInt32 = 2
+    private static let supportedABIVersion: UInt32 = 3
 
     static var localABILayoutIsValid: Bool {
         MemoryLayout<TimeCardTimeRaw>.size == 16
@@ -209,6 +300,15 @@ enum TimeCardClient {
             && MemoryLayout<TimeCardInfoRaw>.offset(of: \.validFields) == 96
             && MemoryLayout<TimeCardInfoRaw>.offset(of: \.pciRevision) == 104
             && MemoryLayout<TimeCardInfoRaw>.offset(of: \.reserved) == 108
+            && MemoryLayout<TimeCardSMARaw>.size == 32
+            && MemoryLayout<TimeCardSMARaw>.offset(of: \.size) == 0
+            && MemoryLayout<TimeCardSMARaw>.offset(of: \.connector) == 4
+            && MemoryLayout<TimeCardSMARaw>.offset(of: \.direction) == 8
+            && MemoryLayout<TimeCardSMARaw>.offset(of: \.function) == 12
+            && MemoryLayout<TimeCardSMARaw>.offset(of: \.flags) == 16
+            && MemoryLayout<TimeCardSMARaw>.offset(of: \.inputMap) == 20
+            && MemoryLayout<TimeCardSMARaw>.offset(of: \.outputMap) == 24
+            && MemoryLayout<TimeCardSMARaw>.offset(of: \.reserved) == 28
     }
 
     static func discoverServices() throws -> [TimeCardServiceDescriptor] {
@@ -321,6 +421,98 @@ enum TimeCardClient {
         )
     }
 
+    static func setCardFromSystem(
+        for descriptor: TimeCardServiceDescriptor
+    ) throws {
+        guard localABILayoutIsValid else {
+            throw TimeCardClientError.invalidClientLayout
+        }
+        guard let matching = IORegistryEntryIDMatching(descriptor.id) else {
+            throw TimeCardClientError.matchingDictionary
+        }
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, matching)
+        guard service != IO_OBJECT_NULL else {
+            throw TimeCardClientError.serviceDisappeared
+        }
+        defer { IOObjectRelease(service) }
+
+        var connection: io_connect_t = 0
+        let openResult = IOServiceOpen(
+            service, mach_task_self_, 0, &connection
+        )
+        guard openResult == KERN_SUCCESS else {
+            throw TimeCardClientError.openFailed(openResult)
+        }
+        defer { IOServiceClose(connection) }
+
+        let now = Date().timeIntervalSince1970
+        let seconds = floor(now)
+        let nanoseconds = (now - seconds) * 1_000_000_000
+        var time = TimeCardTimeRaw(
+            seconds: UInt64(seconds),
+            nanoseconds: UInt32(nanoseconds.rounded()),
+            reserved: 0
+        )
+        try callInput(connection: connection, selector: 2, input: &time)
+    }
+
+    static func querySMARoutes(
+        for descriptor: TimeCardServiceDescriptor
+    ) throws -> [TimeCardSMARoute] {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        return try (1...4).map { connector in
+            var raw = TimeCardSMARaw(
+                size: UInt32(MemoryLayout<TimeCardSMARaw>.size),
+                connector: UInt32(connector)
+            )
+            try callInOut(connection: connection, selector: 4, value: &raw)
+            return raw.route
+        }
+    }
+
+    static func setSMARoute(
+        for descriptor: TimeCardServiceDescriptor,
+        connector: UInt32,
+        direction: TimeCardSMADirection,
+        function: UInt32
+    ) throws -> TimeCardSMARoute {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var raw = TimeCardSMARaw(
+            size: UInt32(MemoryLayout<TimeCardSMARaw>.size),
+            connector: connector,
+            direction: direction.rawValue,
+            function: function
+        )
+        try callInOut(connection: connection, selector: 5, value: &raw)
+        return raw.route
+    }
+
+    private static func openConnection(
+        for descriptor: TimeCardServiceDescriptor
+    ) throws -> io_connect_t {
+        guard let matching = IORegistryEntryIDMatching(descriptor.id) else {
+            throw TimeCardClientError.matchingDictionary
+        }
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, matching)
+        guard service != IO_OBJECT_NULL else {
+            throw TimeCardClientError.serviceDisappeared
+        }
+        defer { IOObjectRelease(service) }
+
+        var connection: io_connect_t = 0
+        let openResult = IOServiceOpen(
+            service, mach_task_self_, 0, &connection
+        )
+        guard openResult == KERN_SUCCESS else {
+            throw TimeCardClientError.openFailed(openResult)
+        }
+        return connection
+    }
+
     private static func callOutput<T>(
         connection: io_connect_t,
         selector: UInt32,
@@ -336,6 +528,61 @@ enum TimeCardClient {
                 bytes.baseAddress,
                 &outputSize
             )
+        }
+        guard result == KERN_SUCCESS else {
+            throw TimeCardClientError.methodFailed(
+                selector: selector, result: result
+            )
+        }
+        guard outputSize == MemoryLayout<T>.size else {
+            throw TimeCardClientError.unexpectedOutput(
+                selector: selector,
+                expected: MemoryLayout<T>.size,
+                actual: outputSize
+            )
+        }
+    }
+
+    private static func callInput<T>(
+        connection: io_connect_t,
+        selector: UInt32,
+        input: inout T
+    ) throws {
+        let result = withUnsafeBytes(of: &input) { bytes in
+            IOConnectCallStructMethod(
+                connection,
+                selector,
+                bytes.baseAddress,
+                bytes.count,
+                nil,
+                nil
+            )
+        }
+        guard result == KERN_SUCCESS else {
+            throw TimeCardClientError.methodFailed(
+                selector: selector, result: result
+            )
+        }
+    }
+
+    private static func callInOut<T>(
+        connection: io_connect_t,
+        selector: UInt32,
+        value: inout T
+    ) throws {
+        var input = value
+        var outputSize = MemoryLayout<T>.size
+        let result = withUnsafeMutableBytes(of: &value) { outputBytes in
+            withUnsafeBytes(of: &input) { inputBytes in
+                IOConnectCallStructMethod(
+                    connection,
+                    selector,
+                    inputBytes.baseAddress,
+                    inputBytes.count,
+                    outputBytes.baseAddress,
+                    &outputSize
+                )
+            }
         }
         guard result == KERN_SUCCESS else {
             throw TimeCardClientError.methodFailed(
@@ -388,4 +635,26 @@ private struct TimeCardInfoRaw {
     var validFields: UInt64 = 0
     var pciRevision: UInt32 = 0
     var reserved: UInt32 = 0
+}
+
+private struct TimeCardSMARaw {
+    var size: UInt32 = 0
+    var connector: UInt32 = 0
+    var direction: UInt32 = 0
+    var function: UInt32 = 0
+    var flags: UInt32 = 0
+    var inputMap: UInt32 = 0
+    var outputMap: UInt32 = 0
+    var reserved: UInt32 = 0
+
+    var route: TimeCardSMARoute {
+        TimeCardSMARoute(
+            connector: connector,
+            direction: TimeCardSMADirection(rawValue: direction) ?? .disabled,
+            function: function,
+            flags: flags,
+            inputMap: inputMap,
+            outputMap: outputMap
+        )
+    }
 }

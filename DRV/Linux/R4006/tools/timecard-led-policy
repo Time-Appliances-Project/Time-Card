@@ -21,6 +21,7 @@ LED_BRIGHTNESS = 160
 GNSS_FIXED = ((0, 180, 30), "FIX LOCKED")
 GNSS_SEARCHING = ((170, 78, 0), "SEARCHING")
 GNSS_FAILED = ((180, 0, 0), "NO FIX")
+GNSS_UNKNOWN = ((145, 64, 0), "STATUS UNKNOWN")
 SMA_OUTPUT = ((0, 165, 30), "OUTPUT")
 SMA_INPUT = ((0, 65, 180), "INPUT")
 SMA_DISABLED = ((50, 35, 0), "DISABLED")
@@ -113,8 +114,7 @@ class LedPolicy:
                         decoded = json.loads(response)
                     except json.JSONDecodeError:
                         continue
-                    gnss = decoded.get("gnss")
-                    return gnss if isinstance(gnss, dict) else None
+                    return decoded if isinstance(decoded, dict) else None
         except (ConnectionError, OSError, TimeoutError):
             return None
         return None
@@ -136,15 +136,27 @@ class LedPolicy:
             return None
         return int(gnss_match.group(1), 16), int(sat_match.group(1), 16)
 
-    def read_gnss(self, card: Path) -> tuple[tuple[int, int, int], str]:
-        monitoring = self.query_oscillatord()
-        if monitoring is not None:
-            if monitoring.get("fixOk") is True:
+    @staticmethod
+    def monitoring_gnss_policy(
+        monitoring: dict[str, object], key: str
+    ) -> tuple[tuple[int, int, int], str] | None:
+        gnss = monitoring.get(key)
+        if isinstance(gnss, dict):
+            if gnss.get("fixOk") is True:
                 return GNSS_FIXED
-            satellites = monitoring.get("satellites_count")
+            satellites = gnss.get("satellites_count")
             if isinstance(satellites, int) and satellites > 0:
                 return GNSS_SEARCHING
             return GNSS_FAILED
+        return None
+
+    def read_gnss1(
+        self, card: Path, monitoring: dict[str, object] | None
+    ) -> tuple[tuple[int, int, int], str]:
+        if monitoring is not None:
+            policy = self.monitoring_gnss_policy(monitoring, "gnss")
+            if policy is not None:
+                return policy
 
         raw = self.read_raw_gnss(card)
         if raw is None:
@@ -158,6 +170,18 @@ class LedPolicy:
             return GNSS_SEARCHING
         return GNSS_FAILED
 
+    def read_gnss2(
+        self, monitoring: dict[str, object] | None
+    ) -> tuple[tuple[int, int, int], str]:
+        if monitoring is not None:
+            policy = self.monitoring_gnss_policy(monitoring, "gnss2")
+            if policy is not None:
+                return policy
+
+        # Current oscillatord and the FPGA ToD block report GNSS1 only. Do not
+        # mirror that state onto a physically independent secondary receiver.
+        return GNSS_UNKNOWN
+
     def apply_once(self) -> bool:
         card = self.find_card()
         if card is None:
@@ -167,13 +191,16 @@ class LedPolicy:
             return False
 
         self.card_missing_reported = False
-        self.set_led("gnss1", self.read_gnss(card))
+        monitoring = self.query_oscillatord()
+        self.set_led("gnss1", self.read_gnss1(card, monitoring))
+        if self.find_led("gnss2") is not None:
+            self.set_led("gnss2", self.read_gnss2(monitoring))
         for connector in range(1, 5):
             self.set_led(f"sma{connector}", self.read_sma(card, connector))
         return True
 
     def turn_off(self) -> None:
-        for name in ("gnss1", "sma1", "sma2", "sma3", "sma4"):
+        for name in ("gnss1", "gnss2", "sma1", "sma2", "sma3", "sma4"):
             led = self.find_led(name)
             if led is None:
                 continue

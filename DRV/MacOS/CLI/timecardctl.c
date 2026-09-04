@@ -19,7 +19,10 @@ print_usage(FILE *stream)
     fprintf(stream,
             "usage: timecardctl status\n"
             "       timecardctl get\n"
-            "       timecardctl set-card-from-system\n");
+            "       timecardctl set-card-from-system\n"
+            "       timecardctl sma [connector]\n"
+            "       timecardctl sma-set connector input|output function\n"
+            "       timecardctl sma-set connector disabled\n");
 }
 
 static io_connect_t
@@ -109,6 +112,28 @@ call_output(io_connect_t connection, uint32_t selector, void *output,
     return 0;
 }
 
+static int
+call_inout(io_connect_t connection, uint32_t selector, void *input,
+           size_t inputSize, void *output, size_t expectedSize)
+{
+    size_t outputSize = expectedSize;
+    kern_return_t result = IOConnectCallStructMethod(
+        connection, selector, input, inputSize, output, &outputSize);
+
+    if (result != KERN_SUCCESS) {
+        fprintf(stderr, "timecardctl: method %u failed: 0x%08x\n", selector,
+                result);
+        return 1;
+    }
+    if (outputSize != expectedSize) {
+        fprintf(stderr,
+                "timecardctl: method %u returned %zu bytes, expected %zu\n",
+                selector, outputSize, expectedSize);
+        return 1;
+    }
+    return 0;
+}
+
 static void
 print_card_time(const TimeCardTime *cardTime)
 {
@@ -153,7 +178,7 @@ command_status(io_connect_t connection)
     }
     printf("Register layout:  %s\n",
            TimeCardRegisterLayoutName(info.layout));
-    printf("Capabilities:     %s%s%s%s\n",
+    printf("Capabilities:     %s%s%s%s%s\n",
            (info.capabilities & kTimeCardCapabilityReadClock) != 0 ?
                "clock-read" : "no-clock-read",
            (info.capabilities & kTimeCardCapabilitySetClock) != 0 ?
@@ -161,7 +186,9 @@ command_status(io_connect_t connection)
            (info.capabilities & kTimeCardCapabilityCrossTimestamp) != 0 ?
                ", cross-timestamp" : "",
            (info.capabilities & kTimeCardCapabilityTOD) != 0 ?
-               ", TOD" : "");
+               ", TOD" : "",
+           (info.capabilities & kTimeCardCapabilitySMA) != 0 ?
+               ", SMA" : "");
     printf("Clock offset:     0x%" PRIx64 "\n", info.clockOffset);
     if ((info.validFields & kTimeCardInfoValidClockVersion) != 0)
         printf("Clock version:    0x%08x\n", info.clockVersion);
@@ -192,6 +219,107 @@ command_status(io_connect_t connection)
             printf("TOD status:       unavailable for this core version\n");
     }
     printf("Optional GNSS:    gated pending an exact FPGA image contract\n");
+    return 0;
+}
+
+static const char *
+sma_direction_name(uint32_t direction)
+{
+    switch (direction) {
+    case kTimeCardSMADirectionInput:
+        return "input";
+    case kTimeCardSMADirectionOutput:
+        return "output";
+    case kTimeCardSMADirectionDisabled:
+        return "disabled";
+    default:
+        return "unknown";
+    }
+}
+
+static void
+print_sma(const TimeCardSMAControl *control)
+{
+    printf("SMA %u: %-8s function 0x%04x, input 0x%04x, output 0x%04x%s%s\n",
+           control->connector, sma_direction_name(control->direction),
+           control->function, control->inputMap, control->outputMap,
+           (control->flags & kTimeCardSMAFlagFixedDirection) != 0 ?
+               " (fixed direction)" : "",
+           (control->flags & kTimeCardSMAFlagDisabled) != 0 ?
+               " (disabled)" : "");
+}
+
+static unsigned long
+parse_ulong(const char *text, const char *name)
+{
+    char *end = NULL;
+    errno = 0;
+    unsigned long value = strtoul(text, &end, 0);
+    if (errno != 0 || end == text || *end != '\0') {
+        fprintf(stderr, "timecardctl: invalid %s: %s\n", name, text);
+        exit(2);
+    }
+    return value;
+}
+
+static int
+command_sma(io_connect_t connection, int argc, char **argv)
+{
+    unsigned long first = 1;
+    unsigned long last = TIMECARD_SMA_COUNT;
+    if (argc > 3)
+        return 2;
+    if (argc == 3)
+        first = last = parse_ulong(argv[2], "SMA connector");
+    if (first == 0 || last > TIMECARD_SMA_COUNT)
+        return 2;
+
+    for (unsigned long connector = first; connector <= last; connector++) {
+        TimeCardSMAControl control = {
+            .size = sizeof(control),
+            .connector = (uint32_t)connector,
+        };
+        if (call_inout(connection, kTimeCardMethodSMAQuery,
+                       &control, sizeof(control), &control,
+                       sizeof(control)))
+            return 1;
+        print_sma(&control);
+    }
+    return 0;
+}
+
+static int
+command_sma_set(io_connect_t connection, int argc, char **argv)
+{
+    if (argc < 4 || argc > 5)
+        return 2;
+
+    TimeCardSMAControl control = {
+        .size = sizeof(control),
+        .connector = (uint32_t)parse_ulong(argv[2], "SMA connector"),
+    };
+    if (strcmp(argv[3], "input") == 0)
+        control.direction = kTimeCardSMADirectionInput;
+    else if (strcmp(argv[3], "output") == 0)
+        control.direction = kTimeCardSMADirectionOutput;
+    else if (strcmp(argv[3], "disabled") == 0)
+        control.direction = kTimeCardSMADirectionDisabled;
+    else
+        return 2;
+
+    if (control.direction == kTimeCardSMADirectionDisabled) {
+        if (argc != 4)
+            return 2;
+    } else {
+        if (argc != 5)
+            return 2;
+        control.function = (uint32_t)parse_ulong(argv[4], "SMA function");
+    }
+
+    if (call_inout(connection, kTimeCardMethodSMASet,
+                   &control, sizeof(control), &control, sizeof(control)))
+        return 1;
+    print_sma(&control);
     return 0;
 }
 
@@ -243,18 +371,22 @@ main(int argc, char **argv)
     io_connect_t connection;
     int status;
 
-    if (argc != 2) {
+    if (argc < 2) {
         print_usage(stderr);
         return 2;
     }
 
     connection = open_timecard();
-    if (strcmp(argv[1], "status") == 0)
+    if (strcmp(argv[1], "status") == 0 && argc == 2)
         status = command_status(connection);
-    else if (strcmp(argv[1], "get") == 0)
+    else if (strcmp(argv[1], "get") == 0 && argc == 2)
         status = command_get(connection);
-    else if (strcmp(argv[1], "set-card-from-system") == 0)
+    else if (strcmp(argv[1], "set-card-from-system") == 0 && argc == 2)
         status = command_set_card_from_system(connection);
+    else if (strcmp(argv[1], "sma") == 0)
+        status = command_sma(connection, argc, argv);
+    else if (strcmp(argv[1], "sma-set") == 0)
+        status = command_sma_set(connection, argc, argv);
     else {
         print_usage(stderr);
         status = 2;

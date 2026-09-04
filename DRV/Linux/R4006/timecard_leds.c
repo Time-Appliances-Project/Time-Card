@@ -113,7 +113,8 @@ static const struct timecard_led_board_data timecard_celestica_leds = {
 	},
 };
 
-static const struct timecard_led_board_data timecard_fb_msix_leds = {
+/* Time Card V9 uses six sequential RGB groups on the IS32FL3207. */
+static const struct timecard_led_board_data timecard_v9_leds = {
 	.num_leds = 6,
 	.preferred_address = 0x37,
 	.probe_alternate_addresses = true,
@@ -125,21 +126,6 @@ static const struct timecard_led_board_data timecard_fb_msix_leds = {
 		{ "sma2",  3 },
 		{ "sma3",  4 },
 		{ "sma4",  5 },
-	},
-};
-
-static const struct timecard_led_board_data timecard_fb_msi_leds = {
-	.num_leds = 6,
-	.preferred_address = 0x37,
-	.probe_alternate_addresses = true,
-	.swap_red_green = true,
-	.leds = {
-		{ "gnss1", 4 },
-		{ "gnss2", 5 },
-		{ "sma1",  2 },
-		{ "sma2",  3 },
-		{ "sma3",  0 },
-		{ "sma4",  1 },
 	},
 };
 
@@ -203,9 +189,9 @@ timecard_select_board_data(struct i2c_client *client)
 	if (pdev->vendor == TIMECARD_PCI_VENDOR_CELESTICA)
 		return &timecard_celestica_leds;
 
+	/* Interrupt mode cannot change the V9 board's physical LED wiring. */
 	if (pdev->vendor == TIMECARD_PCI_VENDOR_FACEBOOK)
-		return pdev->msix_enabled ? &timecard_fb_msix_leds :
-					    &timecard_fb_msi_leds;
+		return &timecard_v9_leds;
 
 	return NULL;
 }

@@ -84,6 +84,14 @@ WriteRegister32(IOPCIDevice *device, uint8_t memoryIndex, uint64_t offset,
     device->MemoryWrite32(memoryIndex, offset, value);
 }
 
+static uint32_t
+ReadRegister32Raw(IOPCIDevice *device, uint8_t memoryIndex, uint64_t offset)
+{
+    uint32_t value = UINT32_MAX;
+    device->MemoryRead32(memoryIndex, offset, &value);
+    return value;
+}
+
 kern_return_t
 IMPL(TimeCardDriver, Start)
 {
@@ -459,6 +467,432 @@ TimeCardDriver::GetInfo(TimeCardInfo *info)
     return kIOReturnSuccess;
 }
 
+static uint64_t
+TimeCardSMAInputRegisterOffset(const TimeCardRegisterMap *map,
+                               uint32_t connector)
+{
+    return connector > 2u ? map->smaMap2Offset : map->smaMap1Offset;
+}
+
+static uint64_t
+TimeCardSMAOutputRegisterOffset(const TimeCardRegisterMap *map,
+                                uint32_t connector)
+{
+    return connector > 2u ? map->smaMap1Offset + 4u :
+                            map->smaMap2Offset + 4u;
+}
+
+static bool
+TimeCardSMAReadHalf(IOPCIDevice *device, uint8_t memoryIndex,
+                    uint64_t offset, uint32_t connector, uint32_t *value)
+{
+    if (value == nullptr)
+        return false;
+    const uint32_t raw = ReadRegister32Raw(device, memoryIndex, offset);
+    const uint32_t shift = (connector & 1u) != 0 ? 0u : 16u;
+    *value = (raw >> shift) & 0xffffu;
+    return true;
+}
+
+static bool
+TimeCardSMAWriteHalf(IOPCIDevice *device, uint8_t memoryIndex,
+                     uint64_t offset, uint32_t connector, uint32_t value)
+{
+    uint32_t raw = 0;
+    if (!ReadRegister32(device, memoryIndex, offset, &raw))
+        return false;
+    const uint32_t shift = (connector & 1u) != 0 ? 0u : 16u;
+    const uint32_t preserveMask =
+        shift == 0u ? 0xffff0000u : 0x0000ffffu;
+    raw = (raw & preserveMask) | ((value & 0xffffu) << shift);
+    WriteRegister32(device, memoryIndex, offset, raw);
+    return true;
+}
+
+static bool
+TimeCardSMAInputFunctionValid(uint32_t function)
+{
+    switch (function) {
+    case kTimeCardSMAInput10MHz:
+    case kTimeCardSMAInputPPS1:
+    case kTimeCardSMAInputPPS2:
+    case kTimeCardSMAInputTS1:
+    case kTimeCardSMAInputTS2:
+    case kTimeCardSMAInputIRIG:
+    case kTimeCardSMAInputDCF:
+    case kTimeCardSMAInputTS3:
+    case kTimeCardSMAInputTS4:
+    case kTimeCardSMAInputFREQ1:
+    case kTimeCardSMAInputFREQ2:
+    case kTimeCardSMAInputFREQ3:
+    case kTimeCardSMAInputFREQ4:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool
+TimeCardSMAOutputFunctionValid(uint32_t function)
+{
+    switch (function) {
+    case kTimeCardSMAOutput10MHz:
+    case kTimeCardSMAOutputPHC:
+    case kTimeCardSMAOutputMAC:
+    case kTimeCardSMAOutputGNSS1:
+    case kTimeCardSMAOutputGNSS2:
+    case kTimeCardSMAOutputIRIG:
+    case kTimeCardSMAOutputDCF:
+    case kTimeCardSMAOutputGEN1:
+    case kTimeCardSMAOutputGEN2:
+    case kTimeCardSMAOutputGEN3:
+    case kTimeCardSMAOutputGEN4:
+    case kTimeCardSMAOutputGND:
+    case kTimeCardSMAOutputVCC:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static uint32_t
+TimeCardSMADefaultDirection(uint32_t connector)
+{
+    return connector <= 2u ? kTimeCardSMADirectionInput :
+                             kTimeCardSMADirectionOutput;
+}
+
+static uint32_t
+TimeCardSMADefaultFunction(uint32_t connector)
+{
+    return (connector & 1u) != 0 ? kTimeCardSMAInput10MHz :
+                                   kTimeCardSMAInputPPS1;
+}
+
+static void
+TimeCardSMAFixedQuery(uint32_t connector, TimeCardSMAControl *control)
+{
+    const uint32_t direction = TimeCardSMADefaultDirection(connector);
+    const uint32_t function = TimeCardSMADefaultFunction(connector);
+
+    *control = {};
+    control->size = sizeof(*control);
+    control->connector = connector;
+    control->direction = direction;
+    control->function = function;
+    control->flags = kTimeCardSMAFlagPresent |
+        kTimeCardSMAFlagFixedDirection | kTimeCardSMAFlagFixedFunction;
+    if (direction == kTimeCardSMADirectionInput)
+        control->inputMap = function;
+    else
+        control->outputMap = function;
+}
+
+static uint32_t
+TimeCardARTSMADefaultFunction(uint32_t connector)
+{
+    static const uint32_t defaults[TIMECARD_SMA_COUNT] = {
+        kTimeCardSMAInputTS2,
+        kTimeCardSMAInputPPS1,
+        kTimeCardSMAOutputIRIG,
+        kTimeCardSMAOutputMAC,
+    };
+    return defaults[connector - 1u];
+}
+
+static uint32_t
+TimeCardARTSMAFunctionDirection(uint32_t function)
+{
+    return function == kTimeCardSMAInputPPS1 ||
+                   function == kTimeCardSMAInputTS2 ?
+               kTimeCardSMADirectionInput :
+               kTimeCardSMADirectionOutput;
+}
+
+static bool
+TimeCardARTSMAFunctionValid(uint32_t direction, uint32_t function)
+{
+    if (direction == kTimeCardSMADirectionInput)
+        return function == kTimeCardSMAInputPPS1 ||
+            function == kTimeCardSMAInputTS2;
+    if (direction == kTimeCardSMADirectionOutput)
+        return function == kTimeCardSMAOutputMAC ||
+            function == kTimeCardSMAOutputGNSS1 ||
+            function == kTimeCardSMAOutputIRIG;
+    return false;
+}
+
+static kern_return_t
+TimeCardARTSMAQueryLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                          const TimeCardRegisterMap *map,
+                          uint32_t connector, TimeCardSMAControl *control)
+{
+    uint32_t raw = 0;
+    if (!ReadRegister32(device, memoryIndex,
+                        map->artSMAOffset + (connector - 1u) * 4u, &raw))
+        return kIOReturnNotResponding;
+
+    uint32_t function = raw & 0xffu;
+    const bool fixed = function == 0u;
+    if (fixed)
+        function = TimeCardARTSMADefaultFunction(connector);
+    const uint32_t direction = TimeCardARTSMAFunctionDirection(function);
+
+    *control = {};
+    control->size = sizeof(*control);
+    control->connector = connector;
+    control->direction = direction;
+    control->function = function;
+    control->flags = kTimeCardSMAFlagPresent;
+    if (fixed)
+        control->flags |= kTimeCardSMAFlagFixedDirection;
+    if (direction == kTimeCardSMADirectionInput)
+        control->inputMap = function;
+    else
+        control->outputMap = function;
+    control->reserved = raw;
+    return kIOReturnSuccess;
+}
+
+static kern_return_t
+TimeCardSMAQueryLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                       const TimeCardRegisterMap *map,
+                       uint32_t connector, TimeCardSMAControl *control)
+{
+    const uint32_t map1Raw =
+        ReadRegister32Raw(device, memoryIndex, map->smaMap1Offset);
+    const uint32_t map2OutputRaw =
+        ReadRegister32Raw(device, memoryIndex, map->smaMap2Offset + 4u);
+    if (map1Raw == UINT32_MAX) {
+        TimeCardSMAFixedQuery(connector, control);
+        control->reserved = map1Raw;
+        return kIOReturnSuccess;
+    }
+
+    uint32_t inputMap = 0;
+    uint32_t outputMap = 0;
+    if (!TimeCardSMAReadHalf(
+            device, memoryIndex, TimeCardSMAInputRegisterOffset(map, connector),
+            connector, &inputMap) ||
+        !TimeCardSMAReadHalf(
+            device, memoryIndex, TimeCardSMAOutputRegisterOffset(map, connector),
+            connector, &outputMap)) {
+        return kIOReturnNotResponding;
+    }
+    if (inputMap == UINT16_MAX || outputMap == UINT16_MAX) {
+        TimeCardSMAFixedQuery(connector, control);
+        control->inputMap = inputMap;
+        control->outputMap = outputMap;
+        control->reserved = map2OutputRaw;
+        return kIOReturnSuccess;
+    }
+
+    const bool fixedDirection = map2OutputRaw == UINT32_MAX;
+    const bool inputEnabled = (inputMap & kTimeCardSMAEnable) != 0;
+    const bool outputEnabled = (outputMap & kTimeCardSMAEnable) != 0;
+    uint32_t direction = kTimeCardSMADirectionDisabled;
+    if (fixedDirection) {
+        direction = connector <= 2u ? kTimeCardSMADirectionInput :
+                                      kTimeCardSMADirectionOutput;
+    } else if (connector <= 2u) {
+        direction = inputEnabled ? kTimeCardSMADirectionInput :
+                    outputEnabled ? kTimeCardSMADirectionOutput :
+                                    kTimeCardSMADirectionDisabled;
+    } else {
+        direction = outputEnabled ? kTimeCardSMADirectionOutput :
+                    inputEnabled ? kTimeCardSMADirectionInput :
+                                   kTimeCardSMADirectionDisabled;
+    }
+
+    *control = {};
+    control->size = sizeof(*control);
+    control->connector = connector;
+    control->direction = direction;
+    control->inputMap = inputMap;
+    control->outputMap = outputMap;
+    control->flags = kTimeCardSMAFlagPresent;
+    if (fixedDirection)
+        control->flags |= kTimeCardSMAFlagFixedDirection;
+    if (direction == kTimeCardSMADirectionDisabled)
+        control->flags |= kTimeCardSMAFlagDisabled;
+    if (direction == kTimeCardSMADirectionInput)
+        control->function = inputMap & kTimeCardSMASelectMask;
+    else if (direction == kTimeCardSMADirectionOutput)
+        control->function = outputMap & kTimeCardSMASelectMask;
+    control->reserved = map2OutputRaw;
+    return kIOReturnSuccess;
+}
+
+kern_return_t
+TimeCardDriver::QuerySMA(TimeCardSMAControl *control)
+{
+    if (control == nullptr || !ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (control->size < sizeof(*control) || control->connector == 0 ||
+        control->connector > TIMECARD_SMA_COUNT)
+        return kIOReturnBadArgument;
+    if ((ivars->registers.capabilities & kTimeCardCapabilitySMA) == 0 ||
+        !TimeCardRegisterMapHasSMA(&ivars->registers))
+        return kIOReturnUnsupported;
+
+    IOLockLock(ivars->registerLock);
+    const kern_return_t result =
+        ivars->registers.artSMAOffset != 0 ?
+            TimeCardARTSMAQueryLocked(ivars->pciDevice, ivars->memoryIndex,
+                                      &ivars->registers, control->connector,
+                                      control) :
+            TimeCardSMAQueryLocked(ivars->pciDevice, ivars->memoryIndex,
+                                   &ivars->registers, control->connector,
+                                   control);
+    IOLockUnlock(ivars->registerLock);
+    return result;
+}
+
+kern_return_t
+TimeCardDriver::SetSMA(const TimeCardSMAControl *request,
+                       TimeCardSMAControl *response)
+{
+    if (request == nullptr || response == nullptr || !ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (request->size < sizeof(*request) || request->connector == 0 ||
+        request->connector > TIMECARD_SMA_COUNT ||
+        request->direction > kTimeCardSMADirectionDisabled)
+        return kIOReturnBadArgument;
+    if ((ivars->registers.capabilities & kTimeCardCapabilitySMA) == 0 ||
+        !TimeCardRegisterMapHasSMA(&ivars->registers))
+        return kIOReturnUnsupported;
+
+    IOLockLock(ivars->registerLock);
+    kern_return_t result = kIOReturnSuccess;
+    if (ivars->registers.artSMAOffset != 0) {
+        uint32_t raw = 0;
+        const uint64_t offset =
+            ivars->registers.artSMAOffset + (request->connector - 1u) * 4u;
+        if (!ReadRegister32(ivars->pciDevice, ivars->memoryIndex, offset,
+                            &raw)) {
+            result = kIOReturnNotResponding;
+            goto done;
+        }
+        const uint32_t supported = raw >> 16;
+        if ((raw & 0xffu) == 0 ||
+            request->direction == kTimeCardSMADirectionDisabled) {
+            result = kIOReturnUnsupported;
+            goto done;
+        }
+        if (!TimeCardARTSMAFunctionValid(request->direction,
+                                         request->function)) {
+            result = kIOReturnBadArgument;
+            goto done;
+        }
+        if ((supported & request->function) == 0) {
+            result = kIOReturnUnsupported;
+            goto done;
+        }
+        raw = (raw & 0xff00u) | (request->function & 0xffu);
+        WriteRegister32(ivars->pciDevice, ivars->memoryIndex, offset, raw);
+        result = TimeCardARTSMAQueryLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+            request->connector, response);
+    } else {
+        if (request->direction == kTimeCardSMADirectionInput &&
+            !TimeCardSMAInputFunctionValid(request->function)) {
+            result = kIOReturnBadArgument;
+            goto done;
+        }
+        if (request->direction == kTimeCardSMADirectionOutput &&
+            !TimeCardSMAOutputFunctionValid(request->function)) {
+            result = kIOReturnBadArgument;
+            goto done;
+        }
+
+        result = TimeCardSMAQueryLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+            request->connector, response);
+        if (result != kIOReturnSuccess)
+            goto done;
+
+        const bool fixedDirection =
+            (response->flags & kTimeCardSMAFlagFixedDirection) != 0;
+        const bool fixedFunction =
+            (response->flags & kTimeCardSMAFlagFixedFunction) != 0;
+        const uint32_t fixedMode =
+            TimeCardSMADefaultDirection(request->connector);
+        if (fixedDirection && request->direction != fixedMode) {
+            result = kIOReturnUnsupported;
+            goto done;
+        }
+        if (fixedFunction && request->function != response->function) {
+            result = kIOReturnUnsupported;
+            goto done;
+        }
+        if (fixedFunction)
+            goto done;
+
+        const uint64_t inputOffset =
+            TimeCardSMAInputRegisterOffset(&ivars->registers,
+                                           request->connector);
+        const uint64_t outputOffset =
+            TimeCardSMAOutputRegisterOffset(&ivars->registers,
+                                            request->connector);
+        if (request->direction == kTimeCardSMADirectionDisabled) {
+            if (!TimeCardSMAWriteHalf(ivars->pciDevice, ivars->memoryIndex,
+                                      inputOffset, request->connector, 0) ||
+                !TimeCardSMAWriteHalf(ivars->pciDevice, ivars->memoryIndex,
+                                      outputOffset, request->connector, 0)) {
+                result = kIOReturnNotResponding;
+                goto done;
+            }
+        } else if (request->direction == kTimeCardSMADirectionInput) {
+            if (!fixedDirection &&
+                response->direction == kTimeCardSMADirectionOutput &&
+                !TimeCardSMAWriteHalf(ivars->pciDevice, ivars->memoryIndex,
+                                      outputOffset, request->connector, 0)) {
+                result = kIOReturnNotResponding;
+                goto done;
+            }
+            uint32_t value = request->function;
+            if (!fixedDirection)
+                value |= kTimeCardSMAEnable;
+            if (!TimeCardSMAWriteHalf(ivars->pciDevice, ivars->memoryIndex,
+                                      inputOffset, request->connector, value)) {
+                result = kIOReturnNotResponding;
+                goto done;
+            }
+        } else {
+            if (!fixedDirection &&
+                response->direction == kTimeCardSMADirectionInput &&
+                !TimeCardSMAWriteHalf(ivars->pciDevice, ivars->memoryIndex,
+                                      inputOffset, request->connector, 0)) {
+                result = kIOReturnNotResponding;
+                goto done;
+            }
+            uint32_t value = request->function;
+            if (!fixedDirection)
+                value |= kTimeCardSMAEnable;
+            if (!TimeCardSMAWriteHalf(ivars->pciDevice, ivars->memoryIndex,
+                                      outputOffset, request->connector, value)) {
+                result = kIOReturnNotResponding;
+                goto done;
+            }
+        }
+
+        result = TimeCardSMAQueryLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+            request->connector, response);
+    }
+
+    if (result == kIOReturnSuccess &&
+        (response->direction != request->direction ||
+         (request->direction != kTimeCardSMADirectionDisabled &&
+          response->function != request->function))) {
+        result = kIOReturnBadMedia;
+    }
+
+done:
+    IOLockUnlock(ivars->registerLock);
+    return result;
+}
+
 static kern_return_t
 GetInfoAction(OSObject *, void *reference,
               IOUserClientMethodArguments *arguments)
@@ -517,6 +951,46 @@ GetCrossTimestampAction(OSObject *, void *reference,
     return result;
 }
 
+static kern_return_t
+SMAQueryAction(OSObject *, void *reference,
+               IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardSMAControl *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardSMAControl response = *request;
+    const kern_return_t result = driver->QuerySMA(&response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+SMASetAction(OSObject *, void *reference,
+             IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardSMAControl *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardSMAControl response = {};
+    const kern_return_t result = driver->SetSMA(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
 static const IOUserClientMethodDispatch kTimeCardDispatch[
     kTimeCardMethodCount] = {
     {GetInfoAction, false, 0, 0, 0, sizeof(TimeCardInfo)},
@@ -524,6 +998,10 @@ static const IOUserClientMethodDispatch kTimeCardDispatch[
     {SetTimeAction, false, 0, sizeof(TimeCardTime), 0, 0},
     {GetCrossTimestampAction, false, 0, 0, 0,
      sizeof(TimeCardCrossTimestamp)},
+    {SMAQueryAction, false, 0, sizeof(TimeCardSMAControl), 0,
+     sizeof(TimeCardSMAControl)},
+    {SMASetAction, false, 0, sizeof(TimeCardSMAControl), 0,
+     sizeof(TimeCardSMAControl)},
 };
 
 kern_return_t

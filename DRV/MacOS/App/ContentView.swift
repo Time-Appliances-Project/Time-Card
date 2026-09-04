@@ -1,11 +1,23 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 
 import Charts
+import AppKit
 import SwiftUI
 
 private enum ControlCenterPage: String, CaseIterable, Identifiable {
     case overview = "Overview"
-    case timing = "Precision Clock"
+    case clock = "Precision Clock"
+    case gnss = "GNSS"
+    case uart = "UART and NMEA"
+    case sma = "SMA Routing"
+    case timing = "Generators"
+    case fpga = "FPGA Engines"
+    case sensors = "Sensors and IMU"
+    case i2c = "I2C and LEDs"
+    case telemetry = "Telemetry Studio"
+    case operations = "Profiles and Self-Test"
+    case subsystems = "Subsystem Map"
+    case flash = "FPGA Flash"
     case hardware = "Hardware"
     case driver = "Driver"
 
@@ -14,7 +26,18 @@ private enum ControlCenterPage: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .overview: "gauge.with.dots.needle.67percent"
-        case .timing: "clock.badge.checkmark"
+        case .clock: "clock.badge.checkmark"
+        case .gnss: "location.north.line"
+        case .uart: "terminal"
+        case .sma: "cable.connector"
+        case .timing: "waveform.path.ecg"
+        case .fpga: "cpu"
+        case .sensors: "gyroscope"
+        case .i2c: "lightbulb.led"
+        case .telemetry: "chart.xyaxis.line"
+        case .operations: "checklist"
+        case .subsystems: "point.3.connected.trianglepath.dotted"
+        case .flash: "externaldrive.badge.timemachine"
         case .hardware: "memorychip"
         case .driver: "puzzlepiece.extension"
         }
@@ -32,15 +55,38 @@ struct ContentView: View {
                 Label(page.rawValue, systemImage: page.systemImage)
                     .tag(page)
             }
+            .listStyle(.sidebar)
             .navigationTitle("Time Card")
-            .navigationSplitViewColumnWidth(min: 190, ideal: 215)
+            .navigationSplitViewColumnWidth(min: 210, ideal: 235)
         } detail: {
             Group {
                 switch selectedPage {
                 case .overview:
                     OverviewView()
-                case .timing:
+                case .clock:
                     PrecisionClockView()
+                case .gnss:
+                    CapabilityWorkspaceView(workspace: .gnss)
+                case .uart:
+                    CapabilityWorkspaceView(workspace: .uart)
+                case .sma:
+                    SMARoutingView()
+                case .timing:
+                    CapabilityWorkspaceView(workspace: .timing)
+                case .fpga:
+                    CapabilityWorkspaceView(workspace: .fpga)
+                case .sensors:
+                    CapabilityWorkspaceView(workspace: .sensors)
+                case .i2c:
+                    CapabilityWorkspaceView(workspace: .i2c)
+                case .telemetry:
+                    TelemetryStudioView()
+                case .operations:
+                    OperationsView()
+                case .subsystems:
+                    SubsystemMapView()
+                case .flash:
+                    CapabilityWorkspaceView(workspace: .flash)
                 case .hardware:
                     HardwareView()
                 case .driver:
@@ -48,6 +94,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle(selectedPage.rawValue)
+            .background(ControlCenterBackground())
             .toolbar {
                 ToolbarItemGroup {
                     if monitor.services.count > 1 {
@@ -91,13 +138,15 @@ private struct OverviewView: View {
                             title: "Time Card",
                             value: TimeCardFormatting.rawTimestamp(snapshot),
                             detail: "Raw hardware epoch",
-                            systemImage: "clock"
+                            systemImage: "clock",
+                            accent: .cyan
                         )
                         MetricCard(
                             title: "macOS",
                             value: TimeCardFormatting.systemTimestamp(snapshot),
                             detail: "Realtime sampling midpoint",
-                            systemImage: "desktopcomputer"
+                            systemImage: "desktopcomputer",
+                            accent: .indigo
                         )
                         MetricCard(
                             title: "Sampling window",
@@ -105,7 +154,8 @@ private struct OverviewView: View {
                                 snapshot.sampleWindowNanoseconds
                             ),
                             detail: "Bracketed cross timestamp",
-                            systemImage: "arrow.left.and.right"
+                            systemImage: "arrow.left.and.right",
+                            accent: .mint
                         )
                     }
 
@@ -162,13 +212,70 @@ private struct OverviewView: View {
                     SamplingWindowChart()
 
                     ControlCenterPanel(
-                        title: "Read-only monitoring",
-                        subtitle: "Safe first macOS Control Center milestone"
+                        title: "Control workspaces",
+                        subtitle: "Windows Control Center feature map on macOS"
+                    ) {
+                        LazyVGrid(
+                            columns: [
+                                GridItem(.adaptive(minimum: 185), spacing: 12)
+                            ],
+                            spacing: 12
+                        ) {
+                            WorkspaceTile(
+                                "Precision Clock",
+                                "Live",
+                                "PHC read, set, cross timestamp",
+                                "clock.badge.checkmark",
+                                .green
+                            )
+                            WorkspaceTile(
+                                "GNSS",
+                                snapshot.capabilityNames.contains("ToD")
+                                    ? "Partial" : "Gated",
+                                "ToD live, u-blox backend pending",
+                                "location.north.line",
+                                .cyan
+                            )
+                            WorkspaceTile(
+                                "SMA",
+                                "Gated",
+                                "Route fabric ABI next",
+                                "cable.connector",
+                                .orange
+                            )
+                            WorkspaceTile(
+                                "FPGA",
+                                "Gated",
+                                "Core contract and controls next",
+                                "cpu",
+                                .purple
+                            )
+                            WorkspaceTile(
+                                "Sensors",
+                                "Gated",
+                                "I2C and IMU backend next",
+                                "gyroscope",
+                                .pink
+                            )
+                            WorkspaceTile(
+                                "Flash",
+                                "Gated",
+                                "SPI flash safety ABI next",
+                                "externaldrive.badge.timemachine",
+                                .red
+                            )
+                        }
+                    }
+
+                    ControlCenterPanel(
+                        title: "macOS port status",
+                        subtitle: "Safe Control Center deployment"
                     ) {
                         Label(
                             "The dashboard reads card identity, clock status, "
                                 + "Time of Day status, and bracketed timestamps. "
-                                + "It never changes the Time Card or macOS clock.",
+                                + "It can also set the card from macOS time "
+                                + "through the guarded DriverKit ABI.",
                             systemImage: "checkmark.shield"
                         )
                         .foregroundStyle(.secondary)
@@ -302,9 +409,654 @@ private struct PrecisionClockView: View {
                         )
                         .foregroundStyle(.secondary)
                     }
+
+                    ControlCenterPanel(
+                        title: "Guarded clock control",
+                        subtitle: "Implemented through DriverKit ABI v2"
+                    ) {
+                        Label(
+                            "Set the Time Card PHC from macOS system time. "
+                                + "This mirrors the safe one-shot Windows "
+                                + "Control Center action and leaves macOS time "
+                                + "unchanged.",
+                            systemImage: "arrow.right.circle"
+                        )
+                        .foregroundStyle(.secondary)
+
+                        HStack {
+                            Button("Set Card from macOS Time") {
+                                monitor.setCardFromSystem()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                monitor.commandInProgress ||
+                                    !snapshot.capabilityNames.contains("Clock set")
+                            )
+
+                            if monitor.commandInProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+
+                        if !monitor.commandMessage.isEmpty {
+                            Text(monitor.commandMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
                 } else {
                     ControlCenterHeader()
                     MonitorUnavailableView()
+                }
+            }
+            .padding(24)
+        }
+    }
+}
+
+private enum MacWorkspace: String {
+    case gnss = "GNSS and Sky Map"
+    case uart = "UART and NMEA Laboratory"
+    case sma = "SMA Connector Routing"
+    case timing = "Signal Generators and Counters"
+    case fpga = "FPGA Engines"
+    case sensors = "Sensors and IMU"
+    case i2c = "I2C and Status LEDs"
+    case flash = "FPGA SPI Flash"
+
+    var summary: String {
+        switch self {
+        case .gnss:
+            "Windows decodes ToD GNSS status plus native u-blox receiver telemetry and sky-view details."
+        case .uart:
+            "Windows provides Time Card UART streams, NMEA decoding, generic serial ports, capture, filtering, and export."
+        case .sma:
+            "Windows reads and writes the four-connector SMA route fabric with fixed-direction warnings."
+        case .timing:
+            "Windows controls four periodic generators, four counters, route selection, starts, repeats, and event readback."
+        case .fpga:
+            "Windows exposes NMEA, PPS, IRIG-B, DCF77, ToD parser, timestamp, and advanced clock cores."
+        case .sensors:
+            "Windows reads Meta and Celestica environmental sensors and fitted BNO055 or BNO08x IMU telemetry."
+        case .i2c:
+            "Windows provides known-device probes, full I2C discovery, EEPROM/register tools, mux routing, and LED control."
+        case .flash:
+            "Windows validates OCPC images, erases and programs flash, and verifies readback."
+        }
+    }
+
+    var requiredABI: String {
+        switch self {
+        case .gnss, .uart: "UART stream and GNSS/ToD ABI"
+        case .sma: "SMA route get/set ABI"
+        case .timing: "Generator, counter, and event ABI"
+        case .fpga: "Versioned FPGA-core register ABI"
+        case .sensors: "I2C/sensor/IMU ABI"
+        case .i2c: "I2C transaction and LED ABI"
+        case .flash: "SPI-flash query/program/readback ABI"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .gnss: "location.north.line"
+        case .uart: "terminal"
+        case .sma: "cable.connector"
+        case .timing: "waveform.path.ecg"
+        case .fpga: "cpu"
+        case .sensors: "gyroscope"
+        case .i2c: "lightbulb.led"
+        case .flash: "externaldrive.badge.timemachine"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .gnss: .cyan
+        case .uart: .teal
+        case .sma: .orange
+        case .timing: .green
+        case .fpga: .purple
+        case .sensors: .pink
+        case .i2c: .yellow
+        case .flash: .red
+        }
+    }
+
+    var rows: [(String, String)] {
+        switch self {
+        case .gnss:
+            return [
+                ("ToD core status", "Live when the board exposes ToD status through ABI v2"),
+                ("u-blox identity and firmware", "Needs native serial/UBX transport"),
+                ("Sky map and constellation counts", "Needs GNSS stream decoder data"),
+                ("Survey-in and fixed-position controls", "Needs guarded receiver configuration ABI"),
+            ]
+        case .uart:
+            return [
+                ("Hardware UART ports 0-3", "Needs DriverKit stream read/write ABI"),
+                ("Generic macOS serial ports", "Planned as app-only IOKit serial enumeration"),
+                ("NMEA generator control", "Needs NMEA register get/set ABI"),
+                ("Capture and export", "UI scaffold ready, backend pending stream data"),
+            ]
+        case .sma:
+            return [
+                ("Connector direction", "Needs route readback ABI"),
+                ("Input/output routing menus", "Needs validated SMA set ABI"),
+                ("Fixed ART routing", "Can be profile-gated after ABI reports ART map details"),
+                ("Output warnings", "UI scaffolded, enabled with route ABI"),
+            ]
+        case .timing:
+            return [
+                ("Periodic generators", "Needs generator query/control ABI"),
+                ("Frequency counters", "Needs counter query/control ABI"),
+                ("Future PHC/TAI starts", "Needs trusted time-scale contract"),
+                ("Completion/error events", "Needs event FIFO ABI"),
+            ]
+        case .fpga:
+            return [
+                ("PPS master/slave", "Needs versioned core query/control ABI"),
+                ("IRIG-B and DCF77", "Needs image contract and core masks"),
+                ("Timestamp laboratory", "Needs timestamp channel ABI"),
+                ("Advanced clock controls", "Needs read-back-verified setters"),
+            ]
+        case .sensors:
+            return [
+                ("BME/BMP and INA rails", "Needs I2C transaction ABI"),
+                ("R4006 LM75B/SHT3x/ICP-10100", "Needs board-profile sensor map"),
+                ("BNO055/BNO08x IMU", "Needs sensor transport and decoding"),
+                ("Vibration charts", "Needs live IMU samples"),
+            ]
+        case .i2c:
+            return [
+                ("AXI IIC health", "Needs I2C controller status ABI"),
+                ("Known-device probes", "Needs safe transaction ABI"),
+                ("EEPROM/register workbench", "Needs paging and timeout controls"),
+                ("RGB subsystem LEDs", "Needs LED controller ABI"),
+            ]
+        case .flash:
+            return [
+                ("JEDEC and geometry", "Needs flash query ABI"),
+                ("OCPC image validation", "Can be app-side once image import exists"),
+                ("Erase and program", "Needs guarded flash write ABI"),
+                ("Readback verification", "Needs flash read ABI"),
+            ]
+        }
+    }
+}
+
+private struct CapabilityWorkspaceView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+    let workspace: MacWorkspace
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlCenterHeader()
+
+                ControlCenterPanel(
+                    title: workspace.rawValue,
+                    subtitle: "Ported Windows workspace, macOS backend gated"
+                ) {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: workspace.symbol)
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(workspace.accent)
+                            .frame(width: 58, height: 58)
+                            .background(
+                                workspace.accent.opacity(0.14),
+                                in: RoundedRectangle(cornerRadius: 16)
+                            )
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(workspace.summary)
+                                .foregroundStyle(.secondary)
+
+                            HStack(spacing: 8) {
+                                StatusPill("ABI \(monitor.snapshot.map { "\($0.abiVersion)" } ?? "?")", .blue)
+                                StatusPill(liveStatus, statusColor)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    InfoRow(label: "macOS backend requirement", value: workspace.requiredABI)
+                }
+
+                ControlCenterPanel(
+                    title: "Feature coverage",
+                    subtitle: "Windows feature mapped to macOS readiness"
+                ) {
+                    VStack(spacing: 10) {
+                        ForEach(workspace.rows, id: \.0) { row in
+                            FeatureRow(name: row.0, state: state(for: row.0), note: row.1)
+                        }
+                    }
+                }
+
+                if workspace == .gnss {
+                    todTelemetry
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    @ViewBuilder
+    private var todTelemetry: some View {
+        if let snapshot = monitor.snapshot {
+            ControlCenterPanel(
+                title: "Live ToD signals",
+                subtitle: "Read through the current macOS ABI when present"
+            ) {
+                InfoRow(
+                    label: "ToD capability",
+                    value: snapshot.capabilityNames.contains("ToD")
+                        ? "Available" : "Not present"
+                )
+                InfoRow(
+                    label: "ToD version",
+                    value: TimeCardFormatting.validHex(
+                        snapshot.todVersion,
+                        valid: snapshot.hasValidField(1 << 3)
+                    )
+                )
+                InfoRow(
+                    label: "ToD status",
+                    value: TimeCardFormatting.validHex(
+                        snapshot.todStatus,
+                        valid: snapshot.hasValidField(1 << 4)
+                    )
+                )
+            }
+        }
+    }
+
+    private var liveStatus: String {
+        switch monitor.state {
+        case .connected:
+            "Backend gated"
+        case .discovering:
+            "Discovering"
+        case .noService:
+            "No driver"
+        case .accessUnavailable:
+            "Access needed"
+        case .failed:
+            "Error"
+        }
+    }
+
+    private var statusColor: Color {
+        switch monitor.state {
+        case .connected: .orange
+        case .discovering: .blue
+        case .noService, .accessUnavailable: .orange
+        case .failed: .red
+        }
+    }
+
+    private func state(for name: String) -> String {
+        if workspace == .gnss && name == "ToD core status" {
+            return monitor.snapshot?.capabilityNames.contains("ToD") == true
+                ? "Live" : "Unavailable"
+        }
+        return "Backend pending"
+    }
+}
+
+private struct SMARoutingView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlCenterHeader()
+
+                ControlCenterPanel(
+                    title: "SMA Signal Routing",
+                    subtitle: "Live DriverKit ABI v3 connector control"
+                ) {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: "cable.connector")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(.orange)
+                            .frame(width: 58, height: 58)
+                            .background(.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(
+                                "Read and route the four Time Card SMA connectors using "
+                                    + "the same function selectors as the Windows Control "
+                                    + "Center and Linux ptp_ocp driver."
+                            )
+                            .foregroundStyle(.secondary)
+
+                            HStack(spacing: 8) {
+                                StatusPill(
+                                    monitor.snapshot?.capabilityNames.contains("SMA") == true
+                                        ? "SMA live" : "SMA unavailable",
+                                    monitor.snapshot?.capabilityNames.contains("SMA") == true
+                                        ? .green : .secondary
+                                )
+                                StatusPill("Readback verified", .blue)
+                            }
+                        }
+
+                        Spacer()
+
+                        Button("Refresh") {
+                            monitor.refreshSMA()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            monitor.snapshot?.capabilityNames.contains("SMA") != true
+                        )
+                    }
+
+                    if !monitor.smaMessage.isEmpty {
+                        Divider()
+                        Text(monitor.smaMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                if monitor.snapshot?.capabilityNames.contains("SMA") == true {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.adaptive(minimum: 310), spacing: 14)
+                        ],
+                        spacing: 14
+                    ) {
+                        ForEach(1...4, id: \.self) { connector in
+                            SMARouteCard(
+                                connector: UInt32(connector),
+                                route: monitor.smaRoutes.first {
+                                    $0.connector == UInt32(connector)
+                                }
+                            )
+                        }
+                    }
+                } else {
+                    ControlCenterPanel(
+                        title: "SMA backend unavailable",
+                        subtitle: "Driver does not advertise SMA capability"
+                    ) {
+                        Text(
+                            "Install the ABI v3 DriverKit extension or use a "
+                                + "board profile with SMA routing registers."
+                        )
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(24)
+        }
+    }
+}
+
+private struct SMARouteCard: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+    let connector: UInt32
+    let route: TimeCardSMARoute?
+    @State private var direction: TimeCardSMADirection = .disabled
+    @State private var function: UInt32 = 0
+
+    var body: some View {
+        ControlCenterPanel(
+            title: "SMA \(connector)",
+            subtitle: routeSubtitle
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    StatusPill(route?.direction.label ?? "Not queried", routeColor)
+                    if route?.isFixedDirection == true {
+                        StatusPill("Fixed direction", .secondary)
+                    }
+                    if route?.isFixedFunction == true {
+                        StatusPill("Fixed function", .secondary)
+                    }
+                    Spacer()
+                }
+
+                InfoRow(label: "Current function", value: route?.functionName ?? "Unavailable")
+                InfoRow(
+                    label: "Raw input",
+                    value: route.map { TimeCardFormatting.hex(UInt64($0.inputMap)) } ?? "Unavailable"
+                )
+                InfoRow(
+                    label: "Raw output",
+                    value: route.map { TimeCardFormatting.hex(UInt64($0.outputMap)) } ?? "Unavailable"
+                )
+
+                Divider()
+
+                Picker("Direction", selection: $direction) {
+                    ForEach(TimeCardSMADirection.allCases) { item in
+                        Text(item.label).tag(item)
+                    }
+                }
+                .disabled(route?.isFixedDirection == true)
+                .onChange(of: direction) { _, newValue in
+                    function = TimeCardSMACatalog.functions(for: newValue).first?.id ?? 0
+                }
+
+                if direction != .disabled {
+                    Picker("Function", selection: $function) {
+                        ForEach(TimeCardSMACatalog.functions(for: direction)) { item in
+                            Text(item.label).tag(item.id)
+                        }
+                    }
+                    .disabled(route?.isFixedFunction == true)
+                }
+
+                Button("Apply Route") {
+                    monitor.setSMARoute(
+                        connector: connector,
+                        direction: direction,
+                        function: function
+                    )
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    monitor.commandInProgress ||
+                        route == nil ||
+                        (route?.isFixedDirection == true &&
+                         direction != route?.direction) ||
+                        (route?.isFixedFunction == true &&
+                         function != route?.function)
+                )
+            }
+        }
+        .onAppear(perform: syncState)
+        .onChange(of: route) { _, _ in syncState() }
+    }
+
+    private var routeSubtitle: String {
+        guard let route else { return "Awaiting DriverKit readback" }
+        return route.isPresent ? "Function \(TimeCardFormatting.hex(UInt64(route.function)))" :
+            "Not present"
+    }
+
+    private var routeColor: Color {
+        switch route?.direction {
+        case .input: .cyan
+        case .output: .green
+        case .disabled: .secondary
+        case nil: .orange
+        }
+    }
+
+    private func syncState() {
+        guard let route else { return }
+        direction = route.direction
+        function = route.function
+        if direction != .disabled &&
+            !TimeCardSMACatalog.functions(for: direction).contains(
+                where: { $0.id == function }
+            ) {
+            function = TimeCardSMACatalog.functions(for: direction).first?.id ?? 0
+        }
+    }
+}
+
+private struct TelemetryStudioView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlCenterHeader()
+                SamplingWindowChart()
+
+                ControlCenterPanel(
+                    title: "Telemetry Studio",
+                    subtitle: "Windows charts mapped to current macOS data"
+                ) {
+                    FeatureRow(
+                        name: "Sampling-window history",
+                        state: monitor.samplingWindowHistory.isEmpty ? "Waiting" : "Live",
+                        note: "Uses bracketed DriverKit cross-timestamps."
+                    )
+                    FeatureRow(
+                        name: "PHC offset history",
+                        state: "Gated",
+                        note: "Requires trusted UTC-to-TAI or clock-domain contract."
+                    )
+                    FeatureRow(
+                        name: "GNSS, temperature, vibration charts",
+                        state: "Backend pending",
+                        note: "Requires GNSS, sensor, and IMU ABI expansion."
+                    )
+                    FeatureRow(
+                        name: "CSV and JSON export",
+                        state: "Planned",
+                        note: "Diagnostics copy is available today."
+                    )
+                }
+            }
+            .padding(24)
+        }
+    }
+}
+
+private struct OperationsView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+    @State private var copiedDiagnostics = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlCenterHeader()
+
+                ControlCenterPanel(
+                    title: "Guided self-test",
+                    subtitle: "Read-only macOS coverage"
+                ) {
+                    FeatureRow(
+                        name: "Driver service",
+                        state: monitor.serviceDetected ? "Pass" : "Waiting",
+                        note: "Checks DriverKit service discovery."
+                    )
+                    FeatureRow(
+                        name: "User-client entitlement",
+                        state: monitor.state == .connected ? "Pass" : "Check",
+                        note: "Opening the user client proves Apple entitlement/profile wiring."
+                    )
+                    FeatureRow(
+                        name: "Clock read and cross-timestamp",
+                        state: monitor.snapshot == nil ? "Waiting" : "Pass",
+                        note: "Uses the same ABI path as the CLI status and get commands."
+                    )
+                    FeatureRow(
+                        name: "Advanced workspaces",
+                        state: "Gated",
+                        note: "Requires the next macOS DriverKit ABI milestone."
+                    )
+                }
+
+                ControlCenterPanel(
+                    title: "Diagnostics",
+                    subtitle: "Copyable support report"
+                ) {
+                    Button("Copy Diagnostics") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(
+                            diagnosticsText,
+                            forType: .string
+                        )
+                        copiedDiagnostics = true
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Text(copiedDiagnostics ? "Diagnostics copied." : diagnosticsText)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    private var diagnosticsText: String {
+        guard let snapshot = monitor.snapshot else {
+            return "Time Card diagnostics: no snapshot available. State: \(monitor.state)"
+        }
+        return [
+            "Time Card macOS diagnostics",
+            "Board: \(snapshot.boardName)",
+            "PCI: \(snapshot.pciIdentity) revision \(String(format: "0x%02x", snapshot.pciRevision & 0xff))",
+            "Driver ABI: \(snapshot.abiVersion)",
+            "Driver version: \(snapshot.driverVersionText)",
+            "Layout: \(snapshot.layoutName)",
+            "BAR0: \(TimeCardFormatting.hex(snapshot.barSize))",
+            "Capabilities: \(snapshot.capabilityNames.joined(separator: ", "))",
+            "Clock status: \(TimeCardFormatting.syncStatus(snapshot))",
+            "Clock source: \(TimeCardFormatting.clockSource(snapshot))",
+            "Sampling window: \(TimeCardFormatting.duration(snapshot.sampleWindowNanoseconds))",
+            "Last update: \(TimeCardFormatting.date(monitor.lastUpdated))",
+        ].joined(separator: "\n")
+    }
+}
+
+private struct SubsystemMapView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlCenterHeader()
+
+                ControlCenterPanel(
+                    title: "Subsystem capability map",
+                    subtitle: "Windows topology imported as a macOS readiness map"
+                ) {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.adaptive(minimum: 220), spacing: 12)
+                        ],
+                        spacing: 12
+                    ) {
+                        SubsystemCard("PCIe", "Live", "Device identity and BAR")
+                        SubsystemCard("PHC", "Live", "Read, set, cross-timestamp")
+                        SubsystemCard(
+                            "ToD",
+                            monitor.snapshot?.capabilityNames.contains("ToD") == true
+                                ? "Live" : "Not present",
+                            "Version and status when fitted"
+                        )
+                        SubsystemCard("GNSS", "Gated", "Needs UART/UBX ABI")
+                        SubsystemCard("SMA", "Gated", "Needs route ABI")
+                        SubsystemCard("I2C", "Gated", "Needs transaction ABI")
+                        SubsystemCard("Sensors", "Gated", "Needs sensor ABI")
+                        SubsystemCard("FPGA flash", "Gated", "Needs flash ABI")
+                    }
                 }
             }
             .padding(24)
@@ -525,29 +1277,72 @@ private struct ControlCenterHeader: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: headerSymbol)
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(headerColor)
-                .frame(width: 48, height: 48)
-                .background(headerColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        HStack(alignment: .center, spacing: 18) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                headerColor.opacity(0.25),
+                                Color.blue.opacity(0.12),
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 72, height: 72)
+                    .shadow(color: headerColor.opacity(0.2), radius: 18)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(monitor.snapshot?.boardName ?? "OCP Time Card Control Center")
-                    .font(.title2.weight(.semibold))
-                Text(headerDetail)
-                    .foregroundStyle(.secondary)
+                Image(systemName: headerSymbol)
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(headerColor)
             }
 
-            Spacer()
+            VStack(alignment: .leading, spacing: 8) {
+                Text("OCP Time Card Control Center")
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(1.4)
 
-            Text(headerLabel)
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .foregroundStyle(headerColor)
-                .background(headerColor.opacity(0.12), in: Capsule())
+                Text(monitor.snapshot?.boardName ?? "Waiting for Time Card")
+                    .font(.system(size: 30, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Text(headerDetail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            Spacer(minLength: 18)
+
+            VStack(alignment: .trailing, spacing: 8) {
+                Text(headerLabel)
+                    .font(.caption.weight(.bold))
+                    .tracking(0.8)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .foregroundStyle(headerColor)
+                    .background(headerColor.opacity(0.14), in: Capsule())
+                    .overlay(
+                        Capsule().stroke(headerColor.opacity(0.35), lineWidth: 1)
+                    )
+
+                if let lastUpdated = monitor.lastUpdated {
+                    Text(TimeCardFormatting.date(lastUpdated))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+        .padding(22)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24)
+                .stroke(.white.opacity(0.16), lineWidth: 1)
+        )
     }
 
     private var headerLabel: String {
@@ -675,17 +1470,233 @@ private struct SamplingWindowChart: View {
     }
 }
 
+private struct FeatureRow: View {
+    let name: String
+    let state: String
+    let note: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            statusIcon
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(name)
+                        .font(.body.weight(.medium))
+                    Spacer()
+                    Text(state)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(statusColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(statusColor.opacity(0.12), in: Capsule())
+                }
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var statusIcon: some View {
+        Image(systemName: statusSymbol)
+            .foregroundStyle(statusColor)
+    }
+
+    private var statusSymbol: String {
+        switch state.lowercased() {
+        case "live", "pass":
+            "checkmark.circle.fill"
+        case "waiting", "check":
+            "clock.badge.questionmark"
+        case "gated", "unavailable":
+            "lock.circle"
+        default:
+            "wrench.and.screwdriver"
+        }
+    }
+
+    private var statusColor: Color {
+        switch state.lowercased() {
+        case "live", "pass":
+            .green
+        case "waiting", "check":
+            .orange
+        case "gated", "unavailable":
+            .secondary
+        default:
+            .blue
+        }
+    }
+}
+
+private struct StatusPill: View {
+    let text: String
+    let color: Color
+
+    init(_ text: String, _ color: Color) {
+        self.text = text
+        self.color = color
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.bold))
+            .tracking(0.5)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .foregroundStyle(color)
+            .background(color.opacity(0.12), in: Capsule())
+            .overlay(Capsule().stroke(color.opacity(0.25), lineWidth: 1))
+    }
+}
+
+private struct SubsystemCard: View {
+    let title: String
+    let state: String
+    let detail: String
+
+    init(_ title: String, _ state: String, _ detail: String) {
+        self.title = title
+        self.state = state
+        self.detail = detail
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: state == "Live" ? "checkmark.circle.fill" : "lock.circle")
+                    .foregroundStyle(state == "Live" ? .green : .secondary)
+                Text(title)
+                    .font(.headline)
+                Spacer()
+            }
+            Text(state)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(state == "Live" ? .green : .secondary)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct WorkspaceTile: View {
+    let title: String
+    let state: String
+    let detail: String
+    let systemImage: String
+    let accent: Color
+
+    init(
+        _ title: String,
+        _ state: String,
+        _ detail: String,
+        _ systemImage: String,
+        _ accent: Color
+    ) {
+        self.title = title
+        self.state = state
+        self.detail = detail
+        self.systemImage = systemImage
+        self.accent = accent
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: systemImage)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 36, height: 36)
+                    .background(accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+
+                Spacer()
+
+                Text(state)
+                    .font(.caption2.weight(.bold))
+                    .tracking(0.6)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .foregroundStyle(accent)
+                    .background(accent.opacity(0.12), in: Capsule())
+            }
+
+            Text(title)
+                .font(.headline)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 128, alignment: .topLeading)
+        .padding(16)
+        .background(
+            LinearGradient(
+                colors: [accent.opacity(0.10), Color.secondary.opacity(0.06)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(accent.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct ControlCenterBackground: View {
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(nsColor: .windowBackgroundColor),
+                    Color.blue.opacity(0.06),
+                    Color.cyan.opacity(0.04),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            RadialGradient(
+                colors: [Color.cyan.opacity(0.16), .clear],
+                center: .topTrailing,
+                startRadius: 40,
+                endRadius: 520
+            )
+            RadialGradient(
+                colors: [Color.purple.opacity(0.12), .clear],
+                center: .bottomLeading,
+                startRadius: 60,
+                endRadius: 500
+            )
+        }
+        .ignoresSafeArea()
+    }
+}
+
 private struct MetricCard: View {
     let title: String
     let value: String
     let detail: String
     let systemImage: String
+    var accent: Color = .accentColor
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+            HStack {
+                Label(title, systemImage: systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Circle()
+                    .fill(accent)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: accent.opacity(0.55), radius: 6)
+            }
             Text(value)
                 .font(.system(.title3, design: .monospaced, weight: .semibold))
                 .lineLimit(1)
@@ -697,7 +1708,18 @@ private struct MetricCard: View {
         }
         .frame(maxWidth: .infinity, minHeight: 94, alignment: .leading)
         .padding(16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .background(
+            LinearGradient(
+                colors: [accent.opacity(0.10), Color.secondary.opacity(0.06)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(accent.opacity(0.18), lineWidth: 1)
+        )
     }
 }
 
@@ -733,7 +1755,12 @@ private struct ControlCenterPanel<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.05), radius: 12, y: 5)
     }
 }
 

@@ -38,6 +38,12 @@ enum {
 };
 
 enum {
+    kTimeCardSMAEnable = 0x8000u,
+    kTimeCardSMASelectMask = 0x7fffu,
+    kTimeCardSMARegisterLength = 0x08u
+};
+
+enum {
     kTimeCardClockEnable = 1u << 0,
     kTimeCardClockAdjustTime = 1u << 1,
     kTimeCardClockAdjustOffset = 1u << 2,
@@ -65,6 +71,9 @@ typedef struct TimeCardRegisterMap {
     uint64_t clockOffset;
     uint64_t todOffset;
     uint64_t uartOffsets[4];
+    uint64_t smaMap1Offset;
+    uint64_t smaMap2Offset;
+    uint64_t artSMAOffset;
     uint64_t requiredBarSize;
 } TimeCardRegisterMap;
 
@@ -169,7 +178,17 @@ static inline bool
 TimeCardRegisterMapFits(uint64_t barSize, const TimeCardRegisterMap *map)
 {
     return map != NULL && map->layout != kTimeCardLayoutUnknown &&
+        map->requiredBarSize != 0 &&
         TimeCardRangeFits(barSize, 0, map->requiredBarSize);
+}
+
+static inline void
+TimeCardRequireRange(TimeCardRegisterMap *map, uint64_t offset,
+                     uint64_t length)
+{
+    const uint64_t end = offset + length;
+    if (offset != 0 && end > map->requiredBarSize)
+        map->requiredBarSize = end;
 }
 
 static inline TimeCardRegisterMap
@@ -178,29 +197,35 @@ TimeCardFacebookRegisterMap(bool useMSIX, uint32_t boardProfile)
     TimeCardRegisterMap map = {
         boardProfile, kTimeCardLayoutUnknown,
         kTimeCardCapabilityReadClock | kTimeCardCapabilitySetClock |
-            kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD,
-        0, 0, 0, {0, 0, 0, 0}, 0
+            kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD |
+            kTimeCardCapabilitySMA,
+        0, 0, 0, {0, 0, 0, 0}, 0, 0, 0, 0
     };
 
     if (useMSIX) {
         map.layout = kTimeCardLayoutLitePCIe;
         map.clockOffset = 0x03000000u;
         map.todOffset = 0x03050000u;
+        map.smaMap1Offset = 0x02140000u;
+        map.smaMap2Offset = 0x02220000u;
         map.uartOffsets[0] = 0x02161000u;
         map.uartOffsets[1] = 0x02171000u;
         map.uartOffsets[2] = 0x02181000u;
         map.uartOffsets[3] = 0x02191000u;
-        map.requiredBarSize = map.todOffset + kTimeCardTodVersion + 4u;
     } else {
         map.layout = kTimeCardLayoutClassic;
         map.clockOffset = 0x01000000u;
         map.todOffset = 0x01050000u;
+        map.smaMap1Offset = 0x00140000u;
+        map.smaMap2Offset = 0x00220000u;
         map.uartOffsets[0] = 0x00161000u;
         map.uartOffsets[1] = 0x00171000u;
         map.uartOffsets[2] = 0x00181000u;
         map.uartOffsets[3] = 0x00191000u;
-        map.requiredBarSize = map.todOffset + kTimeCardTodVersion + 4u;
     }
+    TimeCardRequireRange(&map, map.todOffset, kTimeCardTodVersion + 4u);
+    TimeCardRequireRange(&map, map.smaMap1Offset, kTimeCardSMARegisterLength);
+    TimeCardRequireRange(&map, map.smaMap2Offset, kTimeCardSMARegisterLength);
 
     return map;
 }
@@ -214,7 +239,7 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
         TimeCardBoardProfileForDevice(vendorID, deviceID);
     TimeCardRegisterMap map = {
         profile, kTimeCardLayoutUnknown, 0, 0, 0, 0,
-        {0, 0, 0, 0}, 0
+        {0, 0, 0, 0}, 0, 0, 0, 0
     };
 
     if (profile == kTimeCardBoardFacebook ||
@@ -238,12 +263,16 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
         map.layout = kTimeCardLayoutART;
         map.capabilities = kTimeCardCapabilityReadClock |
             kTimeCardCapabilitySetClock |
-            kTimeCardCapabilityCrossTimestamp;
+            kTimeCardCapabilityCrossTimestamp |
+            kTimeCardCapabilitySMA;
         map.clockOffset = 0x01000000u;
+        map.artSMAOffset = 0x003c0000u;
         map.uartOffsets[0] = 0x00161000u;
         map.uartOffsets[2] = 0x00190000u;
-        map.requiredBarSize =
-            map.clockOffset + kTimeCardClockAdjustSeconds + 4u;
+        TimeCardRequireRange(
+            &map, map.clockOffset, kTimeCardClockAdjustSeconds + 4u);
+        TimeCardRequireRange(
+            &map, map.artSMAOffset, TIMECARD_SMA_COUNT * sizeof(uint32_t));
         return map;
     }
 
@@ -253,13 +282,19 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
         map.layout = kTimeCardLayoutClassic;
         map.capabilities = kTimeCardCapabilityReadClock |
             kTimeCardCapabilitySetClock |
-            kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD;
+            kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD |
+            kTimeCardCapabilitySMA;
         map.clockOffset = 0x01000000u;
         map.todOffset = 0x01050000u;
+        map.smaMap1Offset = 0x00140000u;
+        map.smaMap2Offset = 0x00220000u;
         map.uartOffsets[0] = 0x00161000u;
         map.uartOffsets[2] = 0x00181000u;
-        map.requiredBarSize =
-            map.todOffset + kTimeCardTodVersion + 4u;
+        TimeCardRequireRange(&map, map.todOffset, kTimeCardTodVersion + 4u);
+        TimeCardRequireRange(
+            &map, map.smaMap1Offset, kTimeCardSMARegisterLength);
+        TimeCardRequireRange(
+            &map, map.smaMap2Offset, kTimeCardSMARegisterLength);
     }
     return map;
 }
@@ -268,6 +303,14 @@ static inline bool
 TimeCardRegisterMapHasTOD(const TimeCardRegisterMap *map)
 {
     return map != NULL && map->todOffset != 0;
+}
+
+static inline bool
+TimeCardRegisterMapHasSMA(const TimeCardRegisterMap *map)
+{
+    return map != NULL &&
+        ((map->smaMap1Offset != 0 && map->smaMap2Offset != 0) ||
+         map->artSMAOffset != 0);
 }
 
 #endif /* TIMECARD_REGISTERS_H */

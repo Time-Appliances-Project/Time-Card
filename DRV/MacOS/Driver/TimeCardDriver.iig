@@ -24,6 +24,9 @@ public:
     kern_return_t SetTime(const TimeCardTime *time) LOCALONLY;
     kern_return_t GetCrossTimestamp(TimeCardCrossTimestamp *timestamp)
         LOCALONLY;
+    kern_return_t QuerySMA(TimeCardSMAControl *control) LOCALONLY;
+    kern_return_t SetSMA(const TimeCardSMAControl *request,
+                         TimeCardSMAControl *response) LOCALONLY;
 };
 
 #endif /* TIMECARD_DRIVER_IIG */
