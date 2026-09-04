@@ -35,7 +35,7 @@ The current implementation provides:
   probes, bounded reads, and guarded mux query/set
 - Environmental sensor query for LM75B board temperature sensors, SHT3x
   humidity/temperature, ICP-10100 pressure/temperature with CRC and OTP
-  compensation, plus BNO08x/BNO055 IMU presence probes
+  compensation, plus BNO08x SHTP-header and BNO055 identity probes
 - A native SwiftUI Control Center with:
   - driver activation, update, and removal
   - live card discovery and explicit multi-card selection
@@ -66,8 +66,9 @@ LitePCIe gateware and Windows/Linux support; it is not currently in upstream
 Linux. The Meta/Facebook classic profile is hardware-validated on an Intel Mac
 Pro, including ABI v7 status, SMA fixed-route readback, SMA/GNSS LED policy
 application, I2C diagnostics, and LM75B/SHT3x/ICP-10100 environmental sensor
-telemetry with compensated ICP-10100 pressure. BNO08x presence probing is wired
-for the Celestica mux route and reported separately from decoded fused motion.
+telemetry with compensated ICP-10100 pressure. BNO08x SHTP-header probing is
+wired for the Celestica mux route and reported separately from decoded fused
+motion.
 Every other profile is covered by host-side layout and safety tests but still
 requires physical-card validation before a production release.
 Celestica cards programmed with the generic Meta PCI identity continue to
@@ -229,9 +230,9 @@ and it does not yet apply a UTC/TAI correction.
   control only. General writes remain gated until the Control Center has device
   profiles, paging rules, and write-safety warnings.
 - Sensor support currently reports LM75B, SHT3x, ICP-10100 telemetry with
-  compensated pressure when OTP calibration is available, and BNO08x/BNO055
-  IMU presence. BME/BMP280, INA219 rail telemetry, and fused IMU decoding
-  remain planned on top of the same mux-aware sensor ABI.
+  compensated pressure when OTP calibration is available, BNO08x SHTP-header
+  presence, and BNO055 identity presence. BME/BMP280, INA219 rail telemetry,
+  and fused IMU decoding remain planned on top of the same mux-aware sensor ABI.
 - SMA routing is implemented for the classic, shifted LitePCIe, ART, and ADVA
   register maps. FPGA images with absent or fixed route GPIO report fixed
   direction and fixed function, and writable changes are rejected.

@@ -960,6 +960,7 @@ enum {
     kTimeCardSensorBNO08xAddressAlt = 0x4bu,
     kTimeCardSensorBNO055Address1 = 0x28u,
     kTimeCardSensorBNO055Address2 = 0x29u,
+    kTimeCardBNO08xMaxPacketLength = 1024u,
     kTimeCardSHT3xStatusCommandHi = 0xf3u,
     kTimeCardSHT3xStatusCommandLo = 0x2du,
     kTimeCardSHT3xMeasureCommandHi = 0x24u,
@@ -1618,6 +1619,15 @@ TimeCardSensorFrameCrcValid(const uint8_t *frame)
     return TimeCardSensorCrc8(frame, 2u) == frame[2];
 }
 
+static bool
+TimeCardBNO08xHeaderValid(const uint8_t *header)
+{
+    const uint32_t length = (uint32_t)header[0] |
+        (((uint32_t)header[1] & 0x7fu) << 8);
+    return length >= 4u && length <= kTimeCardBNO08xMaxPacketLength &&
+        header[2] <= 5u;
+}
+
 static TimeCardSensorReading *
 TimeCardSensorAppend(TimeCardSensorTelemetry *telemetry, uint32_t type,
                      uint32_t muxChannelMask, uint32_t address)
@@ -1858,14 +1868,19 @@ TimeCardBNO08xProbeLocked(IOPCIDevice *device, uint8_t memoryIndex,
     };
     reading->flags = kTimeCardSensorFlagIMU;
     for (uint32_t i = 0; i < sizeof(addresses) / sizeof(addresses[0]); ++i) {
+        uint8_t header[4] = {};
         reading->address = addresses[i];
-        const kern_return_t result = TimeCardI2CProbeLocked(
-            device, memoryIndex, map, addresses[i], controllerStatus,
-            interruptStatus);
-        reading->raw0 = (uint32_t)result;
+        const kern_return_t readResult = TimeCardI2CReadLocked(
+            device, memoryIndex, map, addresses[i], 0u, 0u, header,
+            sizeof(header), controllerStatus, interruptStatus);
+        const uint32_t length = (uint32_t)header[0] |
+            (((uint32_t)header[1] & 0x7fu) << 8);
+        reading->raw0 = readResult == kIOReturnSuccess ?
+            length : (uint32_t)readResult;
         reading->raw1 = *controllerStatus;
-        reading->raw2 = *interruptStatus;
-        if (result == kIOReturnSuccess) {
+        reading->raw2 = ((uint32_t)header[2] << 8) | header[3];
+        if (readResult == kIOReturnSuccess &&
+            TimeCardBNO08xHeaderValid(header)) {
             reading->flags |= kTimeCardSensorFlagPresent;
             return true;
         }

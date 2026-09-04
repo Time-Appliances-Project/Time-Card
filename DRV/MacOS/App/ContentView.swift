@@ -1165,6 +1165,12 @@ private struct SensorIMUView: View {
             return "\(SensorUIFormatting.route(reading)) responded with a valid identity."
         }
         if reading.isPresent {
+            if reading.kind == .bno08x {
+                let channel = (reading.raw2 >> 8) & 0xff
+                return "\(SensorUIFormatting.route(reading)) SHTP header " +
+                    "length \(reading.raw0), channel \(channel). " +
+                    "Decoder bring-up is next."
+            }
             return "\(SensorUIFormatting.route(reading)) ACKed. Decoder bring-up is next."
         }
         return "\(SensorUIFormatting.route(reading)) did not ACK on this sample."

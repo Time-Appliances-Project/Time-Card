@@ -87,6 +87,7 @@ foreach(required_cli_sma IN ITEMS
         "command_sensors("
         "icp10100_pressure_pascals("
         "print_sensor_capabilities("
+        "BNO08x"
         "\"sma\""
         "\"sma-set\""
         "\"led\""
@@ -141,6 +142,18 @@ foreach(required_control_center_sma IN ITEMS
     if(control_sma_offset EQUAL -1)
         message(FATAL_ERROR
             "Control Center must expose SMA query and route controls")
+    endif()
+endforeach()
+
+foreach(required_sensor_driver IN ITEMS
+        "TimeCardBNO08xHeaderValid"
+        "TimeCardBNO08xProbeLocked"
+        "TimeCardBNO055ProbeLocked"
+        "TimeCardSensorCapabilitiesForBoard")
+    string(FIND "${driver}" "${required_sensor_driver}" sensor_driver_offset)
+    if(sensor_driver_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Driver must preserve the macOS sensor and IMU probe helpers")
     endif()
 endforeach()
 
