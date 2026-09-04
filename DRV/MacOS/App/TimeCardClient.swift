@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 
 import CoreFoundation
+import Darwin
 import Foundation
 import IOKit
 import IOKit.serial
@@ -293,6 +294,26 @@ struct TimeCardSerialPort: Identifiable, Equatable, Sendable {
             return ttyDevice
         }
         return URL(fileURLWithPath: calloutDevice).lastPathComponent
+    }
+}
+
+struct TimeCardSerialCapture: Equatable, Sendable {
+    let portPath: String
+    let baudRate: UInt32
+    let capturedAt: Date
+    let durationSeconds: Double
+    let data: [UInt8]
+
+    var byteCount: Int {
+        data.count
+    }
+
+    var text: String {
+        String(decoding: data, as: UTF8.self)
+    }
+
+    var lines: [String] {
+        text.split(whereSeparator: \.isNewline).map(String.init)
     }
 }
 
@@ -644,6 +665,9 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
     case incompatibleABI(UInt32)
     case invalidTimestamp
     case invalidI2CRequest(String)
+    case serialUnsupportedBaud(UInt32)
+    case serialOpenFailed(path: String, errnoCode: Int32)
+    case serialConfigureFailed(path: String, operation: String, errnoCode: Int32)
 
     var errorDescription: String? {
         switch self {
@@ -669,6 +693,12 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
             "The driver returned an invalid cross timestamp."
         case .invalidI2CRequest(let reason):
             reason
+        case .serialUnsupportedBaud(let baud):
+            "Unsupported serial baud rate \(baud)."
+        case .serialOpenFailed(let path, let errnoCode):
+            "Could not open \(path) for serial preview (\(Self.posixMessage(errnoCode)))."
+        case .serialConfigureFailed(let path, let operation, let errnoCode):
+            "Could not \(operation) \(path) (\(Self.posixMessage(errnoCode)))."
         }
     }
 
@@ -693,6 +723,10 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
 
     private static func hex(_ value: Int32) -> String {
         String(format: "0x%08x", UInt32(bitPattern: value))
+    }
+
+    private static func posixMessage(_ errnoCode: Int32) -> String {
+        String(cString: strerror(errnoCode))
     }
 }
 
@@ -916,6 +950,100 @@ enum TimeCardClient {
             $0.displayName.localizedStandardCompare($1.displayName)
                 == .orderedAscending
         }
+    }
+
+    static func captureSerialPreview(
+        portPath: String,
+        baudRate: UInt32,
+        durationSeconds: Double = 1.5,
+        maxBytes: Int = 8192
+    ) throws -> TimeCardSerialCapture {
+        guard let speed = serialSpeed(for: baudRate) else {
+            throw TimeCardClientError.serialUnsupportedBaud(baudRate)
+        }
+
+        let boundedDuration = min(max(durationSeconds, 0.1), 5.0)
+        let boundedMaxBytes = min(max(maxBytes, 1), 65_536)
+        let fileDescriptor = Darwin.open(
+            portPath,
+            O_RDONLY | O_NOCTTY | O_NONBLOCK
+        )
+        guard fileDescriptor >= 0 else {
+            throw TimeCardClientError.serialOpenFailed(
+                path: portPath,
+                errnoCode: errno
+            )
+        }
+        defer { Darwin.close(fileDescriptor) }
+
+        var originalSettings = termios()
+        guard tcgetattr(fileDescriptor, &originalSettings) == 0 else {
+            throw TimeCardClientError.serialConfigureFailed(
+                path: portPath,
+                operation: "read settings for",
+                errnoCode: errno
+            )
+        }
+
+        var settings = originalSettings
+        var settingsToRestore = originalSettings
+        defer { _ = tcsetattr(fileDescriptor, TCSANOW, &settingsToRestore) }
+
+        cfmakeraw(&settings)
+        settings.c_cflag |= tcflag_t(CLOCAL | CREAD)
+        settings.c_cflag &= ~tcflag_t(CSIZE | PARENB | CSTOPB)
+        settings.c_cflag |= tcflag_t(CS8)
+        withUnsafeMutableBytes(of: &settings.c_cc) { controlCharacters in
+            controlCharacters[Int(VMIN)] = 0
+            controlCharacters[Int(VTIME)] = 1
+        }
+        guard cfsetispeed(&settings, speed) == 0,
+              cfsetospeed(&settings, speed) == 0 else {
+            throw TimeCardClientError.serialConfigureFailed(
+                path: portPath,
+                operation: "set baud rate for",
+                errnoCode: errno
+            )
+        }
+        guard tcsetattr(fileDescriptor, TCSANOW, &settings) == 0 else {
+            throw TimeCardClientError.serialConfigureFailed(
+                path: portPath,
+                operation: "apply settings to",
+                errnoCode: errno
+            )
+        }
+        tcflush(fileDescriptor, TCIOFLUSH)
+
+        let capturedAt = Date()
+        let deadline = capturedAt.addingTimeInterval(boundedDuration)
+        var captured: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: 512)
+        while Date() < deadline && captured.count < boundedMaxBytes {
+            let requested = min(buffer.count, boundedMaxBytes - captured.count)
+            let bytesRead = buffer.withUnsafeMutableBytes {
+                Darwin.read(fileDescriptor, $0.baseAddress, requested)
+            }
+            if bytesRead > 0 {
+                captured.append(contentsOf: buffer.prefix(bytesRead))
+            } else if bytesRead == 0 ||
+                errno == EAGAIN || errno == EWOULDBLOCK {
+                usleep(20_000)
+            } else {
+                throw TimeCardClientError.serialConfigureFailed(
+                    path: portPath,
+                    operation: "read preview from",
+                    errnoCode: errno
+                )
+            }
+        }
+
+        return TimeCardSerialCapture(
+            portPath: portPath,
+            baudRate: baudRate,
+            capturedAt: capturedAt,
+            durationSeconds: boundedDuration,
+            data: captured
+        )
     }
 
     static func readSnapshot(
@@ -1277,6 +1405,21 @@ enum TimeCardClient {
             kCFAllocatorDefault,
             0
         )?.takeRetainedValue() as? String
+    }
+
+    private static func serialSpeed(for baudRate: UInt32) -> speed_t? {
+        switch baudRate {
+        case 1_200: speed_t(B1200)
+        case 2_400: speed_t(B2400)
+        case 4_800: speed_t(B4800)
+        case 9_600: speed_t(B9600)
+        case 19_200: speed_t(B19200)
+        case 38_400: speed_t(B38400)
+        case 57_600: speed_t(B57600)
+        case 115_200: speed_t(B115200)
+        case 230_400: speed_t(B230400)
+        default: nil
+        }
     }
 
     private static func openConnection(

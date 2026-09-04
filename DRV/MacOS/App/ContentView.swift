@@ -665,8 +665,13 @@ private struct GNSSWorkspaceView: View {
 
 private struct UARTWorkspaceView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
+    @State private var selectedSerialPortID = ""
+    @State private var serialBaudRate: UInt32 = 115_200
     @State private var nmeaText = ""
     @State private var nmeaMessage = ""
+    private let serialBaudRates: [UInt32] = [
+        9_600, 19_200, 38_400, 57_600, 115_200, 230_400,
+    ]
 
     var body: some View {
         ScrollView {
@@ -735,7 +740,7 @@ private struct UARTWorkspaceView: View {
                         )
                         FeatureRow(
                             name: "NMEA capture and export",
-                            state: decodedNMEASentences.isEmpty ? "Partial" : "Live",
+                            state: nmeaCaptureState,
                             note: "Paste or load receiver sentences to validate checksum and decode common GNSS messages."
                         )
                         FeatureRow(
@@ -777,6 +782,112 @@ private struct UARTWorkspaceView: View {
                             ForEach(monitor.serialPorts) { port in
                                 SerialPortCard(port: port)
                             }
+                        }
+                    }
+                }
+
+                ControlCenterPanel(
+                    title: "Serial preview capture",
+                    subtitle: "Bounded read from a selected macOS serial device"
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .bottom, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Port")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Picker("", selection: $selectedSerialPortID) {
+                                    ForEach(monitor.serialPorts) { port in
+                                        Text(port.displayName)
+                                            .tag(port.calloutDevice)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 220)
+                                .disabled(monitor.serialPorts.isEmpty)
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Baud")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Picker("", selection: $serialBaudRate) {
+                                    ForEach(serialBaudRates, id: \.self) { baud in
+                                        Text("\(baud)").tag(baud)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 120)
+                            }
+
+                            Button("Capture Preview") {
+                                guard let path = selectedSerialPortPath else {
+                                    return
+                                }
+                                monitor.captureSerialPreview(
+                                    portPath: path,
+                                    baudRate: serialBaudRate
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                selectedSerialPortPath == nil ||
+                                    monitor.serialCaptureInProgress
+                            )
+
+                            if monitor.serialCaptureInProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+
+                            Spacer()
+
+                            Button("Decode Capture") {
+                                nmeaText = monitor.serialCapture?.text ?? ""
+                                nmeaMessage = "Loaded serial capture into the NMEA decoder."
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(monitor.serialCapture?.data.isEmpty != false)
+                        }
+
+                        Text(
+                            "Preview capture reads for a short bounded window "
+                                + "and restores the serial settings when it exits. "
+                                + "Use the callout device for receiver traffic."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if let capture = monitor.serialCapture {
+                            HStack(spacing: 8) {
+                                StatusPill(
+                                    capture.byteCount == 0
+                                        ? "No bytes" : "\(capture.byteCount) bytes",
+                                    capture.byteCount == 0 ? .orange : .green
+                                )
+                                StatusPill("\(capture.baudRate) baud", .teal)
+                                Text(TimeCardFormatting.date(capture.capturedAt))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text(serialCapturePreviewText(capture))
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    Color.secondary.opacity(0.07),
+                                    in: RoundedRectangle(cornerRadius: 10)
+                                )
+                        } else {
+                            Text(
+                                "No preview capture yet. Select a serial port "
+                                    + "and baud rate, then capture a short sample."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -850,6 +961,10 @@ private struct UARTWorkspaceView: View {
         }
         .onAppear {
             monitor.refreshSerialPorts()
+            selectFirstSerialPortIfNeeded(monitor.serialPorts)
+        }
+        .onChange(of: monitor.serialPorts) { _, ports in
+            selectFirstSerialPortIfNeeded(ports)
         }
     }
 
@@ -866,6 +981,41 @@ private struct UARTWorkspaceView: View {
         case "Waiting": .orange
         default: .secondary
         }
+    }
+
+    private var nmeaCaptureState: String {
+        if monitor.serialCapture?.byteCount ?? 0 > 0 {
+            return "Live"
+        }
+        return decodedNMEASentences.isEmpty ? "Partial" : "Live"
+    }
+
+    private var selectedSerialPortPath: String? {
+        if monitor.serialPorts.contains(where: { $0.calloutDevice == selectedSerialPortID }) {
+            return selectedSerialPortID
+        }
+        return monitor.serialPorts.first?.calloutDevice
+    }
+
+    private func selectFirstSerialPortIfNeeded(_ ports: [TimeCardSerialPort]) {
+        guard !ports.isEmpty,
+              !ports.contains(where: { $0.calloutDevice == selectedSerialPortID }) else {
+            return
+        }
+        selectedSerialPortID = ports.first?.calloutDevice ?? ""
+    }
+
+    private func serialCapturePreviewText(
+        _ capture: TimeCardSerialCapture
+    ) -> String {
+        guard !capture.text.isEmpty else {
+            return "No bytes arrived during the preview window."
+        }
+        let limit = 1800
+        if capture.text.count <= limit {
+            return capture.text
+        }
+        return String(capture.text.prefix(limit)) + "\n[preview truncated]"
     }
 
     private var decodedNMEASentences: [NMEASentence] {

@@ -180,6 +180,8 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var serialPorts: [TimeCardSerialPort] = []
     @Published private(set) var serialRefreshInProgress = false
     @Published private(set) var serialMessage = ""
+    @Published private(set) var serialCapture: TimeCardSerialCapture?
+    @Published private(set) var serialCaptureInProgress = false
 
     private var refreshTimer: Timer?
     private var nextAutomaticAttempt = Date.distantPast
@@ -240,6 +242,40 @@ final class TimeCardMonitor: ObservableObject {
             self.serialMessage = ports.isEmpty
                 ? "No macOS serial ports were found."
                 : "\(ports.count) macOS serial port(s) found."
+        }
+    }
+
+    func captureSerialPreview(portPath: String, baudRate: UInt32) {
+        guard !serialCaptureInProgress else { return }
+        serialCaptureInProgress = true
+        serialCapture = nil
+        serialMessage = "Capturing serial preview from \(portPath)..."
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<TimeCardSerialCapture, Error>.success(
+                        try TimeCardClient.captureSerialPreview(
+                            portPath: portPath,
+                            baudRate: baudRate
+                        )
+                    )
+                } catch {
+                    return Result<TimeCardSerialCapture, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.serialCaptureInProgress = false
+            switch result {
+            case .success(let capture):
+                self.serialCapture = capture
+                self.serialMessage =
+                    "Captured \(capture.byteCount) byte(s) from \(capture.portPath)."
+            case .failure(let error):
+                self.serialMessage =
+                    "Serial preview failed: \(error.localizedDescription)"
+            }
         }
     }
 

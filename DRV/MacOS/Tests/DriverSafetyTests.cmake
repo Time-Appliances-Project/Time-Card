@@ -163,7 +163,10 @@ foreach(required_control_center_sma IN ITEMS
         "TimeCardI2CMuxSnapshot"
         "TimeCardLEDState"
         "TimeCardSerialPort"
+        "TimeCardSerialCapture"
         "listSerialPorts"
+        "captureSerialPreview"
+        "serialSpeed"
         "selector: 6"
         "selector: 7"
         "selector: 8"
@@ -197,7 +200,8 @@ foreach(required_control_center_monitor IN ITEMS
         "runReadOnlySelfTest"
         "TimeCardSelfTestReport"
         "buildSelfTestReport"
-        "refreshSerialPorts")
+        "refreshSerialPorts"
+        "serialCaptureInProgress")
     string(FIND "${control_center_monitor}" "${required_control_center_monitor}" monitor_offset)
     if(monitor_offset EQUAL -1)
         message(FATAL_ERROR
@@ -232,7 +236,10 @@ foreach(required_control_center_view IN ITEMS
         "Refresh Ports"
         "NMEA decoder lab"
         "NMEASentence"
-        "Checksum OK")
+        "Checksum OK"
+        "Serial preview capture"
+        "Capture Preview"
+        "Decode Capture")
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)
         message(FATAL_ERROR
