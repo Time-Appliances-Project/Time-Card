@@ -93,6 +93,7 @@ foreach(required_cli_sma IN ITEMS
         "command_uart_observe("
         "command_uart_config("
         "command_uart_read("
+        "command_uart_capture("
         "command_uart_write_hex("
         "command_ubx_poll_read("
         "build_ubx_poll("
@@ -121,6 +122,7 @@ foreach(required_cli_sma IN ITEMS
         "\"uart-observe\""
         "\"uart-config\""
         "\"uart-read\""
+        "\"uart-capture\""
         "\"uart-write-hex\""
         "\"ubx-poll-read\"")
     string(FIND "${cli}" "${required_cli_sma}" cli_sma_offset)
@@ -195,7 +197,9 @@ foreach(required_control_center_sma IN ITEMS
         "selector: 17"
         "TimeCardUARTObservation"
         "TimeCardUARTReadResult"
-        "TimeCardUARTWriteResult")
+        "TimeCardUARTWriteResult"
+        "TimeCardUARTCapture"
+        "captureUART")
     string(FIND "${control_center}" "${required_control_center_sma}" control_sma_offset)
     if(control_sma_offset EQUAL -1)
         message(FATAL_ERROR
@@ -220,6 +224,10 @@ foreach(required_control_center_monitor IN ITEMS
         "buildSelfTestReport"
         "refreshSerialPorts"
         "serialCaptureInProgress"
+        "uartCaptureInProgress"
+        "startUARTCapture"
+        "stopUARTCapture"
+        "clearUARTCapture"
         "TimeCardSessionLogEntry"
         "appendSessionLog"
         "clearSessionLog")
@@ -269,6 +277,9 @@ foreach(required_control_center_view IN ITEMS
         "Save Support ZIP"
         "Time Card hardware UART"
         "Read Hardware"
+        "Start Capture"
+        "uartCaptureInProgress"
+        "startUARTCapture"
         "Send UBX Poll"
         "MON-VER"
         "pendingUBXAutoload"

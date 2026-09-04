@@ -35,12 +35,14 @@ and is implemented in ABI v3. Bounded UART observe/configure/read operations
 for the GNSS, GNSS2, MAC/atomic-clock, and NMEA ports are implemented in ABI v8.
 Bounded UART writes, safe UBX poll request support, and bounded poll-response
 capture are implemented in ABI v9 and hardware-validated on the classic Meta
-profile.
+profile. Continuous app-side and CLI polling capture are implemented on top of
+the bounded ABI v8 read path.
 
 - SMA input and output route query/set, with fixed-route fallback for older
   FPGA images
 - GNSS, GNSS2, atomic-clock, and NMEA 16550 UART polling access
 - Bounded UART writes, guarded UBX poll requests, and poll-response capture
+- Continuous bounded polling capture in the SwiftUI app and CLI
 - Interrupt-backed stream capture
 - MSI-X interrupt allocation and dispatch
 - PPS and external timestamp events

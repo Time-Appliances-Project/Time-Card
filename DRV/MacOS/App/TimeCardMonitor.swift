@@ -207,6 +207,8 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var uartObservation: TimeCardUARTObservation?
     @Published private(set) var uartReadResult: TimeCardUARTReadResult?
     @Published private(set) var uartWriteResult: TimeCardUARTWriteResult?
+    @Published private(set) var uartCapture: TimeCardUARTCapture?
+    @Published private(set) var uartCaptureInProgress = false
     @Published private(set) var uartOperationInProgress = false
     @Published private(set) var uartMessage = ""
     @Published private(set) var sessionLog: [TimeCardSessionLogEntry] = []
@@ -216,6 +218,7 @@ final class TimeCardMonitor: ObservableObject {
     private var selectionGeneration: UInt64 = 0
     private var refreshInProgress = false
     private var manualRefreshPending = false
+    private var uartCaptureTask: Task<Void, Never>?
     private let historyCapacity = 120
     private let sessionLogCapacity = 300
     private var lastLoggedServiceID: UInt64?
@@ -258,8 +261,13 @@ final class TimeCardMonitor: ObservableObject {
         i2cScanResults.removeAll(keepingCapacity: true)
         i2cTransfer = nil
         i2cOperationMessage = ""
+        uartCaptureTask?.cancel()
+        uartCaptureTask = nil
+        uartCaptureInProgress = false
+        uartCapture = nil
         uartObservation = nil
         uartReadResult = nil
+        uartWriteResult = nil
         uartMessage = ""
         selfTestReport = nil
         selfTestMessage = ""
@@ -350,7 +358,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func configureUART(port: TimeCardUARTPort, baudRate: UInt32) {
-        guard !uartOperationInProgress else { return }
+        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -405,7 +413,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func observeUART(port: TimeCardUARTPort) {
-        guard !uartOperationInProgress else { return }
+        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -466,7 +474,7 @@ final class TimeCardMonitor: ObservableObject {
         maximumBytes: UInt32 = 256,
         timeoutMilliseconds: UInt32 = 500
     ) {
-        guard !uartOperationInProgress else { return }
+        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -530,7 +538,7 @@ final class TimeCardMonitor: ObservableObject {
         label: String = "UART bytes",
         timeoutMilliseconds: UInt32 = 500
     ) {
-        guard !uartOperationInProgress else { return }
+        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -596,7 +604,7 @@ final class TimeCardMonitor: ObservableObject {
         readAttempts: Int = 6,
         readTimeoutMilliseconds: UInt32 = 250
     ) {
-        guard !uartOperationInProgress else { return }
+        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -674,6 +682,105 @@ final class TimeCardMonitor: ObservableObject {
                 )
             }
         }
+    }
+
+    func startUARTCapture(
+        port: TimeCardUARTPort,
+        baudRate: UInt32,
+        durationSeconds: Double
+    ) {
+        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            uartMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.supportsUART == true else {
+            uartMessage = "Hardware UART is not advertised by this driver."
+            return
+        }
+
+        uartCaptureTask?.cancel()
+        uartCapture = nil
+        uartCaptureInProgress = true
+        uartMessage =
+            "Capturing \(port.label) UART for \(Int(durationSeconds)) s at \(baudRate) baud..."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: uartMessage
+        )
+
+        let generation = selectionGeneration
+        uartCaptureTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                let capture = try TimeCardClient.captureUART(
+                    for: descriptor,
+                    port: port,
+                    baudRate: baudRate,
+                    durationSeconds: durationSeconds
+                )
+                await MainActor.run { [weak self] in
+                    guard let self, self.selectionGeneration == generation else {
+                        return
+                    }
+                    self.uartCaptureTask = nil
+                    self.uartCaptureInProgress = false
+                    self.uartCapture = capture
+                    self.uartReadResult = TimeCardUARTReadResult(
+                        port: capture.port,
+                        timeoutMilliseconds: 0,
+                        lineStatus: capture.lastLineStatus,
+                        data: Array(capture.data.prefix(256))
+                    )
+                    self.uartMessage =
+                        "\(capture.port.label) capture \(capture.stopReason.lowercased()): "
+                            + "\(capture.byteCount) byte(s), "
+                            + "\(capture.readCount) read window(s), "
+                            + "LSR \(capture.lineStatusText)."
+                    self.appendSessionLog(
+                        severity: capture.byteCount == 0 ? .warning : .success,
+                        category: "UART",
+                        message: self.uartMessage
+                    )
+                }
+            } catch {
+                let detail = error.localizedDescription
+                await MainActor.run { [weak self] in
+                    guard let self, self.selectionGeneration == generation else {
+                        return
+                    }
+                    self.uartCaptureTask = nil
+                    self.uartCaptureInProgress = false
+                    self.uartMessage = "\(port.label) capture failed: \(detail)"
+                    self.appendSessionLog(
+                        severity: .error,
+                        category: "UART",
+                        message: self.uartMessage
+                    )
+                }
+            }
+        }
+    }
+
+    func stopUARTCapture() {
+        guard uartCaptureInProgress else { return }
+        uartCaptureTask?.cancel()
+        uartMessage = "Stopping UART capture after the current read window..."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: uartMessage
+        )
+    }
+
+    func clearUARTCapture() {
+        uartCapture = nil
+        uartMessage = "UART capture cleared."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: uartMessage
+        )
     }
 
     func clearSessionLog() {

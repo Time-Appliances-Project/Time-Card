@@ -449,6 +449,63 @@ struct TimeCardUARTReadResult: Equatable, Sendable {
     }
 }
 
+struct TimeCardUARTCapture: Equatable, Sendable {
+    let port: TimeCardUARTPort
+    let baudRate: UInt32
+    let capturedAt: Date
+    let durationSeconds: Double
+    let requestedDurationSeconds: Double
+    let readCount: Int
+    let emptyReadCount: Int
+    let lastLineStatus: UInt32
+    let stoppedByLimit: Bool
+    let cancelled: Bool
+    let data: [UInt8]
+
+    var byteCount: Int {
+        data.count
+    }
+
+    var lineStatusText: String {
+        String(format: "0x%02x", lastLineStatus & 0xff)
+    }
+
+    var text: String {
+        String(decoding: data, as: UTF8.self)
+    }
+
+    var dataHex: String {
+        data.map { String(format: "%02x", $0) }.joined(separator: " ")
+    }
+
+    var stopReason: String {
+        if cancelled { return "Stopped" }
+        if stoppedByLimit { return "Byte limit" }
+        return "Timed capture"
+    }
+
+    var hexDumpLines: [String] {
+        guard !data.isEmpty else { return [] }
+        return stride(from: 0, to: data.count, by: 16).map { offset in
+            let chunk = data[offset..<min(offset + 16, data.count)]
+            let hex = chunk
+                .map { String(format: "%02x", $0) }
+                .joined(separator: " ")
+            let paddedHex = hex.padding(
+                toLength: 47,
+                withPad: " ",
+                startingAt: 0
+            )
+            let ascii = chunk.map { byte -> Character in
+                byte >= 0x20 && byte <= 0x7e
+                    ? Character(UnicodeScalar(byte))
+                    : "."
+            }
+            return String(format: "%04x: %@  %@", offset, paddedHex, String(ascii))
+        }
+    }
+}
+
 struct TimeCardUARTWriteResult: Equatable, Sendable {
     let port: TimeCardUARTPort
     let timeoutMilliseconds: UInt32
@@ -1663,6 +1720,66 @@ enum TimeCardClient {
             output: &output
         )
         return TimeCardUARTReadResult(rawBytes: output)
+    }
+
+    static func captureUART(
+        for descriptor: TimeCardServiceDescriptor,
+        port: TimeCardUARTPort,
+        baudRate: UInt32,
+        durationSeconds: Double = 5.0,
+        maxBytes: Int = 65_536,
+        readTimeoutMilliseconds: UInt32 = 250
+    ) throws -> TimeCardUARTCapture {
+        let boundedDuration = min(max(durationSeconds, 0.5), 60.0)
+        let boundedMaxBytes = min(max(maxBytes, 1), 262_144)
+        try configureUART(for: descriptor, port: port, baudRate: baudRate)
+
+        let capturedAt = Date()
+        let deadline = capturedAt.addingTimeInterval(boundedDuration)
+        var captured: [UInt8] = []
+        var readCount = 0
+        var emptyReadCount = 0
+        var lastLineStatus: UInt32 = 0
+
+        while Date() < deadline && captured.count < boundedMaxBytes &&
+            !Task.isCancelled {
+            let remainingBytes = boundedMaxBytes - captured.count
+            let maximumBytes = UInt32(min(256, remainingBytes))
+            let remainingMilliseconds = max(
+                1,
+                Int(deadline.timeIntervalSinceNow * 1_000.0)
+            )
+            let timeout = UInt32(
+                min(Int(max(readTimeoutMilliseconds, 1)), remainingMilliseconds)
+            )
+            let transfer = try readUART(
+                for: descriptor,
+                port: port,
+                maximumBytes: maximumBytes,
+                timeoutMilliseconds: timeout
+            )
+            readCount += 1
+            lastLineStatus = transfer.lineStatus
+            if transfer.data.isEmpty {
+                emptyReadCount += 1
+            } else {
+                captured.append(contentsOf: transfer.data.prefix(remainingBytes))
+            }
+        }
+
+        return TimeCardUARTCapture(
+            port: port,
+            baudRate: baudRate,
+            capturedAt: capturedAt,
+            durationSeconds: Date().timeIntervalSince(capturedAt),
+            requestedDurationSeconds: boundedDuration,
+            readCount: readCount,
+            emptyReadCount: emptyReadCount,
+            lastLineStatus: lastLineStatus,
+            stoppedByLimit: captured.count >= boundedMaxBytes,
+            cancelled: Task.isCancelled,
+            data: captured
+        )
     }
 
     static func writeUART(

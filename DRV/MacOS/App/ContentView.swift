@@ -671,6 +671,7 @@ private struct UARTWorkspaceView: View {
     @State private var serialBaudRate: UInt32 = 115_200
     @State private var selectedUARTPort: TimeCardUARTPort = .gnss
     @State private var hardwareUARTBaudRate: UInt32 = 115_200
+    @State private var hardwareUARTCaptureDurationSeconds: Double = 10
     @State private var nmeaText = ""
     @State private var nmeaMessage = ""
     @State private var ubxInputText = ""
@@ -679,6 +680,7 @@ private struct UARTWorkspaceView: View {
     private let serialBaudRates: [UInt32] = [
         9_600, 19_200, 38_400, 57_600, 115_200, 230_400,
     ]
+    private let uartCaptureDurations: [Double] = [5, 10, 30, 60]
 
     var body: some View {
         ScrollView {
@@ -791,19 +793,31 @@ private struct UARTWorkspaceView: View {
                                 )
                             }
                             .buttonStyle(.bordered)
-                            .disabled(!hardwareUARTAvailable || monitor.uartOperationInProgress)
+                            .disabled(
+                                !hardwareUARTAvailable ||
+                                    monitor.uartOperationInProgress ||
+                                    monitor.uartCaptureInProgress
+                            )
 
                             Button("Observe") {
                                 monitor.observeUART(port: selectedUARTPort)
                             }
                             .buttonStyle(.bordered)
-                            .disabled(!hardwareUARTAvailable || monitor.uartOperationInProgress)
+                            .disabled(
+                                !hardwareUARTAvailable ||
+                                    monitor.uartOperationInProgress ||
+                                    monitor.uartCaptureInProgress
+                            )
 
                             Button("Read Hardware") {
                                 monitor.readUART(port: selectedUARTPort)
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(!hardwareUARTAvailable || monitor.uartOperationInProgress)
+                            .disabled(
+                                !hardwareUARTAvailable ||
+                                    monitor.uartOperationInProgress ||
+                                    monitor.uartCaptureInProgress
+                            )
 
                             Menu("Send UBX Poll") {
                                 ForEach(TimeCardUBXPoll.allCases) { poll in
@@ -815,10 +829,12 @@ private struct UARTWorkspaceView: View {
                             .disabled(
                                 !hardwareUARTWriteAvailable ||
                                     !selectedUARTPort.supportsReceiverPolls ||
-                                    monitor.uartOperationInProgress
+                                    monitor.uartOperationInProgress ||
+                                    monitor.uartCaptureInProgress
                             )
 
-                            if monitor.uartOperationInProgress {
+                            if monitor.uartOperationInProgress ||
+                                monitor.uartCaptureInProgress {
                                 ProgressView()
                                     .controlSize(.small)
                             }
@@ -829,6 +845,56 @@ private struct UARTWorkspaceView: View {
                         Text(selectedUARTPort.detail)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                        HStack(alignment: .bottom, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Capture")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Picker("", selection: $hardwareUARTCaptureDurationSeconds) {
+                                    ForEach(uartCaptureDurations, id: \.self) { seconds in
+                                        Text("\(Int(seconds)) s").tag(seconds)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 100)
+                            }
+
+                            Button("Start Capture") {
+                                monitor.startUARTCapture(
+                                    port: selectedUARTPort,
+                                    baudRate: hardwareUARTBaudRate,
+                                    durationSeconds: hardwareUARTCaptureDurationSeconds
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                !hardwareUARTAvailable ||
+                                    monitor.uartOperationInProgress ||
+                                    monitor.uartCaptureInProgress
+                            )
+
+                            Button("Stop") {
+                                monitor.stopUARTCapture()
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!monitor.uartCaptureInProgress)
+
+                            Button("Clear Capture") {
+                                monitor.clearUARTCapture()
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(
+                                monitor.uartCaptureInProgress ||
+                                    monitor.uartCapture == nil
+                            )
+
+                            Spacer()
+
+                            Text("Capture loops safe 256-byte DriverKit reads.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
 
                         if !hardwareUARTAvailable {
                             Text(
@@ -927,6 +993,81 @@ private struct UARTWorkspaceView: View {
                                     Color.secondary.opacity(0.07),
                                     in: RoundedRectangle(cornerRadius: 10)
                                 )
+                        }
+
+                        if let capture = monitor.uartCapture {
+                            Divider()
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    StatusPill(capture.stopReason, .teal)
+                                    StatusPill(
+                                        capture.byteCount == 0
+                                            ? "No bytes" : "\(capture.byteCount) bytes",
+                                        capture.byteCount == 0 ? .orange : .green
+                                    )
+                                    StatusPill("\(capture.baudRate) baud", .teal)
+                                    StatusPill(
+                                        String(
+                                            format: "%.1f/%.0f s",
+                                            capture.durationSeconds,
+                                            capture.requestedDurationSeconds
+                                        ),
+                                        .secondary
+                                    )
+                                    StatusPill(
+                                        "\(capture.readCount) read window(s)",
+                                        .secondary
+                                    )
+                                    StatusPill("LSR \(capture.lineStatusText)", .teal)
+
+                                    Spacer()
+
+                                    Button("Load as NMEA") {
+                                        nmeaText = capture.text
+                                        nmeaMessage = "Loaded hardware UART capture."
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(capture.data.isEmpty)
+
+                                    Button("Load as UBX") {
+                                        ubxInputText = capture.dataHex
+                                        ubxMessage = "Loaded hardware UART capture."
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(capture.data.isEmpty)
+
+                                    Button("Copy Text") {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(
+                                            capture.text,
+                                            forType: .string
+                                        )
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(capture.data.isEmpty)
+
+                                    Button("Copy Hex") {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(
+                                            capture.dataHex,
+                                            forType: .string
+                                        )
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(capture.data.isEmpty)
+                                }
+
+                                Text(uartCapturePreviewText(capture))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                    .padding(10)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        Color.secondary.opacity(0.07),
+                                        in: RoundedRectangle(cornerRadius: 10)
+                                    )
+                            }
                         }
                     }
                 }
@@ -1092,13 +1233,18 @@ private struct UARTWorkspaceView: View {
 
                         HStack {
                             Button("Load Capture Bytes") {
-                                ubxInputText = monitor.serialCapture?.data
+                                let bytes = monitor.uartCapture?.data ??
+                                    monitor.serialCapture?.data ?? []
+                                ubxInputText = bytes
                                     .map { String(format: "%02x", $0) }
-                                    .joined(separator: " ") ?? ""
-                                ubxMessage = "Loaded serial capture bytes."
+                                    .joined(separator: " ")
+                                ubxMessage = "Loaded capture bytes."
                             }
                             .buttonStyle(.borderedProminent)
-                            .disabled(monitor.serialCapture?.data.isEmpty != false)
+                            .disabled(
+                                monitor.uartCapture?.data.isEmpty != false &&
+                                    monitor.serialCapture?.data.isEmpty != false
+                            )
 
                             Button("Load Pasteboard") {
                                 ubxInputText = NSPasteboard.general.string(
@@ -1167,6 +1313,13 @@ private struct UARTWorkspaceView: View {
                             )
 
                         HStack {
+                            Button("Load Hardware Capture") {
+                                nmeaText = monitor.uartCapture?.text ?? ""
+                                nmeaMessage = "Loaded hardware UART capture."
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(monitor.uartCapture?.data.isEmpty != false)
+
                             Button("Load Pasteboard") {
                                 nmeaText = NSPasteboard.general.string(
                                     forType: .string
@@ -1267,11 +1420,12 @@ private struct UARTWorkspaceView: View {
     }
 
     private var uartState: String {
-        if monitor.uartOperationInProgress {
+        if monitor.uartOperationInProgress || monitor.uartCaptureInProgress {
             return "Waiting"
         }
         if hardwareUARTAvailable {
-            return monitor.uartReadResult?.byteCount ?? 0 > 0
+            return monitor.uartCapture?.byteCount ?? 0 > 0 ||
+                monitor.uartReadResult?.byteCount ?? 0 > 0
                 ? "Live" : "Available"
         }
         return "Gated"
@@ -1287,6 +1441,7 @@ private struct UARTWorkspaceView: View {
 
     private var nmeaCaptureState: String {
         if monitor.serialCapture?.byteCount ?? 0 > 0 ||
+            monitor.uartCapture?.byteCount ?? 0 > 0 ||
             monitor.uartReadResult?.byteCount ?? 0 > 0 {
             return "Live"
         }
@@ -1294,7 +1449,8 @@ private struct UARTWorkspaceView: View {
     }
 
     private var ubxCaptureState: String {
-        if monitor.uartReadResult?.byteCount ?? 0 > 0 {
+        if monitor.uartCapture?.byteCount ?? 0 > 0 ||
+            monitor.uartReadResult?.byteCount ?? 0 > 0 {
             return "Live"
         }
         return decodedUBXFrames.isEmpty ? "Partial" : "Live"
@@ -1326,6 +1482,29 @@ private struct UARTWorkspaceView: View {
             return capture.text
         }
         return String(capture.text.prefix(limit)) + "\n[preview truncated]"
+    }
+
+    private func uartCapturePreviewText(
+        _ capture: TimeCardUARTCapture
+    ) -> String {
+        guard !capture.data.isEmpty else {
+            return "No bytes arrived during the hardware UART capture window."
+        }
+        let scalars = Array(capture.text.unicodeScalars)
+        let printable = scalars.filter { scalar in
+            (scalar.value >= 0x20 && scalar.value <= 0x7e) ||
+                scalar.value == 0x0a ||
+                scalar.value == 0x0d ||
+                scalar.value == 0x09
+        }.count
+        if !scalars.isEmpty && printable * 4 >= scalars.count * 3 {
+            let limit = 2400
+            if capture.text.count <= limit {
+                return capture.text
+            }
+            return String(capture.text.prefix(limit)) + "\n[preview truncated]"
+        }
+        return capture.hexDumpLines.prefix(64).joined(separator: "\n")
     }
 
     private var uartHeaderText: String {

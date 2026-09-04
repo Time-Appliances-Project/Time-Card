@@ -18,6 +18,7 @@
 #define TIMECARD_MIN_COMPATIBLE_ABI_VERSION 7u
 #define TIMECARD_UART_ABI_VERSION 8u
 #define TIMECARD_UART_WRITE_ABI_VERSION 9u
+#define TIMECARD_UART_CAPTURE_MAX_BYTES 65536u
 
 static void
 print_usage(FILE *stream)
@@ -43,6 +44,7 @@ print_usage(FILE *stream)
             "       timecardctl uart-observe port [timeout-ms]\n"
             "       timecardctl uart-config port baud\n"
             "       timecardctl uart-read port [max-bytes [timeout-ms]]\n"
+            "       timecardctl uart-capture port [seconds [baud]]\n"
             "       timecardctl uart-write-hex port hex-string [timeout-ms]\n"
             "       timecardctl ubx-poll-read port mon-ver|mon-hw|nav-pvt|nav-sat "
             "[baud [timeout-ms]]\n");
@@ -395,6 +397,16 @@ parse_ulong(const char *text, const char *name)
     return value;
 }
 
+static uint64_t
+monotonic_milliseconds(void)
+{
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return 0;
+    return (uint64_t)now.tv_sec * 1000ull +
+        (uint64_t)now.tv_nsec / 1000000ull;
+}
+
 static const char *
 uart_port_name(uint32_t port)
 {
@@ -588,27 +600,33 @@ command_uart_config(io_connect_t connection, int argc, char **argv)
 }
 
 static void
+print_uart_bytes(const uint8_t *data, uint32_t length)
+{
+    for (uint32_t i = 0; i < length; i += 16u) {
+        const uint32_t lineLength =
+            length - i > 16u ? 16u : length - i;
+        printf("%04x:", i);
+        for (uint32_t j = 0; j < lineLength; ++j)
+            printf(" %02x", data[i + j]);
+        for (uint32_t j = lineLength; j < 16u; ++j)
+            printf("   ");
+        printf("  ");
+        for (uint32_t j = 0; j < lineLength; ++j) {
+            const uint8_t byte = data[i + j];
+            putchar(byte >= 0x20u && byte <= 0x7eu ? byte : '.');
+        }
+        putchar('\n');
+    }
+}
+
+static void
 print_uart_transfer(const TimeCardUARTTransfer *transfer)
 {
     printf("UART %u (%s):    read %u byte%s, LSR 0x%02x, timeout %u ms\n",
            transfer->port, uart_port_name(transfer->port), transfer->length,
            transfer->length == 1 ? "" : "s",
            transfer->lineStatus & 0xffu, transfer->timeoutMilliseconds);
-    for (uint32_t i = 0; i < transfer->length; i += 16u) {
-        const uint32_t lineLength =
-            transfer->length - i > 16u ? 16u : transfer->length - i;
-        printf("%04x:", i);
-        for (uint32_t j = 0; j < lineLength; ++j)
-            printf(" %02x", transfer->data[i + j]);
-        for (uint32_t j = lineLength; j < 16u; ++j)
-            printf("   ");
-        printf("  ");
-        for (uint32_t j = 0; j < lineLength; ++j) {
-            const uint8_t byte = transfer->data[i + j];
-            putchar(byte >= 0x20u && byte <= 0x7eu ? byte : '.');
-        }
-        putchar('\n');
-    }
+    print_uart_bytes(transfer->data, transfer->length);
 }
 
 static int
@@ -634,6 +652,103 @@ command_uart_read(io_connect_t connection, int argc, char **argv)
                    &request, sizeof(request), &transfer, sizeof(transfer)))
         return 1;
     print_uart_transfer(&transfer);
+    return 0;
+}
+
+static int
+command_uart_capture(io_connect_t connection, int argc, char **argv)
+{
+    if (argc < 3 || argc > 5)
+        return 2;
+    if (require_driver_abi(connection, TIMECARD_UART_ABI_VERSION,
+                           "UART capture"))
+        return 1;
+
+    const uint32_t port = parse_uart_port(argv[2]);
+    const unsigned long seconds = argc >= 4 ?
+        parse_ulong(argv[3], "UART capture seconds") : 5u;
+    if (seconds == 0 || seconds > 60u) {
+        fprintf(stderr,
+                "timecardctl: UART capture seconds must be 1 through 60\n");
+        return 2;
+    }
+
+    TimeCardUARTConfig config = {
+        .port = port,
+        .baud = argc >= 5 ?
+            (uint32_t)parse_ulong(argv[4], "UART baud") : 115200u,
+    };
+    kern_return_t result = IOConnectCallStructMethod(
+        connection, kTimeCardMethodUARTConfigure,
+        &config, sizeof(config), NULL, NULL);
+    if (result != KERN_SUCCESS) {
+        fprintf(stderr, "timecardctl: UART configure failed: 0x%08x\n",
+                result);
+        return 1;
+    }
+
+    printf("UART %u (%s):    capturing for %lu s at %u baud\n",
+           port, uart_port_name(port), seconds, config.baud);
+
+    uint8_t captured[TIMECARD_UART_CAPTURE_MAX_BYTES];
+    uint32_t capturedLength = 0;
+    uint32_t readWindows = 0;
+    uint32_t emptyWindows = 0;
+    uint32_t lastLineStatus = 0;
+    const uint64_t started = monotonic_milliseconds();
+    const uint64_t deadline = started + seconds * 1000ull;
+
+    while (monotonic_milliseconds() < deadline &&
+           capturedLength < TIMECARD_UART_CAPTURE_MAX_BYTES) {
+        const uint64_t now = monotonic_milliseconds();
+        if (now >= deadline)
+            break;
+        const uint64_t remaining = deadline - now;
+        const uint32_t chunk =
+            remaining > 250ull ? 250u : (uint32_t)remaining;
+        TimeCardUARTReadRequest request = {
+            .port = port,
+            .maximumBytes = TIMECARD_UART_MAX_TRANSFER,
+            .timeoutMilliseconds = chunk == 0u ? 1u : chunk,
+        };
+        if (TIMECARD_UART_CAPTURE_MAX_BYTES - capturedLength <
+            TIMECARD_UART_MAX_TRANSFER) {
+            request.maximumBytes =
+                TIMECARD_UART_CAPTURE_MAX_BYTES - capturedLength;
+        }
+
+        TimeCardUARTTransfer response = {0};
+        if (call_inout(connection, kTimeCardMethodUARTRead,
+                       &request, sizeof(request),
+                       &response, sizeof(response)))
+            return 1;
+        ++readWindows;
+        lastLineStatus = response.lineStatus;
+        if (response.length == 0u) {
+            ++emptyWindows;
+            continue;
+        }
+
+        uint32_t copyLength = response.length;
+        if (copyLength > TIMECARD_UART_CAPTURE_MAX_BYTES - capturedLength)
+            copyLength = TIMECARD_UART_CAPTURE_MAX_BYTES - capturedLength;
+        memcpy(&captured[capturedLength], response.data, copyLength);
+        capturedLength += copyLength;
+    }
+
+    const uint64_t stopped = monotonic_milliseconds();
+    printf(
+        "UART %u (%s):    captured %u byte%s in %.2f s, "
+        "%u read window%s, %u empty, LSR 0x%02x%s\n",
+        port, uart_port_name(port), capturedLength,
+        capturedLength == 1u ? "" : "s",
+        (double)(stopped - started) / 1000.0,
+        readWindows, readWindows == 1u ? "" : "s",
+        emptyWindows, lastLineStatus & 0xffu,
+        capturedLength >= TIMECARD_UART_CAPTURE_MAX_BYTES ?
+            ", byte limit reached" : "");
+    if (capturedLength != 0u)
+        print_uart_bytes(captured, capturedLength);
     return 0;
 }
 
@@ -1528,6 +1643,8 @@ main(int argc, char **argv)
         status = command_uart_config(connection, argc, argv);
     else if (strcmp(argv[1], "uart-read") == 0)
         status = command_uart_read(connection, argc, argv);
+    else if (strcmp(argv[1], "uart-capture") == 0)
+        status = command_uart_capture(connection, argc, argv);
     else if (strcmp(argv[1], "uart-write-hex") == 0)
         status = command_uart_write_hex(connection, argc, argv);
     else if (strcmp(argv[1], "ubx-poll-read") == 0)
