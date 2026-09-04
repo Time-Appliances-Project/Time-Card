@@ -30,7 +30,11 @@ private enum TimeCardRefreshOutcome: Sendable {
         selected: TimeCardServiceDescriptor,
         snapshot: TimeCardDeviceSnapshot,
         sensors: TimeCardSensorSnapshot?,
-        sensorError: String?
+        sensorError: String?,
+        i2cStatus: TimeCardI2CStatusSnapshot?,
+        i2cMux: TimeCardI2CMuxSnapshot?,
+        ledStates: [TimeCardLEDState],
+        i2cError: String?
     )
     case failure(
         services: [TimeCardServiceDescriptor],
@@ -57,6 +61,10 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var sensorTelemetry: TimeCardSensorSnapshot?
     @Published private(set) var sensorMessage = ""
     @Published private(set) var sensorHistory: [SensorHistoryPoint] = []
+    @Published private(set) var i2cStatus: TimeCardI2CStatusSnapshot?
+    @Published private(set) var i2cMux: TimeCardI2CMuxSnapshot?
+    @Published private(set) var ledStates: [TimeCardLEDState] = []
+    @Published private(set) var i2cMessage = ""
 
     private var refreshTimer: Timer?
     private var nextAutomaticAttempt = Date.distantPast
@@ -88,6 +96,10 @@ final class TimeCardMonitor: ObservableObject {
         smaRoutes.removeAll(keepingCapacity: true)
         sensorTelemetry = nil
         sensorHistory.removeAll(keepingCapacity: true)
+        i2cStatus = nil
+        i2cMux = nil
+        ledStates.removeAll(keepingCapacity: true)
+        i2cMessage = ""
         refresh()
     }
 
@@ -259,6 +271,10 @@ final class TimeCardMonitor: ObservableObject {
                         )
                         var sensors: TimeCardSensorSnapshot?
                         var sensorError: String?
+                        var i2cStatus: TimeCardI2CStatusSnapshot?
+                        var i2cMux: TimeCardI2CMuxSnapshot?
+                        var ledStates: [TimeCardLEDState] = []
+                        var i2cErrors: [String] = []
                         if snapshot.capabilityNames.contains("Sensors") {
                             do {
                                 sensors = try TimeCardClient.querySensors(
@@ -268,12 +284,38 @@ final class TimeCardMonitor: ObservableObject {
                                 sensorError = error.localizedDescription
                             }
                         }
+                        if snapshot.capabilityNames.contains("I2C") {
+                            do {
+                                i2cStatus = try TimeCardClient.queryI2CStatus(
+                                    for: descriptor
+                                )
+                                i2cMux = try TimeCardClient.queryI2CMux(
+                                    for: descriptor
+                                )
+                            } catch {
+                                i2cErrors.append(error.localizedDescription)
+                            }
+                        }
+                        if snapshot.capabilityNames.contains("LEDs") {
+                            do {
+                                ledStates = try TimeCardClient.queryLEDStates(
+                                    for: descriptor
+                                )
+                            } catch {
+                                i2cErrors.append(error.localizedDescription)
+                            }
+                        }
                         return .success(
                             services: discovered,
                             selected: descriptor,
                             snapshot: snapshot,
                             sensors: sensors,
-                            sensorError: sensorError
+                            sensorError: sensorError,
+                            i2cStatus: i2cStatus,
+                            i2cMux: i2cMux,
+                            ledStates: ledStates,
+                            i2cError: i2cErrors.isEmpty
+                                ? nil : i2cErrors.joined(separator: "; ")
                         )
                     } catch let error as TimeCardClientError {
                         return .failure(
@@ -315,7 +357,8 @@ final class TimeCardMonitor: ObservableObject {
         switch outcome {
         case .success(
             let discovered, let selected, let current, let sensors,
-            let sensorError
+            let sensorError, let currentI2CStatus, let currentI2CMux,
+            let currentLEDStates, let i2cError
         ):
             services = discovered
             updateSelectedService(selected)
@@ -339,6 +382,46 @@ final class TimeCardMonitor: ObservableObject {
                 sensorMessage = "Sensor branch is not advertised by this profile."
                 sensorHistory.removeAll(keepingCapacity: true)
             }
+            i2cStatus = currentI2CStatus
+            i2cMux = currentI2CMux
+            ledStates = currentLEDStates
+            var i2cMessages: [String] = []
+            if let currentI2CStatus {
+                let devices = currentI2CStatus.knownDeviceNames.isEmpty
+                    ? "no known devices"
+                    : currentI2CStatus.knownDeviceNames.joined(separator: ", ")
+                i2cMessages.append("I2C controller refreshed, \(devices)")
+            }
+            if let currentI2CMux {
+                let muxState = currentI2CMux.isPresent ? "live" : "not present"
+                i2cMessages.append(
+                    String(
+                        format: "mux %@ at 0x%02x",
+                        muxState,
+                        currentI2CMux.channelMask & 0xff
+                    )
+                )
+            }
+            if !currentLEDStates.isEmpty {
+                let fitted = currentLEDStates.filter(\.isPresent).count
+                i2cMessages.append(
+                    "\(fitted)/\(currentLEDStates.count) LED state(s) live"
+                )
+            }
+            if let i2cError {
+                i2cMessages.append("partial refresh issue: \(i2cError)")
+            }
+            if !i2cMessages.isEmpty {
+                i2cMessage = i2cMessages.joined(separator: "; ") + "."
+            } else if let i2cError {
+                i2cMessage = "I2C/LED refresh failed: \(i2cError)"
+            } else if current.capabilityNames.contains("I2C") ||
+                current.capabilityNames.contains("LEDs") {
+                i2cMessage = "I2C or LED capability is advertised but has not sampled yet."
+            } else {
+                i2cMessage = "I2C and LED control are not advertised by this profile."
+                ledStates.removeAll(keepingCapacity: true)
+            }
             if current.capabilityNames.contains("SMA") && smaRoutes.isEmpty {
                 refreshSMA()
             }
@@ -349,6 +432,9 @@ final class TimeCardMonitor: ObservableObject {
             updateSelectedService(selected)
             snapshot = nil
             sensorTelemetry = nil
+            i2cStatus = nil
+            i2cMux = nil
+            ledStates.removeAll(keepingCapacity: true)
             errorMessage = error.localizedDescription
             recoverySuggestion = error.recoverySuggestion ?? ""
             switch error {
@@ -368,6 +454,9 @@ final class TimeCardMonitor: ObservableObject {
         case .unexpected(let message):
             snapshot = nil
             sensorTelemetry = nil
+            i2cStatus = nil
+            i2cMux = nil
+            ledStates.removeAll(keepingCapacity: true)
             state = .failed
             errorMessage = message
             recoverySuggestion = ""

@@ -218,6 +218,93 @@ struct TimeCardSMARoute: Identifiable, Equatable, Sendable {
     }
 }
 
+enum TimeCardLEDKind: UInt32, CaseIterable, Identifiable, Sendable {
+    case gnss1 = 0
+    case gnss2 = 1
+    case sma1 = 2
+    case sma2 = 3
+    case sma3 = 4
+    case sma4 = 5
+
+    var id: UInt32 { rawValue }
+
+    var label: String {
+        switch self {
+        case .gnss1: "GNSS 1"
+        case .gnss2: "GNSS 2"
+        case .sma1: "SMA 1"
+        case .sma2: "SMA 2"
+        case .sma3: "SMA 3"
+        case .sma4: "SMA 4"
+        }
+    }
+}
+
+struct TimeCardLEDState: Identifiable, Equatable, Sendable {
+    let led: TimeCardLEDKind
+    let flags: UInt32
+    let red: UInt32
+    let green: UInt32
+    let blue: UInt32
+    let globalCurrent: UInt32
+    let muxChannelMask: UInt32
+    let controllerStatus: UInt32
+    let interruptStatus: UInt32
+    let openOutputMask: UInt32
+    let shortOutputMask: UInt32
+
+    var id: UInt32 { led.rawValue }
+    var isPresent: Bool { (flags & (1 << 0)) != 0 }
+    var isEnabled: Bool { (flags & (1 << 1)) != 0 }
+    var faultStateValid: Bool { (flags & (1 << 2)) != 0 }
+
+    var rgbText: String {
+        "\(red)/\(green)/\(blue)"
+    }
+
+    var color: ColorComponents {
+        ColorComponents(red: red, green: green, blue: blue)
+    }
+}
+
+struct ColorComponents: Equatable, Sendable {
+    let red: UInt32
+    let green: UInt32
+    let blue: UInt32
+}
+
+struct TimeCardI2CStatusSnapshot: Equatable, Sendable {
+    let flags: UInt32
+    let offset: UInt64
+    let control: UInt32
+    let status: UInt32
+    let interruptStatus: UInt32
+    let interruptEnable: UInt32
+    let txFifoOccupancy: UInt32
+    let rxFifoOccupancy: UInt32
+    let knownDeviceMask: UInt32
+
+    var isPresent: Bool { (flags & (1 << 0)) != 0 }
+    var isEnabled: Bool { (flags & (1 << 1)) != 0 }
+    var isBusBusy: Bool { (flags & (1 << 2)) != 0 }
+    var isReceiveEmpty: Bool { (flags & (1 << 3)) != 0 }
+    var isTransmitEmpty: Bool { (flags & (1 << 4)) != 0 }
+
+    var knownDeviceNames: [String] {
+        var names: [String] = []
+        if (knownDeviceMask & (1 << 0)) != 0 { names.append("Mux") }
+        if (knownDeviceMask & (1 << 1)) != 0 { names.append("LED") }
+        return names
+    }
+}
+
+struct TimeCardI2CMuxSnapshot: Equatable, Sendable {
+    let isPresent: Bool
+    let channelMask: UInt32
+    let controllerStatus: UInt32
+    let interruptStatus: UInt32
+}
+
 enum TimeCardSMACatalog {
     static let inputFunctions: [TimeCardSMAFunction] = [
         .init(id: 0x0000, label: "10 MHz"),
@@ -541,6 +628,38 @@ enum TimeCardClient {
             && MemoryLayout<TimeCardSMARaw>.offset(of: \.inputMap) == 20
             && MemoryLayout<TimeCardSMARaw>.offset(of: \.outputMap) == 24
             && MemoryLayout<TimeCardSMARaw>.offset(of: \.reserved) == 28
+            && MemoryLayout<TimeCardLEDRaw>.size == 48
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.size) == 0
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.led) == 4
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.flags) == 8
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.red) == 12
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.green) == 16
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.blue) == 20
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.globalCurrent) == 24
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.muxChannelMask) == 28
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.controllerStatus) == 32
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.interruptStatus) == 36
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.openOutputMask) == 40
+            && MemoryLayout<TimeCardLEDRaw>.offset(of: \.shortOutputMask) == 44
+            && MemoryLayout<TimeCardI2CStatusRaw>.size == 48
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.size) == 0
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.flags) == 4
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.offset) == 8
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.control) == 16
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.status) == 20
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.interruptStatus) == 24
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.interruptEnable) == 28
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.txFifoOccupancy) == 32
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.rxFifoOccupancy) == 36
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.knownDeviceMask) == 40
+            && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.reserved) == 44
+            && MemoryLayout<TimeCardI2CMuxRaw>.size == 32
+            && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.size) == 0
+            && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.present) == 4
+            && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.channelMask) == 8
+            && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.controllerStatus) == 12
+            && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.interruptStatus) == 16
+            && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.reserved0) == 20
             && MemoryLayout<TimeCardSensorReadingRaw>.size == 48
             && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.size) == 0
             && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.type) == 4
@@ -753,6 +872,51 @@ enum TimeCardClient {
         return raw.route
     }
 
+    static func queryI2CStatus(
+        for descriptor: TimeCardServiceDescriptor
+    ) throws -> TimeCardI2CStatusSnapshot {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var raw = TimeCardI2CStatusRaw()
+        raw.size = UInt32(MemoryLayout<TimeCardI2CStatusRaw>.size)
+        try callOutput(connection: connection, selector: 8, output: &raw)
+        return raw.snapshot
+    }
+
+    static func queryI2CMux(
+        for descriptor: TimeCardServiceDescriptor
+    ) throws -> TimeCardI2CMuxSnapshot {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var raw = TimeCardI2CMuxRaw()
+        raw.size = UInt32(MemoryLayout<TimeCardI2CMuxRaw>.size)
+        try callOutput(connection: connection, selector: 11, output: &raw)
+        return raw.snapshot
+    }
+
+    static func queryLEDStates(
+        for descriptor: TimeCardServiceDescriptor
+    ) throws -> [TimeCardLEDState] {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        return try TimeCardLEDKind.allCases.map { led in
+            var raw = TimeCardLEDRaw(
+                size: UInt32(MemoryLayout<TimeCardLEDRaw>.size),
+                led: led.rawValue
+            )
+            do {
+                try callInOut(connection: connection, selector: 6, value: &raw)
+            } catch TimeCardClientError.methodFailed(let selector, let result)
+                where selector == 6 && result == kIOReturnUnsupported {
+                raw.flags = 0
+            }
+            return raw.state
+        }
+    }
+
     static func querySensors(
         for descriptor: TimeCardServiceDescriptor
     ) throws -> TimeCardSensorSnapshot {
@@ -929,6 +1093,85 @@ private struct TimeCardSMARaw {
             flags: flags,
             inputMap: inputMap,
             outputMap: outputMap
+        )
+    }
+}
+
+private struct TimeCardLEDRaw {
+    var size: UInt32 = 0
+    var led: UInt32 = 0
+    var flags: UInt32 = 0
+    var red: UInt32 = 0
+    var green: UInt32 = 0
+    var blue: UInt32 = 0
+    var globalCurrent: UInt32 = 0
+    var muxChannelMask: UInt32 = 0
+    var controllerStatus: UInt32 = 0
+    var interruptStatus: UInt32 = 0
+    var openOutputMask: UInt32 = 0
+    var shortOutputMask: UInt32 = 0
+
+    var state: TimeCardLEDState {
+        TimeCardLEDState(
+            led: TimeCardLEDKind(rawValue: led) ?? .gnss1,
+            flags: flags,
+            red: red,
+            green: green,
+            blue: blue,
+            globalCurrent: globalCurrent,
+            muxChannelMask: muxChannelMask,
+            controllerStatus: controllerStatus,
+            interruptStatus: interruptStatus,
+            openOutputMask: openOutputMask,
+            shortOutputMask: shortOutputMask
+        )
+    }
+}
+
+private struct TimeCardI2CStatusRaw {
+    var size: UInt32 = 0
+    var flags: UInt32 = 0
+    var offset: UInt64 = 0
+    var control: UInt32 = 0
+    var status: UInt32 = 0
+    var interruptStatus: UInt32 = 0
+    var interruptEnable: UInt32 = 0
+    var txFifoOccupancy: UInt32 = 0
+    var rxFifoOccupancy: UInt32 = 0
+    var knownDeviceMask: UInt32 = 0
+    var reserved: UInt32 = 0
+
+    var snapshot: TimeCardI2CStatusSnapshot {
+        TimeCardI2CStatusSnapshot(
+            flags: flags,
+            offset: offset,
+            control: control,
+            status: status,
+            interruptStatus: interruptStatus,
+            interruptEnable: interruptEnable,
+            txFifoOccupancy: txFifoOccupancy,
+            rxFifoOccupancy: rxFifoOccupancy,
+            knownDeviceMask: knownDeviceMask
+        )
+    }
+}
+
+private struct TimeCardI2CMuxRaw {
+    var size: UInt32 = 0
+    var present: UInt32 = 0
+    var channelMask: UInt32 = 0
+    var controllerStatus: UInt32 = 0
+    var interruptStatus: UInt32 = 0
+    var reserved0: UInt32 = 0
+    var reserved1: UInt32 = 0
+    var reserved2: UInt32 = 0
+
+    var snapshot: TimeCardI2CMuxSnapshot {
+        TimeCardI2CMuxSnapshot(
+            isPresent: present != 0,
+            channelMask: channelMask,
+            controllerStatus: controllerStatus,
+            interruptStatus: interruptStatus
         )
     }
 }

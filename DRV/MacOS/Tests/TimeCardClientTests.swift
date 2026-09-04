@@ -67,6 +67,52 @@ enum TimeCardClientTests {
             "Clock read", "Clock set", "Cross timestamp", "ToD",
         ])
 
+        let i2c = TimeCardI2CStatusSnapshot(
+            flags: (1 << 0) | (1 << 1) | (1 << 3) | (1 << 4),
+            offset: 0x0015_0000,
+            control: 0x01,
+            status: 0xc0,
+            interruptStatus: 0xd0,
+            interruptEnable: 0x28,
+            txFifoOccupancy: 0,
+            rxFifoOccupancy: 0,
+            knownDeviceMask: 0x03
+        )
+        precondition(i2c.isPresent)
+        precondition(i2c.isEnabled)
+        precondition(!i2c.isBusBusy)
+        precondition(i2c.isReceiveEmpty)
+        precondition(i2c.isTransmitEmpty)
+        precondition(i2c.knownDeviceNames == ["Mux", "LED"])
+
+        let mux = TimeCardI2CMuxSnapshot(
+            isPresent: true,
+            channelMask: 0x02,
+            controllerStatus: 0xc0,
+            interruptStatus: 0xd0
+        )
+        precondition(mux.isPresent)
+        precondition(mux.channelMask == 0x02)
+
+        let led = TimeCardLEDState(
+            led: .sma1,
+            flags: (1 << 0) | (1 << 1),
+            red: 0,
+            green: 165,
+            blue: 30,
+            globalCurrent: 96,
+            muxChannelMask: 0x02,
+            controllerStatus: 0xc0,
+            interruptStatus: 0xd0,
+            openOutputMask: 0,
+            shortOutputMask: 0
+        )
+        precondition(led.led.label == "SMA 1")
+        precondition(led.isPresent)
+        precondition(led.isEnabled)
+        precondition(!led.faultStateValid)
+        precondition(led.rgbText == "0/165/30")
+
         let art = TimeCardDeviceSnapshot(
             service: TimeCardServiceDescriptor(id: 0x5678),
             abiVersion: 7,

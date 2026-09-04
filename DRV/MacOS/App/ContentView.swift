@@ -78,7 +78,7 @@ struct ContentView: View {
                 case .sensors:
                     SensorDashboardView()
                 case .i2c:
-                    CapabilityWorkspaceView(workspace: .i2c)
+                    I2CAndLEDView()
                 case .telemetry:
                     TelemetryStudioView()
                 case .operations:
@@ -660,6 +660,280 @@ private struct GNSSWorkspaceView: View {
             return "Leap info valid, next \(Int32(bitPattern: snapshot.leap)) s."
         }
         return "Leap information is not marked valid."
+    }
+}
+
+private struct I2CAndLEDView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlCenterHeader()
+
+                if let snapshot = monitor.snapshot {
+                    HStack(spacing: 14) {
+                        MetricCard(
+                            title: "I2C controller",
+                            value: i2cControllerValue,
+                            detail: i2cControllerDetail,
+                            systemImage: "point.3.connected.trianglepath.dotted",
+                            accent: monitor.i2cStatus?.isEnabled == true
+                                ? .green : .orange
+                        )
+                        MetricCard(
+                            title: "Mux branch",
+                            value: muxValue,
+                            detail: muxDetail,
+                            systemImage: "switch.2",
+                            accent: monitor.i2cMux?.isPresent == true
+                                ? .cyan : .secondary
+                        )
+                        MetricCard(
+                            title: "LED readback",
+                            value: ledValue,
+                            detail: "\(presentLEDCount) fitted LED(s)",
+                            systemImage: "lightbulb.led",
+                            accent: presentLEDCount > 0 ? .yellow : .secondary
+                        )
+                    }
+
+                    ControlCenterPanel(
+                        title: "I2C controller registers",
+                        subtitle: "Read-only DriverKit ABI snapshot"
+                    ) {
+                        if let status = monitor.i2cStatus {
+                            InfoRow(
+                                label: "Capability",
+                                value: snapshot.capabilityNames.contains("I2C")
+                                    ? "Available" : "Not present"
+                            )
+                            InfoRow(
+                                label: "BAR offset",
+                                value: TimeCardFormatting.hex(status.offset)
+                            )
+                            InfoRow(
+                                label: "Flags",
+                                value: i2cFlagSummary(status)
+                            )
+                            InfoRow(
+                                label: "Control",
+                                value: TimeCardFormatting.byteHex(status.control)
+                            )
+                            InfoRow(
+                                label: "Status",
+                                value: TimeCardFormatting.byteHex(status.status)
+                            )
+                            InfoRow(
+                                label: "Interrupts",
+                                value: String(
+                                    format: "status 0x%02x, enable 0x%02x",
+                                    status.interruptStatus & 0xff,
+                                    status.interruptEnable & 0xff
+                                )
+                            )
+                            InfoRow(
+                                label: "FIFO",
+                                value: "TX \(status.txFifoOccupancy), RX \(status.rxFifoOccupancy)"
+                            )
+                            InfoRow(
+                                label: "Known devices",
+                                value: status.knownDeviceNames.isEmpty
+                                    ? "None" : status.knownDeviceNames.joined(separator: ", ")
+                            )
+                        } else {
+                            ContentUnavailableView(
+                                "I2C status unavailable",
+                                systemImage: "exclamationmark.triangle",
+                                description: Text(monitor.i2cMessage)
+                            )
+                        }
+                    }
+
+                    ControlCenterPanel(
+                        title: "LED controller readback",
+                        subtitle: "GNSS and SMA LED states from the I2C LED driver"
+                    ) {
+                        if monitor.ledStates.isEmpty {
+                            ContentUnavailableView(
+                                "No LED states sampled",
+                                systemImage: "lightbulb.slash",
+                                description: Text(monitor.i2cMessage)
+                            )
+                        } else {
+                            LazyVGrid(
+                                columns: [
+                                    GridItem(.adaptive(minimum: 210), spacing: 12)
+                                ],
+                                spacing: 12
+                            ) {
+                                ForEach(monitor.ledStates) { led in
+                                    LEDReadbackCard(led: led)
+                                }
+                            }
+                        }
+                    }
+
+                    ControlCenterPanel(
+                        title: "Feature coverage",
+                        subtitle: "Windows I2C and LED workspace parity"
+                    ) {
+                        VStack(spacing: 10) {
+                            FeatureRow(
+                                name: "AXI IIC health",
+                                state: monitor.i2cStatus == nil ? "Unavailable" : "Live",
+                                note: "Control, status, interrupt, FIFO, and known-device fields are read through ABI v5."
+                            )
+                            FeatureRow(
+                                name: "Mux query",
+                                state: monitor.i2cMux?.isPresent == true
+                                    ? "Live" : "Unavailable",
+                                note: "Current mux channel mask is read without changing the active branch."
+                            )
+                            FeatureRow(
+                                name: "RGB subsystem LEDs",
+                                state: presentLEDCount > 0 ? "Live" : "Unavailable",
+                                note: "GNSS and SMA LED color/current readback is live. App-side writes stay CLI-only for now."
+                            )
+                            FeatureRow(
+                                name: "Known-device scan",
+                                state: monitor.i2cStatus == nil ? "Unavailable" : "Partial",
+                                note: "Known mux and LED devices are shown. Full address scan remains CLI-only in this slice."
+                            )
+                            FeatureRow(
+                                name: "Arbitrary I2C reads",
+                                state: "Backend pending",
+                                note: "The driver has bounded read support, but the app still needs an operator-safe form."
+                            )
+                        }
+                    }
+
+                    if !monitor.i2cMessage.isEmpty {
+                        Text(monitor.i2cMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                } else {
+                    MonitorUnavailableView()
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    private var i2cControllerValue: String {
+        guard let status = monitor.i2cStatus else { return "Unavailable" }
+        if status.isBusBusy { return "Bus busy" }
+        if status.isEnabled { return "Enabled" }
+        return status.isPresent ? "Present" : "Not present"
+    }
+
+    private var i2cControllerDetail: String {
+        guard let status = monitor.i2cStatus else {
+            return "Controller status has not sampled yet."
+        }
+        return "status \(TimeCardFormatting.byteHex(status.status)), FIFO TX \(status.txFifoOccupancy) RX \(status.rxFifoOccupancy)"
+    }
+
+    private var muxValue: String {
+        guard let mux = monitor.i2cMux else { return "Unavailable" }
+        return mux.isPresent
+            ? TimeCardFormatting.byteHex(mux.channelMask)
+            : "Not present"
+    }
+
+    private var muxDetail: String {
+        guard let mux = monitor.i2cMux else {
+            return "Mux query has not sampled yet."
+        }
+        return String(
+            format: "controller 0x%02x, interrupts 0x%02x",
+            mux.controllerStatus & 0xff,
+            mux.interruptStatus & 0xff
+        )
+    }
+
+    private var ledValue: String {
+        guard !monitor.ledStates.isEmpty else { return "Unavailable" }
+        return "\(presentLEDCount)/\(monitor.ledStates.count) present"
+    }
+
+    private var presentLEDCount: Int {
+        monitor.ledStates.filter(\.isPresent).count
+    }
+
+    private func i2cFlagSummary(_ status: TimeCardI2CStatusSnapshot) -> String {
+        var flags: [String] = []
+        flags.append(status.isPresent ? "present" : "not present")
+        if status.isEnabled { flags.append("enabled") }
+        if status.isBusBusy { flags.append("bus busy") }
+        if status.isReceiveEmpty { flags.append("RX empty") }
+        if status.isTransmitEmpty { flags.append("TX empty") }
+        return flags.joined(separator: ", ")
+    }
+}
+
+private struct LEDReadbackCard: View {
+    let led: TimeCardLEDState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Circle()
+                    .fill(displayColor)
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 1))
+                    .shadow(color: displayColor.opacity(0.45), radius: 6)
+                Text(led.led.label)
+                    .font(.headline)
+                Spacer()
+                StatusPill(
+                    led.isPresent ? "Present" : "Not fitted",
+                    led.isPresent ? .green : .secondary
+                )
+            }
+
+            InfoRow(label: "RGB", value: led.rgbText)
+            InfoRow(label: "Current", value: "\(led.globalCurrent)")
+            InfoRow(
+                label: "Mux",
+                value: TimeCardFormatting.byteHex(led.muxChannelMask)
+            )
+            InfoRow(
+                label: "Controller",
+                value: String(
+                    format: "0x%02x / 0x%02x",
+                    led.controllerStatus & 0xff,
+                    led.interruptStatus & 0xff
+                )
+            )
+            if led.faultStateValid {
+                InfoRow(
+                    label: "Faults",
+                    value: String(
+                        format: "open 0x%05x, short 0x%05x",
+                        led.openOutputMask & 0x3ffff,
+                        led.shortOutputMask & 0x3ffff
+                    )
+                )
+            }
+        }
+        .padding(14)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(displayColor.opacity(led.isPresent ? 0.25 : 0.08), lineWidth: 1)
+        )
+    }
+
+    private var displayColor: Color {
+        guard led.isPresent else { return .secondary.opacity(0.4) }
+        return Color(
+            red: Double(min(led.color.red, 255)) / 255.0,
+            green: Double(min(led.color.green, 255)) / 255.0,
+            blue: Double(min(led.color.blue, 255)) / 255.0
+        )
     }
 }
 
@@ -2601,6 +2875,10 @@ private enum TimeCardFormatting {
 
     static func validHex(_ value: UInt32, valid: Bool) -> String {
         valid ? String(format: "0x%08x", value) : "Unavailable"
+    }
+
+    static func byteHex(_ value: UInt32) -> String {
+        String(format: "0x%02x", value & 0xff)
     }
 
     static func hex(_ value: UInt64) -> String {

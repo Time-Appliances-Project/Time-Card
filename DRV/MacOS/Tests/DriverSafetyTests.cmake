@@ -149,6 +149,15 @@ foreach(required_control_center_sma IN ITEMS
         "selector: 5"
         "querySensors"
         "TimeCardSensorSnapshot"
+        "queryI2CStatus"
+        "queryI2CMux"
+        "queryLEDStates"
+        "TimeCardI2CStatusSnapshot"
+        "TimeCardI2CMuxSnapshot"
+        "TimeCardLEDState"
+        "selector: 6"
+        "selector: 8"
+        "selector: 11"
         "todTelemetryAvailable"
         "gnssTelemetryAvailable"
         "gnssFixName"
@@ -168,8 +177,11 @@ endif()
 file(READ "${control_center_view_source}" control_center_view)
 foreach(required_control_center_view IN ITEMS
         "GNSSWorkspaceView"
+        "I2CAndLEDView"
         "UTC and leap summary"
-        "GNSS fix and satellite counts")
+        "GNSS fix and satellite counts"
+        "I2C controller registers"
+        "LED controller readback")
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)
         message(FATAL_ERROR
