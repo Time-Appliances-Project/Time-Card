@@ -50,6 +50,7 @@ the bounded ABI v8 read path.
 - Native SwiftUI subsystem topology diagram for Windows parity
 - FPGA core readiness matrix with support-bundle export
 - Receiver validation checklist for the Windows GNSS workflow
+- Windows-style LED policy preset cards with guarded verified readback
 - Continuous bounded polling capture in the SwiftUI app and CLI, with live
   app progress, raw capture save, and support-bundle export
 - Mixed UBX, NMEA, and RTCM3 receiver stream timeline

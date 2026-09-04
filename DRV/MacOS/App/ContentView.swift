@@ -4631,35 +4631,25 @@ private struct I2CAndLEDView: View {
 
                             Divider()
 
-                            HStack(spacing: 10) {
-                                Button("Apply GNSS Policy") {
+                            LEDPolicyPresetGrid(
+                                snapshot: monitor.snapshot,
+                                smaRoutes: monitor.smaRoutes,
+                                ledActionDisabled: ledActionDisabled,
+                                smaPolicyDisabled: ledActionDisabled ||
+                                    monitor.snapshot?.capabilityNames.contains("SMA") != true,
+                                applyGNSS: {
                                     i2cFormMessage = ""
                                     monitor.applyGNSSLEDPolicy()
-                                }
-                                .buttonStyle(.bordered)
-                                .disabled(ledActionDisabled)
-
-                                Button("Apply SMA Policy") {
+                                },
+                                applySMA: {
                                     i2cFormMessage = ""
                                     monitor.applySMALEDPolicy()
-                                }
-                                .buttonStyle(.bordered)
-                                .disabled(ledActionDisabled)
-
-                                Button("Apply All LED Policy") {
+                                },
+                                applyAll: {
                                     i2cFormMessage = ""
                                     monitor.applyAllLEDPolicy()
                                 }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(ledActionDisabled)
-
-                                Text(
-                                    "Policies match the CLI defaults for GNSS "
-                                        + "status and SMA direction colors."
-                                )
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            }
+                            )
                         }
                     }
 
@@ -4922,6 +4912,220 @@ private struct I2CAndLEDView: View {
             throw I2CFormError.message("\(field) must be between 0 and 255.")
         }
         return value
+    }
+}
+
+private struct LEDPolicyPresetGrid: View {
+    let snapshot: TimeCardDeviceSnapshot?
+    let smaRoutes: [TimeCardSMARoute]
+    let ledActionDisabled: Bool
+    let smaPolicyDisabled: Bool
+    let applyGNSS: () -> Void
+    let applySMA: () -> Void
+    let applyAll: () -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 240), spacing: 12)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Windows-style LED policy presets", systemImage: "wand.and.stars")
+                    .font(.headline)
+                Spacer()
+                StatusPill(
+                    snapshot?.capabilityNames.contains("LEDs") == true
+                        ? "LED ABI live" : "LED ABI gated",
+                    snapshot?.capabilityNames.contains("LEDs") == true
+                        ? .green : .secondary
+                )
+            }
+
+            LazyVGrid(columns: columns, spacing: 12) {
+                LEDPolicyPresetCard(
+                    preset: .gnss(snapshot: snapshot),
+                    disabled: ledActionDisabled,
+                    action: applyGNSS
+                )
+                LEDPolicyPresetCard(
+                    preset: .sma(routes: smaRoutes),
+                    disabled: smaPolicyDisabled,
+                    action: applySMA
+                )
+                LEDPolicyPresetCard(
+                    preset: .all(snapshot: snapshot, routes: smaRoutes),
+                    disabled: ledActionDisabled || smaPolicyDisabled,
+                    action: applyAll
+                )
+            }
+
+            Text(
+                "Each preset writes only through the existing verified LED "
+                    + "selector and then refreshes readback. SMA presets stay "
+                    + "disabled until the active board advertises the SMA route ABI."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+        }
+    }
+}
+
+private struct LEDPolicyPresetCard: View {
+    let preset: LEDPolicyPreset
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(preset.title)
+                    .font(.headline)
+                Spacer()
+                StatusPill(disabled ? "Gated" : preset.state, disabled ? .secondary : preset.accent)
+            }
+
+            Text(preset.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            HStack(spacing: 8) {
+                ForEach(preset.swatches) { swatch in
+                    VStack(spacing: 5) {
+                        Circle()
+                            .fill(swatch.color)
+                            .frame(width: 18, height: 18)
+                            .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 1))
+                            .shadow(color: swatch.color.opacity(0.35), radius: 4)
+                        Text(swatch.label)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+
+            if preset.prominent {
+                Button(preset.buttonTitle) {
+                    action()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(disabled)
+            } else {
+                Button(preset.buttonTitle) {
+                    action()
+                }
+                .buttonStyle(.bordered)
+                .disabled(disabled)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            preset.accent.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(preset.accent.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct LEDPolicyPreset: Identifiable {
+    let id: String
+    let title: String
+    let state: String
+    let detail: String
+    let buttonTitle: String
+    let swatches: [LEDPolicySwatch]
+    let accent: Color
+    let prominent: Bool
+
+    static func gnss(snapshot: TimeCardDeviceSnapshot?) -> Self {
+        let state: String
+        let detail: String
+        if snapshot?.gnssTelemetryAvailable == true {
+            state = "Live"
+            detail = "GNSS LEDs follow decoded receiver fix and satellite-valid state."
+        } else if snapshot?.clockInSync == true {
+            state = "Fallback"
+            detail = "GNSS summary is absent, so the preset uses clock sync as the health signal."
+        } else {
+            state = "Ready"
+            detail = "GNSS summary is absent; preset applies amber waiting colors until live fix evidence arrives."
+        }
+
+        return LEDPolicyPreset(
+            id: "gnss",
+            title: "GNSS health",
+            state: state,
+            detail: detail,
+            buttonTitle: "Apply GNSS Policy",
+            swatches: [
+                LEDPolicySwatch("Fix", .green),
+                LEDPolicySwatch("Search", .orange),
+                LEDPolicySwatch("Fault", .red),
+            ],
+            accent: .yellow,
+            prominent: false
+        )
+    }
+
+    static func sma(routes: [TimeCardSMARoute]) -> Self {
+        let presentRoutes = routes.filter(\.isPresent)
+        let detail = presentRoutes.isEmpty
+            ? "SMA routes have not been sampled yet; run refresh or self-test first."
+            : "\(presentRoutes.count) SMA route(s) will map input blue, output green, disabled dim amber."
+        return LEDPolicyPreset(
+            id: "sma",
+            title: "SMA direction",
+            state: presentRoutes.isEmpty ? "Ready" : "Live",
+            detail: detail,
+            buttonTitle: "Apply SMA Policy",
+            swatches: [
+                LEDPolicySwatch("Input", .blue),
+                LEDPolicySwatch("Output", .green),
+                LEDPolicySwatch("Off", .orange.opacity(0.45)),
+            ],
+            accent: .orange,
+            prominent: false
+        )
+    }
+
+    static func all(
+        snapshot: TimeCardDeviceSnapshot?,
+        routes: [TimeCardSMARoute]
+    ) -> Self {
+        let routeCount = routes.filter(\.isPresent).count
+        return LEDPolicyPreset(
+            id: "all",
+            title: "Full front panel",
+            state: routeCount == 0 ? "Ready" : "Live",
+            detail: "Applies GNSS health plus SMA direction colors in one verified pass.",
+            buttonTitle: "Apply All LED Policy",
+            swatches: [
+                LEDPolicySwatch("GNSS", snapshot?.clockInSync == true ? .green : .orange),
+                LEDPolicySwatch("SMA", routeCount == 0 ? .secondary : .blue),
+                LEDPolicySwatch("Readback", .mint),
+            ],
+            accent: .mint,
+            prominent: true
+        )
+    }
+}
+
+private struct LEDPolicySwatch: Identifiable {
+    let label: String
+    let color: Color
+
+    var id: String { label }
+
+    init(_ label: String, _ color: Color) {
+        self.label = label
+        self.color = color
     }
 }
 
