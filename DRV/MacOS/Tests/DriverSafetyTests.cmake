@@ -229,7 +229,10 @@ foreach(required_control_center_view IN ITEMS
         "telemetryCSVText"
         "UARTWorkspaceView"
         "macOS serial ports"
-        "Refresh Ports")
+        "Refresh Ports"
+        "NMEA decoder lab"
+        "NMEASentence"
+        "Checksum OK")
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)
         message(FATAL_ERROR

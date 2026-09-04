@@ -665,6 +665,8 @@ private struct GNSSWorkspaceView: View {
 
 private struct UARTWorkspaceView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
+    @State private var nmeaText = ""
+    @State private var nmeaMessage = ""
 
     var body: some View {
         ScrollView {
@@ -733,8 +735,8 @@ private struct UARTWorkspaceView: View {
                         )
                         FeatureRow(
                             name: "NMEA capture and export",
-                            state: "Partial",
-                            note: "Telemetry export is live; continuous UART capture needs stream samples."
+                            state: decodedNMEASentences.isEmpty ? "Partial" : "Live",
+                            note: "Paste or load receiver sentences to validate checksum and decode common GNSS messages."
                         )
                         FeatureRow(
                             name: "u-blox UBX receiver traffic",
@@ -778,6 +780,71 @@ private struct UARTWorkspaceView: View {
                         }
                     }
                 }
+
+                ControlCenterPanel(
+                    title: "NMEA decoder lab",
+                    subtitle: "Paste GNSS receiver sentences and validate checksums"
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextEditor(text: $nmeaText)
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(minHeight: 130)
+                            .padding(6)
+                            .background(
+                                Color.secondary.opacity(0.07),
+                                in: RoundedRectangle(cornerRadius: 10)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                            )
+
+                        HStack {
+                            Button("Load Pasteboard") {
+                                nmeaText = NSPasteboard.general.string(
+                                    forType: .string
+                                ) ?? ""
+                                nmeaMessage = "Loaded pasteboard text."
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Clear") {
+                                nmeaText = ""
+                                nmeaMessage = "NMEA input cleared."
+                            }
+                            .buttonStyle(.bordered)
+
+                            Spacer()
+
+                            Text(nmeaDecodeSummary)
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if !nmeaMessage.isEmpty {
+                            Text(nmeaMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
+                        if decodedNMEASentences.isEmpty {
+                            Text(
+                                "Paste lines such as $GPGGA, $GPRMC, $GPGSV, "
+                                    + "or $GPZDA. The app verifies checksums "
+                                    + "when a *hh suffix is present."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        } else {
+                            VStack(spacing: 10) {
+                                ForEach(decodedNMEASentences) { sentence in
+                                    NMEASentenceRow(sentence: sentence)
+                                }
+                            }
+                        }
+                    }
+                }
             }
             .padding(24)
         }
@@ -799,6 +866,21 @@ private struct UARTWorkspaceView: View {
         case "Waiting": .orange
         default: .secondary
         }
+    }
+
+    private var decodedNMEASentences: [NMEASentence] {
+        nmeaText.split(whereSeparator: \.isNewline)
+            .compactMap { NMEASentence.parse(String($0)) }
+    }
+
+    private var nmeaDecodeSummary: String {
+        let sentences = decodedNMEASentences
+        guard !sentences.isEmpty else {
+            return "No decoded sentences"
+        }
+        let valid = sentences.filter(\.checksumValid).count
+        let unchecked = sentences.filter { $0.expectedChecksum == nil }.count
+        return "\(sentences.count) decoded, \(valid) checksum OK, \(unchecked) unchecked"
     }
 }
 
@@ -824,6 +906,237 @@ private struct SerialPortCard: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.teal.opacity(0.18), lineWidth: 1)
         )
+    }
+}
+
+private struct NMEASentence: Identifiable, Equatable {
+    let raw: String
+    let talker: String
+    let formatter: String
+    let fields: [String]
+    let expectedChecksum: UInt8?
+    let computedChecksum: UInt8
+    let checksumValid: Bool
+
+    var id: String {
+        raw
+    }
+
+    var label: String {
+        talker + formatter
+    }
+
+    var summary: String {
+        switch formatter {
+        case "GGA":
+            return ggaSummary
+        case "RMC":
+            return rmcSummary
+        case "GSA":
+            return gsaSummary
+        case "GSV":
+            return gsvSummary
+        case "ZDA":
+            return zdaSummary
+        default:
+            return "\(label) with \(fields.count) field(s)."
+        }
+    }
+
+    static func parse(_ line: String) -> NMEASentence? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("$") else { return nil }
+        let withoutDollar = trimmed.dropFirst()
+        let parts = withoutDollar.split(
+            separator: "*",
+            maxSplits: 1,
+            omittingEmptySubsequences: false
+        )
+        guard let body = parts.first, body.count >= 5 else {
+            return nil
+        }
+
+        let fieldParts = body.split(
+            separator: ",",
+            omittingEmptySubsequences: false
+        ).map(String.init)
+        guard let sentenceType = fieldParts.first,
+              sentenceType.count >= 5 else {
+            return nil
+        }
+
+        let typeIndex = sentenceType.index(
+            sentenceType.startIndex,
+            offsetBy: 2
+        )
+        let talker = String(sentenceType[..<typeIndex])
+        let formatter = String(sentenceType[typeIndex...])
+        let fields = Array(fieldParts.dropFirst())
+        let computed = checksum(for: String(body))
+        let expected = parts.count == 2 ? UInt8(parts[1].prefix(2), radix: 16) : nil
+
+        return NMEASentence(
+            raw: trimmed,
+            talker: talker,
+            formatter: formatter,
+            fields: fields,
+            expectedChecksum: expected,
+            computedChecksum: computed,
+            checksumValid: expected.map { $0 == computed } ?? false
+        )
+    }
+
+    private static func checksum(for body: String) -> UInt8 {
+        body.utf8.reduce(UInt8(0)) { partial, byte in
+            partial ^ byte
+        }
+    }
+
+    private var ggaSummary: String {
+        let time = field(0, fallback: "unknown time")
+        let latitude = coordinate(value: field(1), hemisphere: field(2))
+        let longitude = coordinate(value: field(3), hemisphere: field(4))
+        let quality = ggaQuality(field(5))
+        let satellites = field(6, fallback: "?")
+        let altitude = field(8, fallback: "?") + " " + field(9, fallback: "m")
+        return "Fix \(quality), \(satellites) satellites, \(latitude), \(longitude), altitude \(altitude), time \(time)."
+    }
+
+    private var rmcSummary: String {
+        let time = field(0, fallback: "unknown time")
+        let status = field(1) == "A" ? "active" : "void"
+        let latitude = coordinate(value: field(2), hemisphere: field(3))
+        let longitude = coordinate(value: field(4), hemisphere: field(5))
+        let speed = field(6, fallback: "?")
+        let date = field(8, fallback: "unknown date")
+        return "Recommended minimum \(status), \(latitude), \(longitude), \(speed) knots, date \(date), time \(time)."
+    }
+
+    private var gsaSummary: String {
+        let mode = field(0, fallback: "?")
+        let fixType = gsaFixType(field(1))
+        let pdop = field(14, fallback: "?")
+        let hdop = field(15, fallback: "?")
+        let vdop = field(16, fallback: "?")
+        return "DOP mode \(mode), fix \(fixType), PDOP \(pdop), HDOP \(hdop), VDOP \(vdop)."
+    }
+
+    private var gsvSummary: String {
+        let messageNumber = field(1, fallback: "?")
+        let messageCount = field(0, fallback: "?")
+        let satellites = field(2, fallback: "?")
+        return "Satellites in view \(satellites), message \(messageNumber) of \(messageCount)."
+    }
+
+    private var zdaSummary: String {
+        let time = field(0, fallback: "unknown time")
+        let day = field(1, fallback: "??")
+        let month = field(2, fallback: "??")
+        let year = field(3, fallback: "????")
+        return "UTC date \(year)-\(month)-\(day), time \(time)."
+    }
+
+    private func field(_ index: Int) -> String? {
+        guard fields.indices.contains(index),
+              !fields[index].isEmpty else {
+            return nil
+        }
+        return fields[index]
+    }
+
+    private func field(_ index: Int, fallback: String) -> String {
+        field(index) ?? fallback
+    }
+
+    private func coordinate(value: String?, hemisphere: String?) -> String {
+        guard let value,
+              let hemisphere,
+              let numeric = Double(value) else {
+            return "coordinate unavailable"
+        }
+        let degreeDigits = hemisphere == "N" || hemisphere == "S" ? 2 : 3
+        guard value.count > degreeDigits else {
+            return "coordinate unavailable"
+        }
+        let degreeText = String(value.prefix(degreeDigits))
+        guard let degrees = Double(degreeText) else {
+            return "coordinate unavailable"
+        }
+        let minutes = numeric - degrees * 100.0
+        var decimal = degrees + minutes / 60.0
+        if hemisphere == "S" || hemisphere == "W" {
+            decimal *= -1.0
+        }
+        return String(format: "%.6f° %@", decimal, hemisphere)
+    }
+
+    private func ggaQuality(_ code: String?) -> String {
+        switch code {
+        case "0": "invalid"
+        case "1": "GPS"
+        case "2": "DGPS"
+        case "4": "RTK fixed"
+        case "5": "RTK float"
+        case "6": "estimated"
+        default: code ?? "unknown"
+        }
+    }
+
+    private func gsaFixType(_ code: String?) -> String {
+        switch code {
+        case "1": "none"
+        case "2": "2-D"
+        case "3": "3-D"
+        default: code ?? "unknown"
+        }
+    }
+}
+
+private struct NMEASentenceRow: View {
+    let sentence: NMEASentence
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(sentence.label)
+                    .font(.headline)
+                Spacer()
+                StatusPill(checksumText, checksumColor)
+            }
+
+            Text(sentence.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            Text(sentence.raw)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+                .textSelection(.enabled)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var checksumText: String {
+        guard let expected = sentence.expectedChecksum else {
+            return "No checksum"
+        }
+        return expected == sentence.computedChecksum
+            ? "Checksum OK"
+            : String(
+                format: "Expected 0x%02x, got 0x%02x",
+                expected,
+                sentence.computedChecksum
+            )
+    }
+
+    private var checksumColor: Color {
+        guard sentence.expectedChecksum != nil else {
+            return .secondary
+        }
+        return sentence.checksumValid ? .green : .red
     }
 }
 
