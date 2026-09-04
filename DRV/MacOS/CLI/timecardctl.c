@@ -16,6 +16,7 @@
 
 #define TIMECARD_MIN_COMPATIBLE_ABI_VERSION 7u
 #define TIMECARD_UART_ABI_VERSION 8u
+#define TIMECARD_UART_WRITE_ABI_VERSION 9u
 
 static void
 print_usage(FILE *stream)
@@ -40,7 +41,8 @@ print_usage(FILE *stream)
             "       timecardctl sensors\n"
             "       timecardctl uart-observe port [timeout-ms]\n"
             "       timecardctl uart-config port baud\n"
-            "       timecardctl uart-read port [max-bytes [timeout-ms]]\n");
+            "       timecardctl uart-read port [max-bytes [timeout-ms]]\n"
+            "       timecardctl uart-write-hex port hex-string [timeout-ms]\n");
 }
 
 static io_connect_t
@@ -419,6 +421,66 @@ parse_uart_port(const char *text)
     return (uint32_t)port;
 }
 
+static int
+hex_value(char character)
+{
+    if (character >= '0' && character <= '9')
+        return character - '0';
+    if (character >= 'a' && character <= 'f')
+        return character - 'a' + 10;
+    if (character >= 'A' && character <= 'F')
+        return character - 'A' + 10;
+    return -1;
+}
+
+static uint32_t
+parse_uart_hex_bytes(const char *text, uint8_t *data)
+{
+    uint32_t length = 0;
+    int highNibble = -1;
+
+    for (size_t i = 0; text[i] != '\0'; ++i) {
+        if (text[i] == '0' &&
+            (text[i + 1] == 'x' || text[i + 1] == 'X')) {
+            ++i;
+            continue;
+        }
+        if (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' ||
+            text[i] == ',' || text[i] == ':' || text[i] == '-')
+            continue;
+
+        const int value = hex_value(text[i]);
+        if (value < 0) {
+            fprintf(stderr, "timecardctl: invalid hex byte string: %s\n",
+                    text);
+            exit(2);
+        }
+        if (highNibble < 0) {
+            highNibble = value;
+            continue;
+        }
+        if (length >= TIMECARD_UART_MAX_TRANSFER) {
+            fprintf(stderr,
+                    "timecardctl: UART write length must be 1 through %u "
+                    "bytes\n",
+                    TIMECARD_UART_MAX_TRANSFER);
+            exit(2);
+        }
+        data[length++] = (uint8_t)((highNibble << 4) | value);
+        highNibble = -1;
+    }
+
+    if (highNibble >= 0) {
+        fprintf(stderr, "timecardctl: odd number of hex digits: %s\n", text);
+        exit(2);
+    }
+    if (length == 0) {
+        fprintf(stderr, "timecardctl: UART write requires at least one byte\n");
+        exit(2);
+    }
+    return length;
+}
+
 static void
 print_uart_observation(const TimeCardUARTObserve *observe)
 {
@@ -525,6 +587,34 @@ command_uart_read(io_connect_t connection, int argc, char **argv)
         return 1;
     print_uart_transfer(&transfer);
     return 0;
+}
+
+static int
+command_uart_write_hex(io_connect_t connection, int argc, char **argv)
+{
+    if (argc < 4 || argc > 5)
+        return 2;
+    if (require_driver_abi(connection, TIMECARD_UART_WRITE_ABI_VERSION,
+                           "UART write"))
+        return 1;
+
+    TimeCardUARTTransfer request = {
+        .port = parse_uart_port(argv[2]),
+        .timeoutMilliseconds = argc == 5 ?
+            (uint32_t)parse_ulong(argv[4], "UART timeout") : 100u,
+    };
+    request.length = parse_uart_hex_bytes(argv[3], request.data);
+
+    TimeCardUARTTransfer response = {0};
+    if (call_inout(connection, kTimeCardMethodUARTWrite,
+                   &request, sizeof(request), &response, sizeof(response)))
+        return 1;
+    printf(
+        "UART %u (%s):    wrote %u/%u byte%s, LSR 0x%02x, timeout %u ms\n",
+        response.port, uart_port_name(response.port), response.length,
+        request.length, request.length == 1 ? "" : "s",
+        response.lineStatus & 0xffu, response.timeoutMilliseconds);
+    return response.length == request.length ? 0 : 1;
 }
 
 static int
@@ -1300,6 +1390,8 @@ main(int argc, char **argv)
         status = command_uart_config(connection, argc, argv);
     else if (strcmp(argv[1], "uart-read") == 0)
         status = command_uart_read(connection, argc, argv);
+    else if (strcmp(argv[1], "uart-write-hex") == 0)
+        status = command_uart_write_hex(connection, argc, argv);
     else {
         print_usage(stderr);
         status = 2;

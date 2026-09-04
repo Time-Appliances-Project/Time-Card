@@ -32,13 +32,15 @@ Exit criteria:
 
 Status: partially implemented. SMA route control moved here from milestone 3
 and is implemented in ABI v3. Bounded UART observe/configure/read operations
-for the GNSS, GNSS2, MAC/atomic-clock, and NMEA ports are implemented in ABI v8
+for the GNSS, GNSS2, MAC/atomic-clock, and NMEA ports are implemented in ABI v8.
+Bounded UART writes and safe UBX poll request support are implemented in ABI v9
 and hardware-validated on the classic Meta profile.
 
 - SMA input and output route query/set, with fixed-route fallback for older
   FPGA images
 - GNSS, GNSS2, atomic-clock, and NMEA 16550 UART polling access
-- UART writes and interrupt-backed stream capture
+- Bounded UART writes and guarded UBX poll requests
+- Interrupt-backed stream capture
 - MSI-X interrupt allocation and dispatch
 - PPS and external timestamp events
 - Asynchronous user-client notifications

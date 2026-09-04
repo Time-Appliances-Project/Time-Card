@@ -7,7 +7,7 @@ enum TimeCardClientTests {
     static func main() {
         precondition(
             TimeCardClient.localABILayoutIsValid,
-            "Swift structures must preserve the DriverKit ABI v8 layout"
+            "Swift structures must preserve the DriverKit ABI v9 layout"
         )
 
         let utcStatus: UInt32 = (1 << 8) | (1 << 16) | 18
@@ -15,7 +15,7 @@ enum TimeCardClientTests {
         let satellites: UInt32 = (1 << 16) | (12 << 8) | 15
         let snapshot = TimeCardDeviceSnapshot(
             service: TimeCardServiceDescriptor(id: 0x1234),
-            abiVersion: 8,
+            abiVersion: 9,
             driverVersion: 2,
             vendorID: 0x1d9b,
             deviceID: 0x0400,
@@ -68,6 +68,7 @@ enum TimeCardClientTests {
             "UART",
         ])
         precondition(snapshot.supportsUART)
+        precondition(snapshot.supportsUARTWrite)
 
         let i2c = TimeCardI2CStatusSnapshot(
             flags: (1 << 0) | (1 << 1) | (1 << 3) | (1 << 4),
@@ -129,6 +130,17 @@ enum TimeCardClientTests {
         precondition(uartRead.byteCount == 11)
         precondition(uartRead.lineStatusText == "0x01")
         precondition(uartRead.dataHex.hasPrefix("24 47 50"))
+
+        let uartWrite = TimeCardUARTWriteResult(
+            port: .gnss,
+            timeoutMilliseconds: 100,
+            lineStatus: 0x20,
+            requestedByteCount: 8,
+            byteCount: 8
+        )
+        precondition(uartWrite.complete)
+        precondition(uartWrite.lineStatusText == "0x20")
+        precondition(uartWrite.summary == "GNSS: wrote 8/8 byte(s), LSR 0x20")
 
         let mux = TimeCardI2CMuxSnapshot(
             isPresent: true,

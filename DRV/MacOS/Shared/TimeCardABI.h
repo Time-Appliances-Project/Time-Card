@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define TIMECARD_ABI_VERSION 8u
+#define TIMECARD_ABI_VERSION 9u
 #define TIMECARD_DRIVER_VERSION 0x00000002u
 #define TIMECARD_SERVICE_CLASS "TimeCardDriver"
 #define TIMECARD_DRIVER_BUNDLE_ID "org.opentimeserver.timecard.macos.driver"
@@ -32,6 +32,7 @@ enum TimeCardExternalMethod {
     kTimeCardMethodUARTObserve = 14,
     kTimeCardMethodUARTConfigure = 15,
     kTimeCardMethodUARTRead = 16,
+    kTimeCardMethodUARTWrite = 17,
     kTimeCardMethodCount
 };
 

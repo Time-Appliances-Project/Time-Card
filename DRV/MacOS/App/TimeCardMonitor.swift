@@ -201,6 +201,7 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var serialCaptureInProgress = false
     @Published private(set) var uartObservation: TimeCardUARTObservation?
     @Published private(set) var uartReadResult: TimeCardUARTReadResult?
+    @Published private(set) var uartWriteResult: TimeCardUARTWriteResult?
     @Published private(set) var uartOperationInProgress = false
     @Published private(set) var uartMessage = ""
     @Published private(set) var sessionLog: [TimeCardSessionLogEntry] = []
@@ -509,6 +510,70 @@ final class TimeCardMonitor: ObservableObject {
             case .failure(let error):
                 self.uartMessage =
                     "\(port.label) read failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "UART",
+                    message: self.uartMessage
+                )
+            }
+        }
+    }
+
+    func writeUART(
+        port: TimeCardUARTPort,
+        bytes: [UInt8],
+        label: String = "UART bytes",
+        timeoutMilliseconds: UInt32 = 500
+    ) {
+        guard !uartOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            uartMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.supportsUARTWrite == true else {
+            uartMessage = "Hardware UART write requires DriverKit ABI v9."
+            return
+        }
+
+        uartOperationInProgress = true
+        uartMessage = "Writing \(label) to \(port.label)..."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: uartMessage
+        )
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<TimeCardUARTWriteResult, Error>.success(
+                        try TimeCardClient.writeUART(
+                            for: descriptor,
+                            port: port,
+                            bytes: bytes,
+                            timeoutMilliseconds: timeoutMilliseconds
+                        )
+                    )
+                } catch {
+                    return Result<TimeCardUARTWriteResult, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.uartOperationInProgress = false
+            switch result {
+            case .success(let transfer):
+                self.uartWriteResult = transfer
+                self.uartMessage =
+                    "\(label) \(transfer.complete ? "sent" : "partially sent"): \(transfer.summary)."
+                self.appendSessionLog(
+                    severity: transfer.complete ? .success : .warning,
+                    category: "UART",
+                    message: self.uartMessage
+                )
+            case .failure(let error):
+                self.uartMessage =
+                    "\(label) write failed: \(error.localizedDescription)"
                 self.appendSessionLog(
                     severity: .error,
                     category: "UART",
@@ -1239,6 +1304,7 @@ final class TimeCardMonitor: ObservableObject {
                 uartMessage = "Hardware UART is advertised but no observation was returned."
             } else {
                 uartReadResult = nil
+                uartWriteResult = nil
                 uartMessage = currentSnapshot.abiVersion >= 8
                     ? "Hardware UART is not advertised by this profile."
                     : "Hardware UART requires DriverKit ABI v8."
@@ -1931,6 +1997,7 @@ final class TimeCardMonitor: ObservableObject {
             } else if !current.supportsUART {
                 uartObservation = nil
                 uartReadResult = nil
+                uartWriteResult = nil
                 uartMessage = current.abiVersion >= 8
                     ? "Hardware UART is not advertised by this profile."
                     : "Hardware UART requires DriverKit ABI v8."

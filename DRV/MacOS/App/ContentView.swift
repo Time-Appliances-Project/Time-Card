@@ -591,8 +591,9 @@ private struct GNSSWorkspaceView: View {
                             )
                             FeatureRow(
                                 name: "u-blox identity and firmware",
-                                state: "Backend pending",
-                                note: "Needs a guarded DriverKit UART stream ABI before UBX requests can be sent."
+                                state: snapshot.supportsUARTWrite
+                                    ? "Available" : "Backend pending",
+                                note: "ABI v9 can send safe UBX poll requests; use the UART lab to capture MON-VER responses."
                             )
                             FeatureRow(
                                 name: "Sky map and constellation view",
@@ -735,7 +736,7 @@ private struct UARTWorkspaceView: View {
                         FeatureRow(
                             name: "Time Card UART streams",
                             state: uartState,
-                            note: "Uses DriverKit ABI v8 to observe, configure, and read bounded FPGA UART samples."
+                            note: "Uses DriverKit ABI v8/v9 to observe, configure, read bounded FPGA UART samples, and send guarded receiver polls."
                         )
                         FeatureRow(
                             name: "NMEA capture and export",
@@ -803,6 +804,19 @@ private struct UARTWorkspaceView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(!hardwareUARTAvailable || monitor.uartOperationInProgress)
 
+                            Menu("Send UBX Poll") {
+                                ForEach(TimeCardUBXPoll.allCases) { poll in
+                                    Button(poll.label) {
+                                        sendUBXPoll(poll)
+                                    }
+                                }
+                            }
+                            .disabled(
+                                !hardwareUARTWriteAvailable ||
+                                    !selectedUARTPort.supportsReceiverPolls ||
+                                    monitor.uartOperationInProgress
+                            )
+
                             if monitor.uartOperationInProgress {
                                 ProgressView()
                                     .controlSize(.small)
@@ -824,6 +838,20 @@ private struct UARTWorkspaceView: View {
                             .foregroundStyle(.secondary)
                         }
 
+                        if hardwareUARTAvailable && !hardwareUARTWriteAvailable {
+                            Text(
+                                "Install and activate the ABI v9 driver to enable "
+                                    + "bounded UART writes and UBX receiver polls."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        } else if hardwareUARTWriteAvailable &&
+                            !selectedUARTPort.supportsReceiverPolls {
+                            Text("UBX polls are enabled for GNSS receiver ports only.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
                         if !monitor.uartMessage.isEmpty {
                             Text(monitor.uartMessage)
                                 .font(.caption)
@@ -842,6 +870,23 @@ private struct UARTWorkspaceView: View {
                                     observation.hasActivity ? .green : .orange
                                 )
                                 StatusPill("LSR \(observation.lineStatusText)", .teal)
+                            }
+                        }
+
+                        if let write = monitor.uartWriteResult {
+                            HStack(spacing: 8) {
+                                StatusPill(
+                                    write.complete ? "Write complete" : "Partial write",
+                                    write.complete ? .green : .orange
+                                )
+                                StatusPill(
+                                    "\(write.byteCount)/\(write.requestedByteCount) bytes",
+                                    write.complete ? .green : .orange
+                                )
+                                StatusPill("LSR \(write.lineStatusText)", .teal)
+                                Text("Run Read Hardware to capture the receiver response.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
 
@@ -1197,6 +1242,10 @@ private struct UARTWorkspaceView: View {
         monitor.snapshot?.supportsUART == true
     }
 
+    private var hardwareUARTWriteAvailable: Bool {
+        monitor.snapshot?.supportsUARTWrite == true
+    }
+
     private var uartState: String {
         if monitor.uartOperationInProgress {
             return "Waiting"
@@ -1262,7 +1311,17 @@ private struct UARTWorkspaceView: View {
     private var uartHeaderText: String {
         "The macOS Control Center now enumerates native serial devices through "
             + "IOKit and can read the Time Card FPGA UART streams through "
-            + "DriverKit ABI v8 when the active driver advertises UART capability."
+            + "DriverKit ABI v8/v9 when the active driver advertises UART capability."
+    }
+
+    private func sendUBXPoll(_ poll: TimeCardUBXPoll) {
+        monitor.writeUART(
+            port: selectedUARTPort,
+            bytes: poll.packet,
+            label: "UBX \(poll.label) poll"
+        )
+        ubxInputText = poll.hexString
+        ubxMessage = "Sent \(poll.label) poll bytes. Run Read Hardware to capture the response."
     }
 
     private func uartReadPreviewText(
@@ -1357,6 +1416,39 @@ private struct UARTWorkspaceView: View {
             index = next
         }
         return bytes
+    }
+}
+
+private struct TimeCardUBXPoll: Identifiable, Equatable {
+    let label: String
+    let messageClass: UInt8
+    let messageID: UInt8
+
+    var id: String { label }
+
+    static let allCases: [TimeCardUBXPoll] = [
+        TimeCardUBXPoll(label: "MON-VER", messageClass: 0x0a, messageID: 0x04),
+        TimeCardUBXPoll(label: "MON-HW", messageClass: 0x0a, messageID: 0x09),
+        TimeCardUBXPoll(label: "NAV-PVT", messageClass: 0x01, messageID: 0x07),
+        TimeCardUBXPoll(label: "NAV-SAT", messageClass: 0x01, messageID: 0x35),
+    ]
+
+    var packet: [UInt8] {
+        var body = [messageClass, messageID, 0x00, 0x00]
+        var checksumA: UInt8 = 0
+        var checksumB: UInt8 = 0
+        for byte in body {
+            checksumA &+= byte
+            checksumB &+= checksumA
+        }
+        body.insert(contentsOf: [0xb5, 0x62], at: 0)
+        body.append(checksumA)
+        body.append(checksumB)
+        return body
+    }
+
+    var hexString: String {
+        packet.map { String(format: "%02x", $0) }.joined(separator: " ")
     }
 }
 
@@ -2791,16 +2883,16 @@ private enum MacWorkspace: String {
         case .gnss:
             return [
                 ("ToD core status", "Live when the board exposes ToD status through ABI v2"),
-                ("u-blox identity and firmware", "Needs native serial/UBX transport"),
+                ("u-blox identity and firmware", "Available through guarded UBX poll writes and UART reads"),
                 ("Sky map and constellation counts", "Needs GNSS stream decoder data"),
                 ("Survey-in and fixed-position controls", "Needs guarded receiver configuration ABI"),
             ]
         case .uart:
             return [
-                ("Hardware UART ports 0-3", "Needs DriverKit stream read/write ABI"),
-                ("Generic macOS serial ports", "Planned as app-only IOKit serial enumeration"),
+                ("Hardware UART ports 0-3", "Live through DriverKit ABI v8/v9"),
+                ("Generic macOS serial ports", "Live through app-only IOKit serial enumeration"),
                 ("NMEA generator control", "Needs NMEA register get/set ABI"),
-                ("Capture and export", "UI scaffold ready, backend pending stream data"),
+                ("Capture and export", "Manual capture and support-bundle export are available"),
             ]
         case .sma:
             return [
@@ -4449,6 +4541,9 @@ private struct OperationsView: View {
         if let observation = monitor.uartObservation {
             lines.append("UART observe: \(observation.summary)")
         }
+        if let write = monitor.uartWriteResult {
+            lines.append("UART write: \(write.summary)")
+        }
         if let read = monitor.uartReadResult {
             lines.append(
                 "UART read: \(read.port.label), \(read.byteCount) byte(s), LSR \(read.lineStatusText)"
@@ -4705,6 +4800,17 @@ private struct OperationsView: View {
             lines.append("No hardware UART observation recorded.")
         }
         lines.append("")
+        if let write = monitor.uartWriteResult {
+            lines.append("Write")
+            lines.append("Port: \(write.port.label)")
+            lines.append("Bytes: \(write.byteCount)/\(write.requestedByteCount)")
+            lines.append("Complete: \(write.complete)")
+            lines.append("Line status: \(write.lineStatusText)")
+            lines.append("Timeout: \(write.timeoutMilliseconds) ms")
+        } else {
+            lines.append("No hardware UART write recorded.")
+        }
+        lines.append("")
         if let read = monitor.uartReadResult {
             lines.append("Read")
             lines.append("Port: \(read.port.label)")
@@ -4957,7 +5063,12 @@ private struct SubsystemMapView: View {
                                 ? "Live" : "Not present",
                             "Version and status when fitted"
                         )
-                        SubsystemCard("GNSS", "Gated", "Needs UART/UBX ABI")
+                        SubsystemCard(
+                            "GNSS",
+                            monitor.snapshot?.supportsUART == true
+                                ? "Available" : "Gated",
+                            "UART and UBX poll labs"
+                        )
                         SubsystemCard(
                             "SMA",
                             monitor.snapshot?.capabilityNames.contains("SMA") == true

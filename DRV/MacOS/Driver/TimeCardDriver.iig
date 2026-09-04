@@ -43,6 +43,8 @@ public:
     kern_return_t ConfigureUART(const TimeCardUARTConfig *config) LOCALONLY;
     kern_return_t ReadUART(const TimeCardUARTReadRequest *request,
                            TimeCardUARTTransfer *response) LOCALONLY;
+    kern_return_t WriteUART(const TimeCardUARTTransfer *request,
+                            TimeCardUARTTransfer *response) LOCALONLY;
 };
 
 #endif /* TIMECARD_DRIVER_IIG */

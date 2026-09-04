@@ -93,6 +93,7 @@ foreach(required_cli_sma IN ITEMS
         "command_uart_observe("
         "command_uart_config("
         "command_uart_read("
+        "command_uart_write_hex("
         "gnss_fix_name("
         "icp10100_pressure_pascals("
         "print_sensor_capabilities("
@@ -117,7 +118,8 @@ foreach(required_cli_sma IN ITEMS
         "\"sensors\""
         "\"uart-observe\""
         "\"uart-config\""
-        "\"uart-read\"")
+        "\"uart-read\""
+        "\"uart-write-hex\"")
     string(FIND "${cli}" "${required_cli_sma}" cli_sma_offset)
     if(cli_sma_offset EQUAL -1)
         message(FATAL_ERROR
@@ -183,7 +185,14 @@ foreach(required_control_center_sma IN ITEMS
         "todTelemetryAvailable"
         "gnssTelemetryAvailable"
         "gnssFixName"
-        "selector: 13")
+        "selector: 13"
+        "selector: 14"
+        "selector: 15"
+        "selector: 16"
+        "selector: 17"
+        "TimeCardUARTObservation"
+        "TimeCardUARTReadResult"
+        "TimeCardUARTWriteResult")
     string(FIND "${control_center}" "${required_control_center_sma}" control_sma_offset)
     if(control_sma_offset EQUAL -1)
         message(FATAL_ERROR
@@ -257,6 +266,8 @@ foreach(required_control_center_view IN ITEMS
         "Save Support ZIP"
         "Time Card hardware UART"
         "Read Hardware"
+        "Send UBX Poll"
+        "MON-VER"
         "hardware-uart.txt"
         "Copy Session Log"
         "supportBundleManifestText"
@@ -288,9 +299,11 @@ foreach(required_uart_driver IN ITEMS
         "ObserveUART"
         "ConfigureUART"
         "ReadUART"
+        "WriteUART"
         "UARTObserveAction"
         "UARTConfigureAction"
-        "UARTReadAction")
+        "UARTReadAction"
+        "UARTWriteAction")
     string(FIND "${driver}" "${required_uart_driver}" uart_driver_offset)
     if(uart_driver_offset EQUAL -1)
         message(FATAL_ERROR
@@ -301,7 +314,7 @@ endforeach()
 set(abi_source "${TIMECARD_SOURCE_DIR}/Shared/TimeCardABI.h")
 file(READ "${abi_source}" abi)
 foreach(required_uart_abi IN ITEMS
-        "TIMECARD_ABI_VERSION 8u"
+        "TIMECARD_ABI_VERSION 9u"
         "kTimeCardCapabilityUART"
         "TimeCardUARTObserve"
         "TimeCardUARTConfig"
@@ -309,7 +322,8 @@ foreach(required_uart_abi IN ITEMS
         "TimeCardUARTTransfer"
         "kTimeCardMethodUARTObserve"
         "kTimeCardMethodUARTConfigure"
-        "kTimeCardMethodUARTRead")
+        "kTimeCardMethodUARTRead"
+        "kTimeCardMethodUARTWrite")
     string(FIND "${abi}" "${required_uart_abi}" uart_abi_offset)
     if(uart_abi_offset EQUAL -1)
         message(FATAL_ERROR

@@ -179,6 +179,10 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
         abiVersion >= 8 && (capabilities & (1 << 8)) != 0
     }
 
+    var supportsUARTWrite: Bool {
+        abiVersion >= 9 && supportsUART
+    }
+
     func hasValidField(_ field: UInt64) -> Bool {
         (validFields & field) != 0
     }
@@ -347,6 +351,10 @@ enum TimeCardUARTPort: UInt32, CaseIterable, Identifiable, Sendable {
         case .nmea: "NMEA output UART"
         }
     }
+
+    var supportsReceiverPolls: Bool {
+        self == .gnss || self == .gnss2
+    }
 }
 
 struct TimeCardUARTObservation: Equatable, Sendable {
@@ -438,6 +446,65 @@ struct TimeCardUARTReadResult: Equatable, Sendable {
                 .joined(separator: " ")
             return String(format: "%04x: %@", offset, hex)
         }
+    }
+}
+
+struct TimeCardUARTWriteResult: Equatable, Sendable {
+    let port: TimeCardUARTPort
+    let timeoutMilliseconds: UInt32
+    let lineStatus: UInt32
+    let requestedByteCount: Int
+    let byteCount: Int
+
+    init(
+        port: TimeCardUARTPort,
+        timeoutMilliseconds: UInt32,
+        lineStatus: UInt32,
+        requestedByteCount: Int,
+        byteCount: Int
+    ) {
+        self.port = port
+        self.timeoutMilliseconds = timeoutMilliseconds
+        self.lineStatus = lineStatus
+        self.requestedByteCount = requestedByteCount
+        self.byteCount = byteCount
+    }
+
+    init(rawBytes: [UInt8], requestedByteCount: Int) {
+        let rawPort = TimeCardUARTTransferRawLayout.readUInt32(
+            rawBytes,
+            at: TimeCardUARTTransferRawLayout.portOffset
+        )
+        self.init(
+            port: TimeCardUARTPort(rawValue: rawPort) ?? .gnss,
+            timeoutMilliseconds: TimeCardUARTTransferRawLayout.readUInt32(
+                rawBytes,
+                at: TimeCardUARTTransferRawLayout.timeoutOffset
+            ),
+            lineStatus: TimeCardUARTTransferRawLayout.readUInt32(
+                rawBytes,
+                at: TimeCardUARTTransferRawLayout.lineStatusOffset
+            ),
+            requestedByteCount: requestedByteCount,
+            byteCount: Int(
+                TimeCardUARTTransferRawLayout.readUInt32(
+                    rawBytes,
+                    at: TimeCardUARTTransferRawLayout.lengthOffset
+                )
+            )
+        )
+    }
+
+    var complete: Bool {
+        byteCount == requestedByteCount
+    }
+
+    var lineStatusText: String {
+        String(format: "0x%02x", lineStatus & 0xff)
+    }
+
+    var summary: String {
+        "\(port.label): wrote \(byteCount)/\(requestedByteCount) byte(s), LSR \(lineStatusText)"
     }
 }
 
@@ -861,7 +928,7 @@ enum TimeCardClient {
     private static let serviceClass = "IOUserService"
     private static let userClassValue = "TimeCardDriver"
     private static let minimumSupportedABIVersion: UInt32 = 7
-    private static let supportedABIVersion: UInt32 = 8
+    private static let supportedABIVersion: UInt32 = 9
 
     static var localABILayoutIsValid: Bool {
         MemoryLayout<TimeCardTimeRaw>.size == 16
@@ -1598,6 +1665,59 @@ enum TimeCardClient {
         return TimeCardUARTReadResult(rawBytes: output)
     }
 
+    static func writeUART(
+        for descriptor: TimeCardServiceDescriptor,
+        port: TimeCardUARTPort,
+        bytes: [UInt8],
+        timeoutMilliseconds: UInt32
+    ) throws -> TimeCardUARTWriteResult {
+        guard !bytes.isEmpty && bytes.count <= 256 else {
+            throw TimeCardClientError.invalidUARTRequest(
+                "UART write length must be between 1 and 256 bytes."
+            )
+        }
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var input = [UInt8](
+            repeating: 0,
+            count: TimeCardUARTTransferRawLayout.size
+        )
+        TimeCardUARTTransferRawLayout.writeUInt32(
+            port.rawValue,
+            into: &input,
+            at: TimeCardUARTTransferRawLayout.portOffset
+        )
+        TimeCardUARTTransferRawLayout.writeUInt32(
+            UInt32(bytes.count),
+            into: &input,
+            at: TimeCardUARTTransferRawLayout.lengthOffset
+        )
+        TimeCardUARTTransferRawLayout.writeUInt32(
+            min(timeoutMilliseconds, 5_000),
+            into: &input,
+            at: TimeCardUARTTransferRawLayout.timeoutOffset
+        )
+        let dataStart = TimeCardUARTTransferRawLayout.dataOffset
+        let dataEnd = dataStart + bytes.count
+        input.replaceSubrange(dataStart..<dataEnd, with: bytes)
+
+        var output = [UInt8](
+            repeating: 0,
+            count: TimeCardUARTTransferRawLayout.size
+        )
+        try callInOutRawBytes(
+            connection: connection,
+            selector: 17,
+            input: input,
+            output: &output
+        )
+        return TimeCardUARTWriteResult(
+            rawBytes: output,
+            requestedByteCount: bytes.count
+        )
+    }
+
     private static func validateI2CAddress(_ address: UInt32) throws {
         guard address >= 0x08 && address <= 0x77 else {
             throw TimeCardClientError.invalidI2CRequest(
@@ -1758,6 +1878,39 @@ enum TimeCardClient {
         var outputSize = output.count
         let result = output.withUnsafeMutableBytes { outputBytes in
             withUnsafeBytes(of: &inputCopy) { inputBytes in
+                IOConnectCallStructMethod(
+                    connection,
+                    selector,
+                    inputBytes.baseAddress,
+                    inputBytes.count,
+                    outputBytes.baseAddress,
+                    &outputSize
+                )
+            }
+        }
+        guard result == KERN_SUCCESS else {
+            throw TimeCardClientError.methodFailed(
+                selector: selector, result: result
+            )
+        }
+        guard outputSize == output.count else {
+            throw TimeCardClientError.unexpectedOutput(
+                selector: selector,
+                expected: output.count,
+                actual: outputSize
+            )
+        }
+    }
+
+    private static func callInOutRawBytes(
+        connection: io_connect_t,
+        selector: UInt32,
+        input: [UInt8],
+        output: inout [UInt8]
+    ) throws {
+        var outputSize = output.count
+        let result = output.withUnsafeMutableBytes { outputBytes in
+            input.withUnsafeBytes { inputBytes in
                 IOConnectCallStructMethod(
                     connection,
                     selector,
@@ -1948,6 +2101,7 @@ private enum TimeCardI2CTransferRawLayout {
             (UInt32(bytes[offset + 2]) << 16) |
             (UInt32(bytes[offset + 3]) << 24)
     }
+
 }
 
 private struct TimeCardI2CMuxRaw {
@@ -1996,6 +2150,14 @@ private enum TimeCardUARTTransferRawLayout {
             (UInt32(bytes[offset + 1]) << 8) |
             (UInt32(bytes[offset + 2]) << 16) |
             (UInt32(bytes[offset + 3]) << 24)
+    }
+
+    static func writeUInt32(_ value: UInt32, into bytes: inout [UInt8], at offset: Int) {
+        guard bytes.count >= offset + 4 else { return }
+        bytes[offset] = UInt8(value & 0xff)
+        bytes[offset + 1] = UInt8((value >> 8) & 0xff)
+        bytes[offset + 2] = UInt8((value >> 16) & 0xff)
+        bytes[offset + 3] = UInt8((value >> 24) & 0xff)
     }
 }
 
