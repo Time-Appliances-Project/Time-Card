@@ -27,6 +27,9 @@ public:
     kern_return_t QuerySMA(TimeCardSMAControl *control) LOCALONLY;
     kern_return_t SetSMA(const TimeCardSMAControl *request,
                          TimeCardSMAControl *response) LOCALONLY;
+    kern_return_t QueryLED(TimeCardLEDControl *control) LOCALONLY;
+    kern_return_t SetLED(const TimeCardLEDControl *request,
+                         TimeCardLEDControl *response) LOCALONLY;
 };
 
 #endif /* TIMECARD_DRIVER_IIG */

@@ -44,6 +44,17 @@ enum {
 };
 
 enum {
+    kTimeCardI2CRegisterLength = 0x00010000u,
+    kTimeCardLEDAddressMin = 0x34u,
+    kTimeCardLEDAddressMax = 0x37u,
+    kTimeCardLEDMaxGlobalCurrent = 128u,
+    kTimeCardLEDOutputMask = (1u << 18) - 1u,
+    kTimeCardI2CMuxAddress = 0x70u,
+    kTimeCardI2CMuxChannelSensors = 1u << 1,
+    kTimeCardI2CMuxChannelMask = 0x0fu
+};
+
+enum {
     kTimeCardClockEnable = 1u << 0,
     kTimeCardClockAdjustTime = 1u << 1,
     kTimeCardClockAdjustOffset = 1u << 2,
@@ -74,6 +85,7 @@ typedef struct TimeCardRegisterMap {
     uint64_t smaMap1Offset;
     uint64_t smaMap2Offset;
     uint64_t artSMAOffset;
+    uint64_t i2cOffset;
     uint64_t requiredBarSize;
 } TimeCardRegisterMap;
 
@@ -198,8 +210,8 @@ TimeCardFacebookRegisterMap(bool useMSIX, uint32_t boardProfile)
         boardProfile, kTimeCardLayoutUnknown,
         kTimeCardCapabilityReadClock | kTimeCardCapabilitySetClock |
             kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD |
-            kTimeCardCapabilitySMA,
-        0, 0, 0, {0, 0, 0, 0}, 0, 0, 0, 0
+            kTimeCardCapabilitySMA | kTimeCardCapabilityLED,
+        0, 0, 0, {0, 0, 0, 0}, 0, 0, 0, 0, 0
     };
 
     if (useMSIX) {
@@ -208,6 +220,7 @@ TimeCardFacebookRegisterMap(bool useMSIX, uint32_t boardProfile)
         map.todOffset = 0x03050000u;
         map.smaMap1Offset = 0x02140000u;
         map.smaMap2Offset = 0x02220000u;
+        map.i2cOffset = 0x02150000u;
         map.uartOffsets[0] = 0x02161000u;
         map.uartOffsets[1] = 0x02171000u;
         map.uartOffsets[2] = 0x02181000u;
@@ -218,6 +231,7 @@ TimeCardFacebookRegisterMap(bool useMSIX, uint32_t boardProfile)
         map.todOffset = 0x01050000u;
         map.smaMap1Offset = 0x00140000u;
         map.smaMap2Offset = 0x00220000u;
+        map.i2cOffset = 0x00150000u;
         map.uartOffsets[0] = 0x00161000u;
         map.uartOffsets[1] = 0x00171000u;
         map.uartOffsets[2] = 0x00181000u;
@@ -226,6 +240,7 @@ TimeCardFacebookRegisterMap(bool useMSIX, uint32_t boardProfile)
     TimeCardRequireRange(&map, map.todOffset, kTimeCardTodVersion + 4u);
     TimeCardRequireRange(&map, map.smaMap1Offset, kTimeCardSMARegisterLength);
     TimeCardRequireRange(&map, map.smaMap2Offset, kTimeCardSMARegisterLength);
+    TimeCardRequireRange(&map, map.i2cOffset, kTimeCardI2CRegisterLength);
 
     return map;
 }
@@ -239,7 +254,7 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
         TimeCardBoardProfileForDevice(vendorID, deviceID);
     TimeCardRegisterMap map = {
         profile, kTimeCardLayoutUnknown, 0, 0, 0, 0,
-        {0, 0, 0, 0}, 0, 0, 0, 0
+        {0, 0, 0, 0}, 0, 0, 0, 0, 0
     };
 
     if (profile == kTimeCardBoardFacebook ||
@@ -283,11 +298,12 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
         map.capabilities = kTimeCardCapabilityReadClock |
             kTimeCardCapabilitySetClock |
             kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD |
-            kTimeCardCapabilitySMA;
+            kTimeCardCapabilitySMA | kTimeCardCapabilityLED;
         map.clockOffset = 0x01000000u;
         map.todOffset = 0x01050000u;
         map.smaMap1Offset = 0x00140000u;
         map.smaMap2Offset = 0x00220000u;
+        map.i2cOffset = 0x00150000u;
         map.uartOffsets[0] = 0x00161000u;
         map.uartOffsets[2] = 0x00181000u;
         TimeCardRequireRange(&map, map.todOffset, kTimeCardTodVersion + 4u);
@@ -295,6 +311,7 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
             &map, map.smaMap1Offset, kTimeCardSMARegisterLength);
         TimeCardRequireRange(
             &map, map.smaMap2Offset, kTimeCardSMARegisterLength);
+        TimeCardRequireRange(&map, map.i2cOffset, kTimeCardI2CRegisterLength);
     }
     return map;
 }
@@ -311,6 +328,12 @@ TimeCardRegisterMapHasSMA(const TimeCardRegisterMap *map)
     return map != NULL &&
         ((map->smaMap1Offset != 0 && map->smaMap2Offset != 0) ||
          map->artSMAOffset != 0);
+}
+
+static inline bool
+TimeCardRegisterMapHasLED(const TimeCardRegisterMap *map)
+{
+    return map != NULL && map->i2cOffset != 0;
 }
 
 #endif /* TIMECARD_REGISTERS_H */

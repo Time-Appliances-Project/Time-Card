@@ -97,6 +97,7 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
         if (capabilities & (1 << 2)) != 0 { names.append("Cross timestamp") }
         if (capabilities & (1 << 3)) != 0 { names.append("ToD") }
         if (capabilities & (1 << 4)) != 0 { names.append("SMA") }
+        if (capabilities & (1 << 5)) != 0 { names.append("LEDs") }
         return names
     }
 
@@ -259,7 +260,7 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
 enum TimeCardClient {
     private static let serviceClass = "IOUserService"
     private static let userClassValue = "TimeCardDriver"
-    private static let supportedABIVersion: UInt32 = 3
+    private static let supportedABIVersion: UInt32 = 4
 
     static var localABILayoutIsValid: Bool {
         MemoryLayout<TimeCardTimeRaw>.size == 16

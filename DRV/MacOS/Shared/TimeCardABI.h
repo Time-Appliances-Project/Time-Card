@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define TIMECARD_ABI_VERSION 3u
+#define TIMECARD_ABI_VERSION 4u
 #define TIMECARD_DRIVER_VERSION 0x00000002u
 #define TIMECARD_SERVICE_CLASS "TimeCardDriver"
 #define TIMECARD_DRIVER_BUNDLE_ID "org.opentimeserver.timecard.macos.driver"
@@ -21,6 +21,8 @@ enum TimeCardExternalMethod {
     kTimeCardMethodGetCrossTimestamp = 3,
     kTimeCardMethodSMAQuery = 4,
     kTimeCardMethodSMASet = 5,
+    kTimeCardMethodLEDQuery = 6,
+    kTimeCardMethodLEDSet = 7,
     kTimeCardMethodCount
 };
 
@@ -49,7 +51,8 @@ enum TimeCardCapability {
     kTimeCardCapabilitySetClock = 1u << 1,
     kTimeCardCapabilityCrossTimestamp = 1u << 2,
     kTimeCardCapabilityTOD = 1u << 3,
-    kTimeCardCapabilitySMA = 1u << 4
+    kTimeCardCapabilitySMA = 1u << 4,
+    kTimeCardCapabilityLED = 1u << 5
 };
 
 enum TimeCardSMADirection {
@@ -159,6 +162,35 @@ typedef struct TimeCardSMAControl {
     uint32_t reserved;
 } TimeCardSMAControl;
 
+#define TIMECARD_LED_COUNT 6u
+#define TIMECARD_LED_GNSS1 0u
+#define TIMECARD_LED_GNSS2 1u
+#define TIMECARD_LED_SMA1 2u
+#define TIMECARD_LED_SMA2 3u
+#define TIMECARD_LED_SMA3 4u
+#define TIMECARD_LED_SMA4 5u
+
+enum TimeCardLEDFlag {
+    kTimeCardLEDFlagPresent = 1u << 0,
+    kTimeCardLEDFlagEnabled = 1u << 1,
+    kTimeCardLEDFlagFaultValid = 1u << 2
+};
+
+typedef struct TimeCardLEDControl {
+    uint32_t size;
+    uint32_t led;
+    uint32_t flags;
+    uint32_t red;
+    uint32_t green;
+    uint32_t blue;
+    uint32_t globalCurrent;
+    uint32_t muxChannelMask;
+    uint32_t controllerStatus;
+    uint32_t interruptStatus;
+    uint32_t openOutputMask;
+    uint32_t shortOutputMask;
+} TimeCardLEDControl;
+
 #ifdef __cplusplus
 }
 
@@ -168,6 +200,8 @@ static_assert(sizeof(TimeCardCrossTimestamp) == 32,
 static_assert(sizeof(TimeCardInfo) == 112, "TimeCardInfo ABI changed");
 static_assert(sizeof(TimeCardSMAControl) == 32,
               "TimeCardSMAControl ABI changed");
+static_assert(sizeof(TimeCardLEDControl) == 48,
+              "TimeCardLEDControl ABI changed");
 #endif
 
 #endif /* TIMECARD_ABI_H */

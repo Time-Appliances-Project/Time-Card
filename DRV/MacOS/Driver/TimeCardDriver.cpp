@@ -6,6 +6,7 @@
 #include <PCIDriverKit/IOPCIDevice.h>
 #include <PCIDriverKit/IOPCIFamilyDefinitions.h>
 #include <os/log.h>
+#include <string.h>
 #include <time.h>
 
 #include "TimeCardDriver.h"
@@ -22,6 +23,7 @@ struct TimeCardDriver_IVars {
     uint32_t advertisedMSIXVectors;
     uint64_t barSize;
     TimeCardRegisterMap registers;
+    uint32_t i2cLEDAddress;
     bool deviceOpen;
 };
 
@@ -82,6 +84,28 @@ WriteRegister32(IOPCIDevice *device, uint8_t memoryIndex, uint64_t offset,
                 uint32_t value)
 {
     device->MemoryWrite32(memoryIndex, offset, value);
+}
+
+static uint8_t
+ReadRegister8Raw(IOPCIDevice *device, uint8_t memoryIndex, uint64_t offset)
+{
+    uint8_t value = UINT8_MAX;
+    device->MemoryRead8(memoryIndex, offset, &value);
+    return value;
+}
+
+static void
+WriteRegister8(IOPCIDevice *device, uint8_t memoryIndex, uint64_t offset,
+               uint8_t value)
+{
+    device->MemoryWrite8(memoryIndex, offset, value);
+}
+
+static void
+WriteRegister16(IOPCIDevice *device, uint8_t memoryIndex, uint64_t offset,
+                uint16_t value)
+{
+    device->MemoryWrite16(memoryIndex, offset, value);
 }
 
 static uint32_t
@@ -893,6 +917,916 @@ done:
     return result;
 }
 
+enum {
+    kXIICDGIEROffset = 0x01cu,
+    kXIICIISROffset = 0x020u,
+    kXIICIIEROffset = 0x028u,
+    kXIICResetOffset = 0x040u,
+    kXIICControlOffset = 0x100u,
+    kXIICStatusOffset = 0x104u,
+    kXIICTransmitFIFOOffset = 0x108u,
+    kXIICReceiveFIFOOffset = 0x10cu,
+    kXIICTxOccupancyOffset = 0x114u,
+    kXIICRxOccupancyOffset = 0x118u,
+    kXIICRxDepthOffset = 0x120u,
+
+    kXIICResetValue = 0x0000000au,
+    kXIICControlEnable = 0x01u,
+    kXIICControlTxFIFOReset = 0x02u,
+    kXIICStatusBusBusy = 0x04u,
+    kXIICStatusRxEmpty = 0x40u,
+    kXIICInterruptArbLost = 0x01u,
+    kXIICInterruptTxError = 0x02u,
+    kXIICInterruptTxEmpty = 0x04u,
+    kXIICInterruptRxFull = 0x08u,
+    kXIICInterruptBusNotBusy = 0x10u,
+    kXIICDynamicStart = 0x0100u,
+    kXIICDynamicStop = 0x0200u,
+    kXIICFIFODepth = 16u,
+
+    kTimeCardI2CAddressMin = 0x08u,
+    kTimeCardI2CAddressMax = 0x77u,
+    kTimeCardI2CPollDelayUS = 5u,
+    kTimeCardI2CDefaultPolls = 100u * 1000u / kTimeCardI2CPollDelayUS,
+
+    kIS32FL3207DeviceControl = 0x00u,
+    kIS32FL3207PWMBase = 0x01u,
+    kIS32FL3207Update = 0x49u,
+    kIS32FL3207ControlBase = 0x4au,
+    kIS32FL3207GlobalCurrent = 0x6eu,
+    kIS32FL3207SpreadSpectrum = 0x78u
+};
+
+typedef struct TimeCardI2CTransfer {
+    uint32_t controllerStatus;
+    uint32_t interruptStatus;
+    uint8_t data[255];
+    uint32_t length;
+} TimeCardI2CTransfer;
+
+static bool
+TimeCardI2CAddressValid(uint32_t address)
+{
+    return address >= kTimeCardI2CAddressMin &&
+        address <= kTimeCardI2CAddressMax;
+}
+
+static uint64_t
+TimeCardI2COffset(const TimeCardRegisterMap *map, uint32_t offset)
+{
+    return map->i2cOffset + offset;
+}
+
+static uint8_t
+TimeCardI2CRead8(IOPCIDevice *device, uint8_t memoryIndex,
+                 const TimeCardRegisterMap *map, uint32_t offset)
+{
+    return ReadRegister8Raw(device, memoryIndex,
+                            TimeCardI2COffset(map, offset));
+}
+
+static uint32_t
+TimeCardI2CRead32(IOPCIDevice *device, uint8_t memoryIndex,
+                  const TimeCardRegisterMap *map, uint32_t offset)
+{
+    return ReadRegister32Raw(device, memoryIndex,
+                             TimeCardI2COffset(map, offset));
+}
+
+static void
+TimeCardI2CWrite8(IOPCIDevice *device, uint8_t memoryIndex,
+                  const TimeCardRegisterMap *map, uint32_t offset,
+                  uint8_t value)
+{
+    WriteRegister8(device, memoryIndex, TimeCardI2COffset(map, offset), value);
+}
+
+static void
+TimeCardI2CWrite16(IOPCIDevice *device, uint8_t memoryIndex,
+                   const TimeCardRegisterMap *map, uint32_t offset,
+                   uint16_t value)
+{
+    WriteRegister16(device, memoryIndex, TimeCardI2COffset(map, offset),
+                    value);
+}
+
+static void
+TimeCardI2CWrite32(IOPCIDevice *device, uint8_t memoryIndex,
+                   const TimeCardRegisterMap *map, uint32_t offset,
+                   uint32_t value)
+{
+    WriteRegister32(device, memoryIndex, TimeCardI2COffset(map, offset),
+                    value);
+}
+
+static void
+TimeCardI2CClearInterruptMask(IOPCIDevice *device, uint8_t memoryIndex,
+                              const TimeCardRegisterMap *map, uint32_t mask)
+{
+    const uint32_t pending =
+        TimeCardI2CRead32(device, memoryIndex, map, kXIICIISROffset) & mask;
+    if (pending != 0)
+        TimeCardI2CWrite32(device, memoryIndex, map, kXIICIISROffset, pending);
+}
+
+static void
+TimeCardI2CClearInterrupts(IOPCIDevice *device, uint8_t memoryIndex,
+                           const TimeCardRegisterMap *map)
+{
+    const uint32_t pending =
+        TimeCardI2CRead32(device, memoryIndex, map, kXIICIISROffset);
+    if (pending != 0)
+        TimeCardI2CWrite32(device, memoryIndex, map, kXIICIISROffset, pending);
+}
+
+static void
+TimeCardI2CArmPolling(IOPCIDevice *device, uint8_t memoryIndex,
+                      const TimeCardRegisterMap *map)
+{
+    TimeCardI2CClearInterrupts(device, memoryIndex, map);
+    TimeCardI2CWrite32(device, memoryIndex, map, kXIICIIEROffset,
+                       kXIICInterruptArbLost | kXIICInterruptTxError |
+                           kXIICInterruptTxEmpty | kXIICInterruptRxFull |
+                           kXIICInterruptBusNotBusy);
+}
+
+static kern_return_t
+TimeCardI2CReset(IOPCIDevice *device, uint8_t memoryIndex,
+                 const TimeCardRegisterMap *map)
+{
+    TimeCardI2CWrite32(device, memoryIndex, map, kXIICDGIEROffset, 0);
+    TimeCardI2CWrite32(device, memoryIndex, map, kXIICIIEROffset, 0);
+    TimeCardI2CWrite32(device, memoryIndex, map, kXIICResetOffset,
+                       kXIICResetValue);
+    TimeCardI2CWrite8(device, memoryIndex, map, kXIICRxDepthOffset,
+                      (uint8_t)(kXIICFIFODepth - 1u));
+    TimeCardI2CWrite8(device, memoryIndex, map, kXIICControlOffset,
+                      kXIICControlTxFIFOReset);
+    TimeCardI2CWrite8(device, memoryIndex, map, kXIICControlOffset,
+                      kXIICControlEnable);
+    for (uint32_t i = 0; i < 255u; ++i) {
+        if ((TimeCardI2CRead8(device, memoryIndex, map,
+                              kXIICStatusOffset) &
+             kXIICStatusRxEmpty) != 0) {
+            TimeCardI2CClearInterrupts(device, memoryIndex, map);
+            return kIOReturnSuccess;
+        }
+        (void)TimeCardI2CRead8(device, memoryIndex, map,
+                               kXIICReceiveFIFOOffset);
+    }
+    return kIOReturnIOError;
+}
+
+static kern_return_t
+TimeCardI2CWaitNotBusy(IOPCIDevice *device, uint8_t memoryIndex,
+                       const TimeCardRegisterMap *map)
+{
+    for (uint32_t i = 0; i < 600u; ++i) {
+        if ((TimeCardI2CRead8(device, memoryIndex, map,
+                              kXIICStatusOffset) &
+             kXIICStatusBusBusy) == 0)
+            return kIOReturnSuccess;
+        IODelay(kTimeCardI2CPollDelayUS);
+    }
+    return kIOReturnBusy;
+}
+
+static kern_return_t
+TimeCardI2CPrepareTransfer(IOPCIDevice *device, uint8_t memoryIndex,
+                           const TimeCardRegisterMap *map)
+{
+    kern_return_t result = TimeCardI2CWaitNotBusy(device, memoryIndex, map);
+    if (result != kIOReturnSuccess) {
+        result = TimeCardI2CReset(device, memoryIndex, map);
+        if (result != kIOReturnSuccess)
+            return result;
+        result = TimeCardI2CWaitNotBusy(device, memoryIndex, map);
+        if (result != kIOReturnSuccess)
+            return result;
+    }
+    return TimeCardI2CReset(device, memoryIndex, map);
+}
+
+static void
+TimeCardI2CQueueDynamicStart(IOPCIDevice *device, uint8_t memoryIndex,
+                             const TimeCardRegisterMap *map,
+                             uint16_t addressWord)
+{
+    TimeCardI2CWrite16(device, memoryIndex, map, kXIICTransmitFIFOOffset,
+                       (uint16_t)(kXIICDynamicStart | addressWord));
+}
+
+static kern_return_t
+TimeCardI2CWaitTransmitPhase(IOPCIDevice *device, uint8_t memoryIndex,
+                             const TimeCardRegisterMap *map,
+                             uint32_t *remainingPolls,
+                             uint32_t *observedInterrupts,
+                             uint8_t *controllerStatus)
+{
+    while (*remainingPolls != 0) {
+        const uint32_t interrupts =
+            TimeCardI2CRead32(device, memoryIndex, map, kXIICIISROffset);
+        --(*remainingPolls);
+        *observedInterrupts |= interrupts;
+        *controllerStatus =
+            TimeCardI2CRead8(device, memoryIndex, map, kXIICStatusOffset);
+        if ((interrupts & kXIICInterruptArbLost) != 0)
+            return kIOReturnIOError;
+        if ((interrupts & kXIICInterruptTxError) != 0)
+            return kIOReturnNoDevice;
+        if ((interrupts & kXIICInterruptBusNotBusy) != 0)
+            return kIOReturnIOError;
+        if ((interrupts & kXIICInterruptTxEmpty) != 0) {
+            TimeCardI2CClearInterruptMask(device, memoryIndex, map,
+                                          kXIICInterruptTxEmpty);
+            return kIOReturnSuccess;
+        }
+        IODelay(kTimeCardI2CPollDelayUS);
+    }
+    return kIOReturnTimeout;
+}
+
+static kern_return_t
+TimeCardI2CWriteAttempt(IOPCIDevice *device, uint8_t memoryIndex,
+                        const TimeCardRegisterMap *map, uint32_t address,
+                        const uint8_t *data, uint32_t length,
+                        uint32_t *controllerStatus,
+                        uint32_t *interruptStatus)
+{
+    uint32_t remainingPolls = kTimeCardI2CDefaultPolls;
+    uint32_t observedInterrupts = 0;
+    uint8_t currentStatus = 0;
+    uint32_t i = 0;
+    kern_return_t result =
+        TimeCardI2CPrepareTransfer(device, memoryIndex, map);
+    if (result != kIOReturnSuccess)
+        goto done;
+
+    TimeCardI2CArmPolling(device, memoryIndex, map);
+    TimeCardI2CQueueDynamicStart(device, memoryIndex, map,
+                                 (uint16_t)(address << 1));
+    TimeCardI2CClearInterruptMask(device, memoryIndex, map,
+                                  kXIICInterruptTxEmpty |
+                                      kXIICInterruptTxError |
+                                      kXIICInterruptBusNotBusy);
+    while (i < length) {
+        uint32_t capacity = i == 0 ? kXIICFIFODepth - 1u :
+                                     kXIICFIFODepth;
+        uint32_t chunk = length - i;
+        if (chunk > capacity)
+            chunk = capacity;
+        while (chunk-- != 0) {
+            uint16_t value = data[i];
+            if (i + 1u == length)
+                value |= kXIICDynamicStop;
+            TimeCardI2CWrite16(device, memoryIndex, map,
+                               kXIICTransmitFIFOOffset, value);
+            ++i;
+        }
+        if (i < length) {
+            result = TimeCardI2CWaitTransmitPhase(
+                device, memoryIndex, map, &remainingPolls,
+                &observedInterrupts, &currentStatus);
+            if (result != kIOReturnSuccess)
+                goto done;
+        }
+    }
+
+    result = kIOReturnTimeout;
+    while (remainingPolls != 0) {
+        const uint32_t interrupts =
+            TimeCardI2CRead32(device, memoryIndex, map, kXIICIISROffset);
+        --remainingPolls;
+        observedInterrupts |= interrupts;
+        currentStatus =
+            TimeCardI2CRead8(device, memoryIndex, map, kXIICStatusOffset);
+        if ((interrupts & kXIICInterruptArbLost) != 0) {
+            result = kIOReturnIOError;
+            break;
+        }
+        if ((interrupts & kXIICInterruptTxError) != 0) {
+            result = kIOReturnNoDevice;
+            break;
+        }
+        if ((interrupts & kXIICInterruptBusNotBusy) != 0) {
+            result = kIOReturnSuccess;
+            break;
+        }
+        IODelay(kTimeCardI2CPollDelayUS);
+    }
+
+done:
+    *controllerStatus = currentStatus;
+    *interruptStatus = observedInterrupts;
+    (void)TimeCardI2CReset(device, memoryIndex, map);
+    return result;
+}
+
+static kern_return_t
+TimeCardI2CWriteLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                       const TimeCardRegisterMap *map, uint32_t address,
+                       const uint8_t *data, uint32_t length,
+                       uint32_t *controllerStatus,
+                       uint32_t *interruptStatus)
+{
+    if (!TimeCardI2CAddressValid(address) || data == nullptr ||
+        length == 0 || length > sizeof(TimeCardI2CTransfer::data))
+        return kIOReturnBadArgument;
+    *controllerStatus = 0;
+    *interruptStatus = 0;
+    kern_return_t result = kIOReturnTimeout;
+    for (uint32_t attempt = 0; attempt < 2u; ++attempt) {
+        result = TimeCardI2CWriteAttempt(
+            device, memoryIndex, map, address, data, length,
+            controllerStatus, interruptStatus);
+        if (result == kIOReturnSuccess || result == kIOReturnNoDevice)
+            break;
+    }
+    return result;
+}
+
+static void
+TimeCardI2CSetReceiveWatermark(IOPCIDevice *device, uint8_t memoryIndex,
+                               const TimeCardRegisterMap *map,
+                               uint32_t remaining)
+{
+    uint32_t bytes =
+        remaining < kXIICFIFODepth ? remaining : kXIICFIFODepth;
+    if (bytes != 0)
+        TimeCardI2CWrite8(device, memoryIndex, map, kXIICRxDepthOffset,
+                          (uint8_t)(bytes - 1u));
+}
+
+static void
+TimeCardI2CDrainReceiveFIFO(IOPCIDevice *device, uint8_t memoryIndex,
+                            const TimeCardRegisterMap *map,
+                            TimeCardI2CTransfer *transfer,
+                            uint32_t requestedLength)
+{
+    uint32_t remaining = requestedLength - transfer->length;
+    if ((TimeCardI2CRead8(device, memoryIndex, map, kXIICStatusOffset) &
+         kXIICStatusRxEmpty) != 0)
+        return;
+    uint32_t available =
+        (uint32_t)TimeCardI2CRead8(device, memoryIndex, map,
+                                   kXIICRxOccupancyOffset) +
+        1u;
+    if (available > remaining)
+        available = remaining;
+    for (uint32_t i = 0; i < available; ++i) {
+        transfer->data[transfer->length++] =
+            TimeCardI2CRead8(device, memoryIndex, map,
+                             kXIICReceiveFIFOOffset);
+    }
+    remaining = requestedLength - transfer->length;
+    if (remaining != 0)
+        TimeCardI2CSetReceiveWatermark(device, memoryIndex, map, remaining);
+}
+
+static kern_return_t
+TimeCardI2CReadAttempt(IOPCIDevice *device, uint8_t memoryIndex,
+                       const TimeCardRegisterMap *map, uint32_t address,
+                       uint32_t subaddressLength, uint32_t subaddress,
+                       TimeCardI2CTransfer *transfer, uint32_t length)
+{
+    uint32_t remainingPolls = kTimeCardI2CDefaultPolls;
+    uint32_t observedInterrupts = 0;
+    uint8_t controllerStatus = 0;
+    kern_return_t result =
+        TimeCardI2CPrepareTransfer(device, memoryIndex, map);
+    if (result != kIOReturnSuccess)
+        goto done;
+
+    TimeCardI2CArmPolling(device, memoryIndex, map);
+    if (subaddressLength != 0) {
+        TimeCardI2CQueueDynamicStart(device, memoryIndex, map,
+                                     (uint16_t)(address << 1));
+        TimeCardI2CClearInterruptMask(device, memoryIndex, map,
+                                      kXIICInterruptTxEmpty |
+                                          kXIICInterruptTxError |
+                                          kXIICInterruptBusNotBusy);
+        if (subaddressLength == 2u) {
+            TimeCardI2CWrite16(device, memoryIndex, map,
+                               kXIICTransmitFIFOOffset,
+                               (uint16_t)((subaddress >> 8) & 0xffu));
+        }
+        TimeCardI2CWrite16(device, memoryIndex, map,
+                           kXIICTransmitFIFOOffset,
+                           (uint16_t)(subaddress & 0xffu));
+        result = TimeCardI2CWaitTransmitPhase(
+            device, memoryIndex, map, &remainingPolls, &observedInterrupts,
+            &controllerStatus);
+        if (result != kIOReturnSuccess)
+            goto done;
+    }
+
+    TimeCardI2CSetReceiveWatermark(device, memoryIndex, map, length);
+    TimeCardI2CClearInterruptMask(device, memoryIndex, map,
+                                  kXIICInterruptArbLost |
+                                      kXIICInterruptTxError |
+                                      kXIICInterruptTxEmpty |
+                                      kXIICInterruptRxFull);
+    TimeCardI2CQueueDynamicStart(device, memoryIndex, map,
+                                 (uint16_t)((address << 1) | 1u));
+    TimeCardI2CWrite16(device, memoryIndex, map, kXIICTransmitFIFOOffset,
+                       (uint16_t)(kXIICDynamicStop | length));
+    TimeCardI2CClearInterruptMask(device, memoryIndex, map,
+                                  kXIICInterruptBusNotBusy);
+
+    result = kIOReturnTimeout;
+    while (remainingPolls != 0) {
+        const uint32_t interrupts =
+            TimeCardI2CRead32(device, memoryIndex, map, kXIICIISROffset);
+        observedInterrupts |= interrupts;
+        controllerStatus =
+            TimeCardI2CRead8(device, memoryIndex, map, kXIICStatusOffset);
+        --remainingPolls;
+        if ((interrupts & kXIICInterruptArbLost) != 0) {
+            result = kIOReturnIOError;
+            break;
+        }
+        if ((controllerStatus & kXIICStatusRxEmpty) == 0) {
+            TimeCardI2CDrainReceiveFIFO(device, memoryIndex, map, transfer,
+                                        length);
+            if ((interrupts & kXIICInterruptRxFull) != 0) {
+                TimeCardI2CClearInterruptMask(
+                    device, memoryIndex, map,
+                    kXIICInterruptRxFull | kXIICInterruptTxError);
+            }
+            controllerStatus =
+                TimeCardI2CRead8(device, memoryIndex, map,
+                                 kXIICStatusOffset);
+        }
+        if (transfer->length == length) {
+            TimeCardI2CClearInterruptMask(device, memoryIndex, map,
+                                          kXIICInterruptTxError);
+            if ((interrupts & kXIICInterruptBusNotBusy) != 0 ||
+                (controllerStatus & kXIICStatusBusBusy) == 0) {
+                result = kIOReturnSuccess;
+                break;
+            }
+            IODelay(kTimeCardI2CPollDelayUS);
+            continue;
+        }
+        if ((interrupts & kXIICInterruptTxError) != 0 &&
+            (interrupts & kXIICInterruptRxFull) == 0) {
+            result = transfer->length == 0 ? kIOReturnNoDevice :
+                                             kIOReturnIOError;
+            break;
+        }
+        if ((interrupts & kXIICInterruptBusNotBusy) != 0 &&
+            transfer->length < length) {
+            result = kIOReturnIOError;
+            break;
+        }
+        IODelay(kTimeCardI2CPollDelayUS);
+    }
+
+done:
+    transfer->controllerStatus = controllerStatus;
+    transfer->interruptStatus = observedInterrupts;
+    (void)TimeCardI2CReset(device, memoryIndex, map);
+    return result;
+}
+
+static kern_return_t
+TimeCardI2CReadLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                      const TimeCardRegisterMap *map, uint32_t address,
+                      uint32_t subaddressLength, uint32_t subaddress,
+                      uint8_t *data, uint32_t length,
+                      uint32_t *controllerStatus,
+                      uint32_t *interruptStatus)
+{
+    if (!TimeCardI2CAddressValid(address) || subaddressLength > 2u ||
+        data == nullptr || length == 0 ||
+        length > sizeof(TimeCardI2CTransfer::data))
+        return kIOReturnBadArgument;
+
+    kern_return_t result = kIOReturnTimeout;
+    TimeCardI2CTransfer transfer = {};
+    for (uint32_t attempt = 0; attempt < 2u; ++attempt) {
+        transfer.length = 0;
+        transfer.controllerStatus = 0;
+        transfer.interruptStatus = 0;
+        result = TimeCardI2CReadAttempt(
+            device, memoryIndex, map, address, subaddressLength, subaddress,
+            &transfer, length);
+        if (result == kIOReturnSuccess || result == kIOReturnNoDevice)
+            break;
+    }
+    if (result == kIOReturnNoDevice && subaddressLength != 0) {
+        uint8_t pointer[2] = {
+            (uint8_t)((subaddress >> 8) & 0xffu),
+            (uint8_t)(subaddress & 0xffu),
+        };
+        uint32_t localControllerStatus = 0;
+        uint32_t localInterruptStatus = 0;
+        result = TimeCardI2CWriteLocked(
+            device, memoryIndex, map, address,
+            subaddressLength == 2u ? pointer : &pointer[1],
+            subaddressLength, &localControllerStatus, &localInterruptStatus);
+        if (result == kIOReturnSuccess) {
+            transfer.length = 0;
+            transfer.controllerStatus = 0;
+            transfer.interruptStatus = 0;
+            result = TimeCardI2CReadAttempt(
+                device, memoryIndex, map, address, 0, 0, &transfer, length);
+        }
+    }
+    *controllerStatus = transfer.controllerStatus;
+    *interruptStatus = transfer.interruptStatus;
+    if (result == kIOReturnSuccess)
+        memcpy(data, transfer.data, length);
+    return result;
+}
+
+static kern_return_t
+TimeCardI2CMuxReadLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                         const TimeCardRegisterMap *map,
+                         uint8_t *channelMask, uint32_t *controllerStatus,
+                         uint32_t *interruptStatus)
+{
+    uint8_t value = 0;
+    const kern_return_t result = TimeCardI2CReadLocked(
+        device, memoryIndex, map, kTimeCardI2CMuxAddress, 0, 0, &value, 1,
+        controllerStatus, interruptStatus);
+    if (result == kIOReturnSuccess)
+        *channelMask = value & kTimeCardI2CMuxChannelMask;
+    return result;
+}
+
+static kern_return_t
+TimeCardI2CMuxWriteLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                          const TimeCardRegisterMap *map,
+                          uint8_t channelMask, uint32_t *controllerStatus,
+                          uint32_t *interruptStatus)
+{
+    const uint8_t value = channelMask & kTimeCardI2CMuxChannelMask;
+    return TimeCardI2CWriteLocked(
+        device, memoryIndex, map, kTimeCardI2CMuxAddress, &value, 1,
+        controllerStatus, interruptStatus);
+}
+
+static bool
+TimeCardLEDLogicalIndexValid(uint32_t led)
+{
+    return led < TIMECARD_LED_COUNT;
+}
+
+static uint32_t
+TimeCardLEDPhysicalIndex(const TimeCardRegisterMap *map, uint32_t logicalLED)
+{
+    static const uint32_t classicMap[TIMECARD_LED_COUNT] = {
+        4u, 5u, 2u, 3u, 0u, 1u
+    };
+    static const uint32_t celesticaMap[TIMECARD_LED_COUNT] = {
+        4u, 5u, 0u, 1u, 2u, 3u
+    };
+    if (map->boardProfile == kTimeCardBoardCelestica)
+        return celesticaMap[logicalLED];
+    if (map->boardProfile == kTimeCardBoardFacebook &&
+        map->layout == kTimeCardLayoutClassic)
+        return classicMap[logicalLED];
+    return logicalLED;
+}
+
+static bool
+TimeCardLEDChannelSwapsRedGreen(const TimeCardRegisterMap *map)
+{
+    return (map->boardProfile == kTimeCardBoardFacebook &&
+            map->layout == kTimeCardLayoutClassic) ||
+        map->boardProfile == kTimeCardBoardCelestica;
+}
+
+static bool
+TimeCardLEDFitted(const TimeCardRegisterMap *map, uint32_t logicalLED)
+{
+    return map->boardProfile != kTimeCardBoardCelestica ||
+        logicalLED != TIMECARD_LED_GNSS2;
+}
+
+static uint32_t
+TimeCardLEDOutputMaskForLogical(const TimeCardRegisterMap *map,
+                                uint32_t logicalLED)
+{
+    const uint32_t physical = TimeCardLEDPhysicalIndex(map, logicalLED);
+    uint32_t red = physical * 3u;
+    uint32_t green = red + 1u;
+    uint32_t blue = red + 2u;
+    if (TimeCardLEDChannelSwapsRedGreen(map)) {
+        const uint32_t swap = red;
+        red = green;
+        green = swap;
+    }
+    return (1u << red) | (1u << green) | (1u << blue);
+}
+
+static uint32_t
+TimeCardLEDPWMRegisterBase(const TimeCardRegisterMap *map,
+                           uint32_t logicalLED)
+{
+    return kIS32FL3207PWMBase +
+        TimeCardLEDPhysicalIndex(map, logicalLED) * 6u;
+}
+
+static uint32_t
+TimeCardLEDScalingRegisterBase(const TimeCardRegisterMap *map,
+                               uint32_t logicalLED)
+{
+    return kIS32FL3207ControlBase +
+        TimeCardLEDPhysicalIndex(map, logicalLED) * 3u;
+}
+
+static kern_return_t
+TimeCardLEDWriteRegisterLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                               const TimeCardRegisterMap *map,
+                               uint32_t address, uint8_t reg, uint8_t value,
+                               uint32_t *controllerStatus,
+                               uint32_t *interruptStatus)
+{
+    const uint8_t data[2] = {reg, value};
+    return TimeCardI2CWriteLocked(device, memoryIndex, map, address, data,
+                                  sizeof(data), controllerStatus,
+                                  interruptStatus);
+}
+
+static kern_return_t
+TimeCardLEDSelectSensorsBranchLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                                     const TimeCardRegisterMap *map,
+                                     uint8_t *savedMux,
+                                     bool *restoreMux,
+                                     uint32_t *controllerStatus,
+                                     uint32_t *interruptStatus)
+{
+    *savedMux = 0;
+    *restoreMux = false;
+    kern_return_t result = TimeCardI2CMuxReadLocked(
+        device, memoryIndex, map, savedMux, controllerStatus,
+        interruptStatus);
+    if (result == kIOReturnNoDevice)
+        return kIOReturnSuccess;
+    if (result != kIOReturnSuccess)
+        return result;
+    if (*savedMux == kTimeCardI2CMuxChannelSensors)
+        return kIOReturnSuccess;
+    result = TimeCardI2CMuxWriteLocked(
+        device, memoryIndex, map, kTimeCardI2CMuxChannelSensors,
+        controllerStatus, interruptStatus);
+    if (result == kIOReturnSuccess)
+        *restoreMux = true;
+    return result;
+}
+
+static void
+TimeCardLEDRestoreBranchLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                               const TimeCardRegisterMap *map,
+                               uint8_t savedMux, bool restoreMux,
+                               uint32_t *controllerStatus,
+                               uint32_t *interruptStatus)
+{
+    if (restoreMux) {
+        (void)TimeCardI2CMuxWriteLocked(device, memoryIndex, map, savedMux,
+                                        controllerStatus, interruptStatus);
+    }
+}
+
+static kern_return_t
+TimeCardLEDResolveAddressLocked(TimeCardDriver_IVars *ivars,
+                                uint32_t *address,
+                                uint32_t *controllerStatus,
+                                uint32_t *interruptStatus)
+{
+    static const uint32_t candidates[] = {0x37u, 0x36u, 0x35u, 0x34u};
+    if (ivars->i2cLEDAddress != 0) {
+        *address = ivars->i2cLEDAddress;
+        return kIOReturnSuccess;
+    }
+    for (uint32_t candidate : candidates) {
+        uint8_t deviceControl = 0xffu;
+        uint8_t globalCurrent = 0xffu;
+        kern_return_t result = TimeCardI2CReadLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+            candidate, 1, kIS32FL3207DeviceControl, &deviceControl, 1,
+            controllerStatus, interruptStatus);
+        if (result != kIOReturnSuccess)
+            continue;
+        result = TimeCardI2CReadLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+            candidate, 1, kIS32FL3207GlobalCurrent, &globalCurrent, 1,
+            controllerStatus, interruptStatus);
+        if (result == kIOReturnSuccess && (deviceControl & 0x88u) == 0) {
+            ivars->i2cLEDAddress = candidate;
+            *address = candidate;
+            return kIOReturnSuccess;
+        }
+    }
+    return kIOReturnNoDevice;
+}
+
+static void
+TimeCardLEDEncodeColor(const TimeCardRegisterMap *map,
+                       const TimeCardLEDControl *control, uint8_t *rgb)
+{
+    rgb[0] = (uint8_t)control->red;
+    rgb[1] = (uint8_t)control->green;
+    rgb[2] = (uint8_t)control->blue;
+    if (TimeCardLEDChannelSwapsRedGreen(map)) {
+        const uint8_t swap = rgb[0];
+        rgb[0] = rgb[1];
+        rgb[1] = swap;
+    }
+}
+
+static kern_return_t
+TimeCardLEDReadStateLocked(TimeCardDriver_IVars *ivars,
+                           uint32_t logicalLED,
+                           TimeCardLEDControl *response,
+                           uint32_t *controllerStatus,
+                           uint32_t *interruptStatus)
+{
+    uint32_t address = 0;
+    uint8_t raw[6] = {};
+    uint8_t global = 0;
+    kern_return_t result = TimeCardLEDResolveAddressLocked(
+        ivars, &address, controllerStatus, interruptStatus);
+    if (result != kIOReturnSuccess)
+        return result;
+    const uint32_t base = TimeCardLEDPWMRegisterBase(&ivars->registers,
+                                                     logicalLED);
+    result = TimeCardI2CReadLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers, address, 1,
+        base, raw, sizeof(raw), controllerStatus, interruptStatus);
+    if (result != kIOReturnSuccess)
+        return result;
+    result = TimeCardI2CReadLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers, address, 1,
+        kIS32FL3207GlobalCurrent, &global, 1, controllerStatus,
+        interruptStatus);
+    if (result != kIOReturnSuccess)
+        return result;
+
+    *response = {};
+    response->size = sizeof(*response);
+    response->led = logicalLED;
+    response->flags = kTimeCardLEDFlagPresent | kTimeCardLEDFlagEnabled;
+    if (TimeCardLEDChannelSwapsRedGreen(&ivars->registers)) {
+        response->red = raw[2];
+        response->green = raw[0];
+    } else {
+        response->red = raw[0];
+        response->green = raw[2];
+    }
+    response->blue = raw[4];
+    response->globalCurrent = global;
+    response->muxChannelMask = kTimeCardI2CMuxChannelSensors;
+    response->controllerStatus = *controllerStatus;
+    response->interruptStatus = *interruptStatus;
+    response->openOutputMask =
+        TimeCardLEDOutputMaskForLogical(&ivars->registers, logicalLED);
+    response->shortOutputMask = 0;
+    return kIOReturnSuccess;
+}
+
+kern_return_t
+TimeCardDriver::QueryLED(TimeCardLEDControl *control)
+{
+    if (control == nullptr || !ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (control->size < sizeof(*control) ||
+        !TimeCardLEDLogicalIndexValid(control->led))
+        return kIOReturnBadArgument;
+    if ((ivars->registers.capabilities & kTimeCardCapabilityLED) == 0 ||
+        !TimeCardRegisterMapHasLED(&ivars->registers))
+        return kIOReturnUnsupported;
+    if (!TimeCardLEDFitted(&ivars->registers, control->led))
+        return kIOReturnUnsupported;
+
+    IOLockLock(ivars->registerLock);
+    uint8_t savedMux = 0;
+    bool restoreMux = false;
+    uint32_t controllerStatus = 0;
+    uint32_t interruptStatus = 0;
+    kern_return_t result = TimeCardLEDSelectSensorsBranchLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers, &savedMux,
+        &restoreMux, &controllerStatus, &interruptStatus);
+    if (result == kIOReturnSuccess) {
+        TimeCardLEDControl response = {};
+        result = TimeCardLEDReadStateLocked(
+            ivars, control->led, &response, &controllerStatus,
+            &interruptStatus);
+        if (result == kIOReturnSuccess)
+            *control = response;
+    }
+    TimeCardLEDRestoreBranchLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers, savedMux,
+        restoreMux, &controllerStatus, &interruptStatus);
+    IOLockUnlock(ivars->registerLock);
+    return result;
+}
+
+kern_return_t
+TimeCardDriver::SetLED(const TimeCardLEDControl *request,
+                       TimeCardLEDControl *response)
+{
+    if (request == nullptr || response == nullptr || !ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (request->size < sizeof(*request) ||
+        !TimeCardLEDLogicalIndexValid(request->led) ||
+        request->red > UINT8_MAX || request->green > UINT8_MAX ||
+        request->blue > UINT8_MAX ||
+        request->globalCurrent > kTimeCardLEDMaxGlobalCurrent)
+        return kIOReturnBadArgument;
+    if ((ivars->registers.capabilities & kTimeCardCapabilityLED) == 0 ||
+        !TimeCardRegisterMapHasLED(&ivars->registers))
+        return kIOReturnUnsupported;
+    if (!TimeCardLEDFitted(&ivars->registers, request->led))
+        return kIOReturnUnsupported;
+
+    IOLockLock(ivars->registerLock);
+    uint8_t savedMux = 0;
+    bool restoreMux = false;
+    uint32_t controllerStatus = 0;
+    uint32_t interruptStatus = 0;
+    uint32_t address = 0;
+    kern_return_t result = TimeCardLEDSelectSensorsBranchLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers, &savedMux,
+        &restoreMux, &controllerStatus, &interruptStatus);
+    if (result != kIOReturnSuccess)
+        goto done;
+    result = TimeCardLEDResolveAddressLocked(
+        ivars, &address, &controllerStatus, &interruptStatus);
+    if (result != kIOReturnSuccess)
+        goto done;
+    result = TimeCardLEDWriteRegisterLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers, address,
+        kIS32FL3207DeviceControl, 0x01u, &controllerStatus,
+        &interruptStatus);
+    if (result != kIOReturnSuccess)
+        goto done;
+
+    {
+        const uint8_t current = request->globalCurrent == 0 ?
+            kTimeCardLEDMaxGlobalCurrent : (uint8_t)request->globalCurrent;
+        uint8_t rgb[3] = {};
+        TimeCardLEDEncodeColor(&ivars->registers, request, rgb);
+        const uint8_t scaleBase = (uint8_t)TimeCardLEDScalingRegisterBase(
+            &ivars->registers, request->led);
+        const uint8_t pwmBase = (uint8_t)TimeCardLEDPWMRegisterBase(
+            &ivars->registers, request->led);
+        result = TimeCardLEDWriteRegisterLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers, address,
+            kIS32FL3207GlobalCurrent, current, &controllerStatus,
+            &interruptStatus);
+        if (result != kIOReturnSuccess)
+            goto done;
+        for (uint32_t channel = 0; channel < 3u; ++channel) {
+            result = TimeCardLEDWriteRegisterLocked(
+                ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+                address, (uint8_t)(scaleBase + channel), 0xffu,
+                &controllerStatus, &interruptStatus);
+            if (result != kIOReturnSuccess)
+                goto done;
+        }
+        const uint8_t pwm[6] = {rgb[0], 0, rgb[1], 0, rgb[2], 0};
+        for (uint32_t channel = 0; channel < sizeof(pwm); ++channel) {
+            result = TimeCardLEDWriteRegisterLocked(
+                ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+                address, (uint8_t)(pwmBase + channel), pwm[channel],
+                &controllerStatus, &interruptStatus);
+            if (result != kIOReturnSuccess)
+                goto done;
+        }
+        result = TimeCardLEDWriteRegisterLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers, address,
+            kIS32FL3207Update, 0x00u, &controllerStatus, &interruptStatus);
+        if (result != kIOReturnSuccess)
+            goto done;
+        result = TimeCardLEDWriteRegisterLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers, address,
+            kIS32FL3207SpreadSpectrum, 0x00u, &controllerStatus,
+            &interruptStatus);
+        if (result != kIOReturnSuccess)
+            goto done;
+        result = TimeCardLEDReadStateLocked(
+            ivars, request->led, response, &controllerStatus,
+            &interruptStatus);
+        if (result == kIOReturnSuccess &&
+            (response->red != request->red ||
+             response->green != request->green ||
+             response->blue != request->blue ||
+             response->globalCurrent != current)) {
+            result = kIOReturnBadMedia;
+        }
+    }
+
+done:
+    TimeCardLEDRestoreBranchLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers, savedMux,
+        restoreMux, &controllerStatus, &interruptStatus);
+    IOLockUnlock(ivars->registerLock);
+    return result;
+}
+
 static kern_return_t
 GetInfoAction(OSObject *, void *reference,
               IOUserClientMethodArguments *arguments)
@@ -991,6 +1925,46 @@ SMASetAction(OSObject *, void *reference,
     return result;
 }
 
+static kern_return_t
+LEDQueryAction(OSObject *, void *reference,
+               IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardLEDControl *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardLEDControl response = *request;
+    const kern_return_t result = driver->QueryLED(&response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+LEDSetAction(OSObject *, void *reference,
+             IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardLEDControl *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardLEDControl response = {};
+    const kern_return_t result = driver->SetLED(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
 static const IOUserClientMethodDispatch kTimeCardDispatch[
     kTimeCardMethodCount] = {
     {GetInfoAction, false, 0, 0, 0, sizeof(TimeCardInfo)},
@@ -1002,6 +1976,10 @@ static const IOUserClientMethodDispatch kTimeCardDispatch[
      sizeof(TimeCardSMAControl)},
     {SMASetAction, false, 0, sizeof(TimeCardSMAControl), 0,
      sizeof(TimeCardSMAControl)},
+    {LEDQueryAction, false, 0, sizeof(TimeCardLEDControl), 0,
+     sizeof(TimeCardLEDControl)},
+    {LEDSetAction, false, 0, sizeof(TimeCardLEDControl), 0,
+     sizeof(TimeCardLEDControl)},
 };
 
 kern_return_t

@@ -22,7 +22,10 @@ print_usage(FILE *stream)
             "       timecardctl set-card-from-system\n"
             "       timecardctl sma [connector]\n"
             "       timecardctl sma-set connector input|output function\n"
-            "       timecardctl sma-set connector disabled\n");
+            "       timecardctl sma-set connector disabled\n"
+            "       timecardctl led [led]\n"
+            "       timecardctl led-set led red green blue [current]\n"
+            "       timecardctl led-sma-auto\n");
 }
 
 static io_connect_t
@@ -178,7 +181,7 @@ command_status(io_connect_t connection)
     }
     printf("Register layout:  %s\n",
            TimeCardRegisterLayoutName(info.layout));
-    printf("Capabilities:     %s%s%s%s%s\n",
+    printf("Capabilities:     %s%s%s%s%s%s\n",
            (info.capabilities & kTimeCardCapabilityReadClock) != 0 ?
                "clock-read" : "no-clock-read",
            (info.capabilities & kTimeCardCapabilitySetClock) != 0 ?
@@ -188,7 +191,9 @@ command_status(io_connect_t connection)
            (info.capabilities & kTimeCardCapabilityTOD) != 0 ?
                ", TOD" : "",
            (info.capabilities & kTimeCardCapabilitySMA) != 0 ?
-               ", SMA" : "");
+               ", SMA" : "",
+           (info.capabilities & kTimeCardCapabilityLED) != 0 ?
+               ", LEDs" : "");
     printf("Clock offset:     0x%" PRIx64 "\n", info.clockOffset);
     if ((info.validFields & kTimeCardInfoValidClockVersion) != 0)
         printf("Clock version:    0x%08x\n", info.clockVersion);
@@ -323,6 +328,155 @@ command_sma_set(io_connect_t connection, int argc, char **argv)
     return 0;
 }
 
+static const char *
+led_name(uint32_t led)
+{
+    switch (led) {
+    case TIMECARD_LED_GNSS1:
+        return "GNSS 1";
+    case TIMECARD_LED_GNSS2:
+        return "GNSS 2";
+    case TIMECARD_LED_SMA1:
+        return "SMA 1";
+    case TIMECARD_LED_SMA2:
+        return "SMA 2";
+    case TIMECARD_LED_SMA3:
+        return "SMA 3";
+    case TIMECARD_LED_SMA4:
+        return "SMA 4";
+    default:
+        return "unknown";
+    }
+}
+
+static void
+print_led(const TimeCardLEDControl *control)
+{
+    printf("LED %u (%s): %s%s, RGB %u/%u/%u, current %u",
+           control->led + 1u, led_name(control->led),
+           (control->flags & kTimeCardLEDFlagPresent) != 0 ?
+               "present" : "not present",
+           (control->flags & kTimeCardLEDFlagEnabled) != 0 ?
+               ", enabled" : "",
+           control->red, control->green, control->blue,
+           control->globalCurrent);
+    if ((control->flags & kTimeCardLEDFlagFaultValid) != 0) {
+        printf(", open 0x%05x, short 0x%05x",
+               control->openOutputMask & kTimeCardLEDOutputMask,
+               control->shortOutputMask & kTimeCardLEDOutputMask);
+    }
+    printf(", mux 0x%02x, controller 0x%02x, interrupts 0x%02x\n",
+           control->muxChannelMask, control->controllerStatus,
+           control->interruptStatus);
+}
+
+static int
+command_led(io_connect_t connection, int argc, char **argv)
+{
+    unsigned long first = 1;
+    unsigned long last = TIMECARD_LED_COUNT;
+    if (argc > 3)
+        return 2;
+    if (argc == 3)
+        first = last = parse_ulong(argv[2], "LED");
+    if (first == 0 || last > TIMECARD_LED_COUNT)
+        return 2;
+
+    for (unsigned long led = first; led <= last; led++) {
+        TimeCardLEDControl control = {
+            .size = sizeof(control),
+            .led = (uint32_t)(led - 1u),
+        };
+        if (call_inout(connection, kTimeCardMethodLEDQuery,
+                       &control, sizeof(control), &control,
+                       sizeof(control)))
+            return 1;
+        print_led(&control);
+    }
+    return 0;
+}
+
+static int
+command_led_set(io_connect_t connection, int argc, char **argv)
+{
+    if (argc < 6 || argc > 7)
+        return 2;
+
+    TimeCardLEDControl control = {
+        .size = sizeof(control),
+        .led = (uint32_t)(parse_ulong(argv[2], "LED") - 1u),
+        .red = (uint32_t)parse_ulong(argv[3], "red"),
+        .green = (uint32_t)parse_ulong(argv[4], "green"),
+        .blue = (uint32_t)parse_ulong(argv[5], "blue"),
+        .globalCurrent = argc == 7 ?
+            (uint32_t)parse_ulong(argv[6], "current") : 96u,
+    };
+    if (control.led >= TIMECARD_LED_COUNT || control.red > UINT8_MAX ||
+        control.green > UINT8_MAX || control.blue > UINT8_MAX ||
+        control.globalCurrent > kTimeCardLEDMaxGlobalCurrent) {
+        return 2;
+    }
+
+    if (call_inout(connection, kTimeCardMethodLEDSet,
+                   &control, sizeof(control), &control, sizeof(control)))
+        return 1;
+    print_led(&control);
+    return 0;
+}
+
+static void
+sma_led_color(const TimeCardSMAControl *sma, TimeCardLEDControl *led)
+{
+    led->red = 130u;
+    led->green = 55u;
+    led->blue = 0u;
+    led->globalCurrent = 96u;
+    if ((sma->flags & kTimeCardSMAFlagDisabled) != 0 ||
+        sma->direction == kTimeCardSMADirectionDisabled) {
+        led->red = 50u;
+        led->green = 35u;
+        led->blue = 0u;
+    } else if (sma->direction == kTimeCardSMADirectionInput) {
+        led->red = 0u;
+        led->green = 65u;
+        led->blue = 180u;
+    } else if (sma->direction == kTimeCardSMADirectionOutput) {
+        led->red = 0u;
+        led->green = 165u;
+        led->blue = 30u;
+    }
+}
+
+static int
+command_led_sma_auto(io_connect_t connection, int argc, char **argv)
+{
+    (void)argv;
+    if (argc != 2)
+        return 2;
+    for (uint32_t connector = 1; connector <= TIMECARD_SMA_COUNT;
+         connector++) {
+        TimeCardSMAControl sma = {
+            .size = sizeof(sma),
+            .connector = connector,
+        };
+        TimeCardLEDControl led = {
+            .size = sizeof(led),
+            .led = TIMECARD_LED_SMA1 + connector - 1u,
+        };
+        if (call_inout(connection, kTimeCardMethodSMAQuery,
+                       &sma, sizeof(sma), &sma, sizeof(sma)))
+            return 1;
+        sma_led_color(&sma, &led);
+        if (call_inout(connection, kTimeCardMethodLEDSet,
+                       &led, sizeof(led), &led, sizeof(led)))
+            return 1;
+        printf("SMA %u %-8s -> ", connector,
+               sma_direction_name(sma.direction));
+        print_led(&led);
+    }
+    return 0;
+}
+
 static int
 command_get(io_connect_t connection)
 {
@@ -387,6 +541,12 @@ main(int argc, char **argv)
         status = command_sma(connection, argc, argv);
     else if (strcmp(argv[1], "sma-set") == 0)
         status = command_sma_set(connection, argc, argv);
+    else if (strcmp(argv[1], "led") == 0)
+        status = command_led(connection, argc, argv);
+    else if (strcmp(argv[1], "led-set") == 0)
+        status = command_led_set(connection, argc, argv);
+    else if (strcmp(argv[1], "led-sma-auto") == 0)
+        status = command_led_sma_auto(connection, argc, argv);
     else {
         print_usage(stderr);
         status = 2;

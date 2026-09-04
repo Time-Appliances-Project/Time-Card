@@ -38,6 +38,10 @@ AssertDriverAccessesFit(const TimeCardRegisterMap &map)
         assert(TimeCardRangeFits(map.requiredBarSize,
                                  map.todOffset + kTimeCardTodVersion, 4));
     }
+    if (TimeCardRegisterMapHasLED(&map)) {
+        assert(TimeCardRangeFits(map.requiredBarSize,
+                                 map.i2cOffset, kTimeCardI2CRegisterLength));
+    }
 }
 
 int main()
@@ -95,8 +99,10 @@ int main()
     assert(facebookMSI.uartOffsets[0] == 0x00161000u);
     assert(TimeCardRegisterMapHasTOD(&facebookMSI));
     assert((facebookMSI.capabilities & kTimeCardCapabilityTOD) != 0);
-    assert(facebookMSI.requiredBarSize ==
-           facebookMSI.todOffset + kTimeCardTodVersion + 4u);
+    assert(TimeCardRegisterMapHasLED(&facebookMSI));
+    assert((facebookMSI.capabilities & kTimeCardCapabilityLED) != 0);
+    assert(facebookMSI.requiredBarSize >=
+           facebookMSI.i2cOffset + kTimeCardI2CRegisterLength);
     assert(facebookMSI.requiredBarSize <
            facebookMSI.todOffset + kTimeCardTodUtcStatus + 4u);
     AssertExactBarBoundary(facebookMSI);
@@ -149,8 +155,10 @@ int main()
     assert(art.clockOffset == 0x01000000u);
     assert(art.todOffset == 0);
     assert(!TimeCardRegisterMapHasTOD(&art));
+    assert(!TimeCardRegisterMapHasLED(&art));
     assert((art.capabilities & kTimeCardCapabilityReadClock) != 0);
     assert((art.capabilities & kTimeCardCapabilityTOD) == 0);
+    assert((art.capabilities & kTimeCardCapabilityLED) == 0);
     assert(art.uartOffsets[0] == 0x00161000u);
     assert(art.uartOffsets[1] == 0);
     assert(art.uartOffsets[2] == 0x00190000u);
@@ -168,6 +176,8 @@ int main()
     assert(adva.clockOffset == 0x01000000u);
     assert(adva.todOffset == 0x01050000u);
     assert(TimeCardRegisterMapHasTOD(&adva));
+    assert(TimeCardRegisterMapHasLED(&adva));
+    assert((adva.capabilities & kTimeCardCapabilityLED) != 0);
     assert(adva.uartOffsets[1] == 0);
     assert(adva.uartOffsets[2] == 0x00181000u);
     AssertExactBarBoundary(adva);
