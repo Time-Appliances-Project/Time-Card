@@ -7,6 +7,8 @@ endif()
 
 project(TimeCardMacOS LANGUAGES C CXX)
 
+set(TIMECARDCTL_BUNDLE_VERSION "20")
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_STANDARD 20)
@@ -24,7 +26,7 @@ if(APPLE)
     set_target_properties(timecardctl PROPERTIES
         MACOSX_BUNDLE_BUNDLE_NAME "timecardctl"
         MACOSX_BUNDLE_GUI_IDENTIFIER "org.opentimeserver.timecard.macos.cli"
-        MACOSX_BUNDLE_BUNDLE_VERSION "1"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${TIMECARDCTL_BUNDLE_VERSION}"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
     )
 endif()

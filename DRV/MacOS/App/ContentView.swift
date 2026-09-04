@@ -1747,8 +1747,17 @@ private struct TimeCardUBXPoll: Identifiable, Equatable {
     static let allCases: [TimeCardUBXPoll] = [
         TimeCardUBXPoll(label: "MON-VER", messageClass: 0x0a, messageID: 0x04),
         TimeCardUBXPoll(label: "MON-HW", messageClass: 0x0a, messageID: 0x09),
+        TimeCardUBXPoll(label: "MON-HW2", messageClass: 0x0a, messageID: 0x0b),
+        TimeCardUBXPoll(label: "NAV-STATUS", messageClass: 0x01, messageID: 0x03),
         TimeCardUBXPoll(label: "NAV-PVT", messageClass: 0x01, messageID: 0x07),
+        TimeCardUBXPoll(label: "NAV-DOP", messageClass: 0x01, messageID: 0x04),
+        TimeCardUBXPoll(label: "NAV-CLOCK", messageClass: 0x01, messageID: 0x22),
+        TimeCardUBXPoll(label: "NAV-TIMEGPS", messageClass: 0x01, messageID: 0x20),
+        TimeCardUBXPoll(label: "NAV-TIMEUTC", messageClass: 0x01, messageID: 0x21),
+        TimeCardUBXPoll(label: "NAV-TIMELS", messageClass: 0x01, messageID: 0x26),
         TimeCardUBXPoll(label: "NAV-SAT", messageClass: 0x01, messageID: 0x35),
+        TimeCardUBXPoll(label: "NAV-SVIN", messageClass: 0x01, messageID: 0x3b),
+        TimeCardUBXPoll(label: "TIM-TP", messageClass: 0x0d, messageID: 0x01),
     ]
 
     var packet: [UInt8] {
@@ -1859,7 +1868,12 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
     var messageName: String {
         switch (messageClass, messageID) {
         case (0x01, 0x03): "NAV-STATUS"
+        case (0x01, 0x04): "NAV-DOP"
         case (0x01, 0x07): "NAV-PVT"
+        case (0x01, 0x20): "NAV-TIMEGPS"
+        case (0x01, 0x21): "NAV-TIMEUTC"
+        case (0x01, 0x22): "NAV-CLOCK"
+        case (0x01, 0x26): "NAV-TIMELS"
         case (0x01, 0x35): "NAV-SAT"
         case (0x01, 0x3B): "NAV-SVIN"
         case (0x05, 0x01): "ACK-ACK"
@@ -1867,6 +1881,8 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
         case (0x06, 0x08): "CFG-RATE"
         case (0x06, 0x24): "CFG-NAV5"
         case (0x0A, 0x04): "MON-VER"
+        case (0x0A, 0x09): "MON-HW"
+        case (0x0A, 0x0B): "MON-HW2"
         case (0x0D, 0x01): "TIM-TP"
         default: "UBX"
         }
@@ -1878,6 +1894,16 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
             return navPVTSummary
         case (0x01, 0x03):
             return navStatusSummary
+        case (0x01, 0x04):
+            return navDOPSummary
+        case (0x01, 0x20):
+            return navTimeGPSSummary
+        case (0x01, 0x21):
+            return navTimeUTCSummary
+        case (0x01, 0x22):
+            return navClockSummary
+        case (0x01, 0x26):
+            return navTimeLSSummary
         case (0x01, 0x35):
             return navSATSummary
         case (0x01, 0x3B):
@@ -1886,6 +1912,10 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
             return cfgRateSummary
         case (0x0A, 0x04):
             return monVersionSummary
+        case (0x0A, 0x09):
+            return monHWSummary
+        case (0x0A, 0x0B):
+            return monHW2Summary
         case (0x0D, 0x01):
             return timTPSummary
         default:
@@ -1972,6 +2002,93 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
         return "Fix type \(fixType), fix \(fixOK ? "OK" : "not OK"), time-to-first-fix \(timeToFirstFix) ms."
     }
 
+    private var navDOPSummary: String {
+        guard payload.count >= 18 else {
+            return "NAV-DOP payload is shorter than expected."
+        }
+        let gDOP = Double(Self.readUInt16(payload, at: 4)) * 0.01
+        let pDOP = Double(Self.readUInt16(payload, at: 6)) * 0.01
+        let tDOP = Double(Self.readUInt16(payload, at: 8)) * 0.01
+        let vDOP = Double(Self.readUInt16(payload, at: 10)) * 0.01
+        let hDOP = Double(Self.readUInt16(payload, at: 12)) * 0.01
+        let nDOP = Double(Self.readUInt16(payload, at: 14)) * 0.01
+        let eDOP = Double(Self.readUInt16(payload, at: 16)) * 0.01
+        return String(
+            format: "DOP g %.2f, p %.2f, t %.2f, v %.2f, h %.2f, n %.2f, e %.2f.",
+            gDOP,
+            pDOP,
+            tDOP,
+            vDOP,
+            hDOP,
+            nDOP,
+            eDOP
+        )
+    }
+
+    private var navTimeGPSSummary: String {
+        guard payload.count >= 16 else {
+            return "NAV-TIMEGPS payload is shorter than expected."
+        }
+        let towMS = Self.readUInt32(payload, at: 0)
+        let towNS = Self.readInt32(payload, at: 4)
+        let week = Self.readInt16(payload, at: 8)
+        let leapSeconds = Int(Int8(bitPattern: payload[10]))
+        let valid = payload[11]
+        let timeAccuracy = Self.readUInt32(payload, at: 12)
+        return "GPS week \(week), TOW \(towMS) ms + \(towNS) ns, leap seconds \(leapSeconds), valid flags 0x\(String(format: "%02x", valid)), accuracy \(timeAccuracy) ns."
+    }
+
+    private var navTimeUTCSummary: String {
+        guard payload.count >= 20 else {
+            return "NAV-TIMEUTC payload is shorter than expected."
+        }
+        let timeAccuracy = Self.readUInt32(payload, at: 4)
+        let nano = Self.readInt32(payload, at: 8)
+        let year = Self.readUInt16(payload, at: 12)
+        let month = payload[14]
+        let day = payload[15]
+        let hour = payload[16]
+        let minute = payload[17]
+        let second = payload[18]
+        let valid = payload[19]
+        return String(
+            format: "UTC %04u-%02u-%02u %02u:%02u:%02u + %d ns, valid flags 0x%02x, accuracy %u ns.",
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+            nano,
+            valid,
+            timeAccuracy
+        )
+    }
+
+    private var navClockSummary: String {
+        guard payload.count >= 20 else {
+            return "NAV-CLOCK payload is shorter than expected."
+        }
+        let bias = Self.readInt32(payload, at: 4)
+        let drift = Self.readInt32(payload, at: 8)
+        let timeAccuracy = Self.readUInt32(payload, at: 12)
+        let frequencyAccuracy = Self.readUInt32(payload, at: 16)
+        return "Clock bias \(bias) ns, drift \(drift) ns/s, time accuracy \(timeAccuracy) ns, frequency accuracy \(frequencyAccuracy) ps/s."
+    }
+
+    private var navTimeLSSummary: String {
+        guard payload.count >= 24 else {
+            return "NAV-TIMELS payload is shorter than expected."
+        }
+        let currentLeapSeconds = Int(Int8(bitPattern: payload[8]))
+        let leapChange = Int(Int8(bitPattern: payload[10]))
+        let timeToEvent = Self.readInt32(payload, at: 12)
+        let eventWeek = Self.readUInt16(payload, at: 16)
+        let eventDay = Self.readUInt16(payload, at: 18)
+        let valid = payload[23]
+        return "Current leap seconds \(currentLeapSeconds), next change \(leapChange), event in \(timeToEvent) s at GPS week \(eventWeek) day \(eventDay), valid flags 0x\(String(format: "%02x", valid))."
+    }
+
     private var navSATSummary: String {
         guard payload.count >= 8 else {
             return "NAV-SAT payload is shorter than expected."
@@ -2035,6 +2152,34 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
         let software = Self.cString(payload[0..<30])
         let hardware = Self.cString(payload[30..<40])
         return "Software \(software), hardware \(hardware)."
+    }
+
+    private var monHWSummary: String {
+        guard payload.count >= 24 else {
+            return "MON-HW payload is shorter than expected."
+        }
+        let noise = Self.readUInt16(payload, at: 16)
+        let agc = Self.readUInt16(payload, at: 18)
+        let antennaStatus = Self.antennaStatusName(payload[20])
+        let antennaPower = Self.antennaPowerName(payload[21])
+        let flags = payload[22]
+        let usedMask = payload.count >= 28 ?
+            Self.readUInt32(payload, at: 24) : 0
+        return "Antenna \(antennaStatus), power \(antennaPower), AGC \(agc), noise \(noise), flags 0x\(String(format: "%02x", flags)), used mask 0x\(String(format: "%08x", usedMask))."
+    }
+
+    private var monHW2Summary: String {
+        guard payload.count >= 28 else {
+            return "MON-HW2 payload is shorter than expected."
+        }
+        let offsetI = Self.readInt8(payload, at: 0)
+        let magI = payload[1]
+        let offsetQ = Self.readInt8(payload, at: 2)
+        let magQ = payload[3]
+        let cfgSource = payload[4]
+        let lowLevel = Self.readUInt32(payload, at: 8)
+        let postStatus = Self.readUInt32(payload, at: 16)
+        return "I/Q offset \(offsetI)/\(offsetQ), I/Q magnitude \(magI)/\(magQ), config source \(cfgSource), low level \(lowLevel), POST 0x\(String(format: "%08x", postStatus))."
     }
 
     private var timTPSummary: String {
@@ -2131,6 +2276,10 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
         Int16(bitPattern: readUInt16(bytes, at: offset))
     }
 
+    private static func readInt8(_ bytes: [UInt8], at offset: Int) -> Int8 {
+        Int8(bitPattern: bytes[offset])
+    }
+
     private static func readInt32(_ bytes: [UInt8], at offset: Int) -> Int32 {
         Int32(bitPattern: readUInt32(bytes, at: offset))
     }
@@ -2145,6 +2294,26 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
         case 6: "GLONASS"
         case 7: "NavIC"
         default: "GNSS \(identifier)"
+        }
+    }
+
+    private static func antennaStatusName(_ value: UInt8) -> String {
+        switch value {
+        case 0: "initializing"
+        case 1: "unknown"
+        case 2: "OK"
+        case 3: "short"
+        case 4: "open"
+        default: "status \(value)"
+        }
+    }
+
+    private static func antennaPowerName(_ value: UInt8) -> String {
+        switch value {
+        case 0: "off"
+        case 1: "on"
+        case 2: "unknown"
+        default: "power \(value)"
         }
     }
 

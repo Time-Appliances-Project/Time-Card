@@ -32,3 +32,17 @@ if(NOT bundle_identifier STREQUAL "org.opentimeserver.timecard.macos.cli")
     message(FATAL_ERROR
         "unexpected timecardctl bundle identifier: ${bundle_identifier}")
 endif()
+
+execute_process(
+    COMMAND /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${info_plist}"
+    RESULT_VARIABLE version_result
+    OUTPUT_VARIABLE bundle_version
+    ERROR_VARIABLE version_error
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT version_result EQUAL 0)
+    message(FATAL_ERROR "cannot read timecardctl bundle version: ${version_error}")
+endif()
+if(NOT bundle_version STREQUAL "20")
+    message(FATAL_ERROR "unexpected timecardctl bundle version: ${bundle_version}")
+endif()

@@ -46,8 +46,9 @@ print_usage(FILE *stream)
             "       timecardctl uart-read port [max-bytes [timeout-ms]]\n"
             "       timecardctl uart-capture port [seconds [baud]]\n"
             "       timecardctl uart-write-hex port hex-string [timeout-ms]\n"
-            "       timecardctl ubx-poll-read port mon-ver|mon-hw|nav-pvt|nav-sat "
-            "[baud [timeout-ms]]\n");
+            "       timecardctl ubx-poll-read port mon-ver|mon-hw|mon-hw2|"
+            "nav-status|nav-pvt|nav-dop|nav-clock|nav-timegps|nav-timeutc|"
+            "nav-timels|nav-sat|nav-svin|tim-tp [baud [timeout-ms]]\n");
 }
 
 static io_connect_t
@@ -505,8 +506,17 @@ typedef struct TimeCardUBXPollSpec {
 static const TimeCardUBXPollSpec kTimeCardUBXPolls[] = {
     {"mon-ver", 0x0au, 0x04u},
     {"mon-hw", 0x0au, 0x09u},
+    {"mon-hw2", 0x0au, 0x0bu},
+    {"nav-status", 0x01u, 0x03u},
     {"nav-pvt", 0x01u, 0x07u},
+    {"nav-dop", 0x01u, 0x04u},
+    {"nav-clock", 0x01u, 0x22u},
+    {"nav-timegps", 0x01u, 0x20u},
+    {"nav-timeutc", 0x01u, 0x21u},
+    {"nav-timels", 0x01u, 0x26u},
     {"nav-sat", 0x01u, 0x35u},
+    {"nav-svin", 0x01u, 0x3bu},
+    {"tim-tp", 0x0du, 0x01u},
 };
 
 static const TimeCardUBXPollSpec *
@@ -794,7 +804,9 @@ command_ubx_poll_read(io_connect_t connection, int argc, char **argv)
     if (poll == NULL) {
         fprintf(stderr,
                 "timecardctl: unknown UBX poll '%s'; expected mon-ver, "
-                "mon-hw, nav-pvt, or nav-sat\n",
+                "mon-hw, mon-hw2, nav-status, nav-pvt, nav-dop, nav-clock, "
+                "nav-timegps, nav-timeutc, nav-timels, nav-sat, nav-svin, "
+                "or tim-tp\n",
                 argv[3]);
         return 2;
     }

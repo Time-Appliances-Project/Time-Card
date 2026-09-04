@@ -61,6 +61,9 @@ The current implementation provides:
     satellite sky map, and per-satellite signal records
   - NMEA summaries for GGA, RMC, GSA, GSV, GLL, VTG, GNS, ZDA, GST, TXT, HDT,
     and THS receiver sentences
+  - read-only UBX polls and summaries for receiver version, monitor hardware,
+    navigation status, PVT, DOP, receiver clock, GPS/UTC/leap-second time,
+    satellite records, survey-in, and time-pulse telemetry
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
@@ -236,7 +239,7 @@ the new driver build.
    same executable with `get`, `sma`, `led`, `led-auto`, `i2c-status`,
    `i2c-scan`, `i2c-read`, `i2c-mux`, `sensors`, `uart-observe`,
    `uart-config`, `uart-read`, `uart-capture`, `uart-write-hex`, and
-   `ubx-poll-read`.
+   `ubx-poll-read mon-ver|mon-hw|mon-hw2|nav-status|nav-pvt|nav-dop|nav-clock|nav-timegps|nav-timeutc|nav-timels|nav-sat|nav-svin|tim-tp`.
 9. Compare the reported card time, core versions, and available status fields
    with the Linux reference setup.
 
