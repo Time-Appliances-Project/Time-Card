@@ -854,6 +854,40 @@ print_sensor_presence(const TimeCardSensorReading *reading)
                ", IMU" : "");
 }
 
+static void
+print_imu_probe_detail(const TimeCardSensorReading *reading)
+{
+    if ((reading->flags & kTimeCardSensorFlagIMU) == 0)
+        return;
+
+    if (reading->type == kTimeCardSensorTypeBNO08x) {
+        const uint32_t channel = (reading->raw2 >> 8) & 0xffu;
+        const uint32_t sequence = reading->raw2 & 0xffu;
+        if ((reading->flags & kTimeCardSensorFlagPresent) != 0) {
+            printf("  SHTP header:     length %" PRIu32
+                   ", channel %" PRIu32 ", sequence %" PRIu32 "\n",
+                   reading->raw0, channel, sequence);
+        } else {
+            printf("  SHTP probe:      result 0x%08" PRIx32
+                   ", controller 0x%02" PRIx32 "\n",
+                   reading->raw0, reading->raw1 & 0xffu);
+        }
+        return;
+    }
+
+    if (reading->type == kTimeCardSensorTypeBNO055) {
+        if ((reading->flags & kTimeCardSensorFlagPresent) != 0) {
+            printf("  chip ID:         0x%02" PRIx32 "%s\n",
+                   reading->raw0 & 0xffu,
+                   (reading->flags & kTimeCardSensorFlagValid) != 0 ?
+                       " (valid)" : " (unexpected)");
+        } else {
+            printf("  chip ID probe:   no response, controller 0x%02" PRIx32
+                   "\n", reading->raw1 & 0xffu);
+        }
+    }
+}
+
 static bool
 icp10100_pressure_pascals(uint32_t rawPressure, uint32_t rawTemperature,
                           const int32_t otp[4], double *pressurePascals)
@@ -910,6 +944,7 @@ command_sensors(io_connect_t connection, int argc, char **argv)
          i < TIMECARD_SENSOR_MAX_READINGS; i++) {
         const TimeCardSensorReading *reading = &telemetry.readings[i];
         print_sensor_presence(reading);
+        print_imu_probe_detail(reading);
         if ((reading->flags & kTimeCardSensorFlagTemperature) != 0) {
             printf("  temperature:     %.3f C\n",
                    reading->temperatureMilliCelsius / 1000.0);

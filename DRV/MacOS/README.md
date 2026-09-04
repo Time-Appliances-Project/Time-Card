@@ -50,7 +50,8 @@ The current implementation provides:
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
   `sma-set`, `led`, `led-set`, `led-sma-auto`, `led-gnss-auto`, `led-auto`,
-  `i2c-status`, `i2c-scan`, `i2c-read`, `i2c-mux`, and `sensors`
+  `i2c-status`, `i2c-scan`, `i2c-read`, `i2c-mux`, and `sensors`, including
+  BNO08x SHTP-header and BNO055 chip-ID probe detail
 
 The common PHC block is available on every matched profile. ART uses its own
 fixed layout and has no standard TOD block, so the driver never reads one.
