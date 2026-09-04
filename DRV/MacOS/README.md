@@ -57,7 +57,8 @@ The current implementation provides:
     UBX poll writes, bounded poll-response capture, continuous polling capture
     with live progress, copy and raw capture export helpers, handoff into the
     NMEA and UBX decoder labs, and receiver summary rollups for firmware, fix,
-    satellites, timing, position, and per-satellite signal records
+    satellites, timing, position, a satellite sky map, and per-satellite signal
+    records
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
@@ -270,8 +271,9 @@ and it does not yet apply a UTC/TAI correction.
   validity bits. Receiver stream preview is available through bounded UART
   reads when the FPGA exposes 16550 ports. Safe UBX poll writes are available
   through the UART workspace. The decoder can summarize UBX NAV-SAT and NMEA
-  GSV satellite records, while interrupt-backed continuous streaming and
-  guarded persistent u-blox configuration remain planned.
+  GSV satellite records in a sky map and signal table, while interrupt-backed
+  continuous streaming and guarded persistent u-blox configuration remain
+  planned.
 - The Control Center labels card time as raw and does not calculate a card to
   macOS offset until the driver exposes a trusted UTC-to-TAI contract.
 - The driver does not create a Linux-style `/dev/ptpN` device.

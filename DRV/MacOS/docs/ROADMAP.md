@@ -46,6 +46,7 @@ the bounded ABI v8 read path.
   app progress, raw capture save, and support-bundle export
 - Receiver stream summary dashboard for decoded UBX and NMEA captures
 - Receiver satellite signal table and support-bundle CSV export
+- Receiver satellite sky map from UBX NAV-SAT and NMEA GSV records
 - Interrupt-backed stream capture
 - MSI-X interrupt allocation and dispatch
 - PPS and external timestamp events

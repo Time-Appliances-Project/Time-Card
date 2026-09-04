@@ -2277,6 +2277,7 @@ private struct ReceiverStreamSummaryView: View {
                     Text(satelliteSignalSource)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    ReceiverSatelliteSkyMapView(signals: satelliteSignals)
                     ScrollView(.horizontal) {
                         Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
                             GridRow {
@@ -2523,6 +2524,215 @@ private struct ReceiverStreamSummaryView: View {
             return .secondary
         case nil:
             return .orange
+        }
+    }
+}
+
+private struct ReceiverSatelliteSkyMapView: View {
+    let signals: [ReceiverSatelliteSignal]
+
+    private var plottableSignals: [ReceiverSatelliteSignal] {
+        signals.filter {
+            $0.elevation != nil && $0.azimuth != nil
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Satellite sky map", systemImage: "scope")
+                    .font(.headline)
+                Spacer()
+                StatusPill("\(plottableSignals.count) plotted", .blue)
+            }
+            Text("North-up polar view: zenith is center, horizon is the outer ring, marker size follows C/N0, and a bright outline means the receiver used the satellite in the fix.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            if plottableSignals.isEmpty {
+                Text("Satellite records do not include elevation and azimuth yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        Color.secondary.opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 12)
+                    )
+            } else {
+                GeometryReader { geometry in
+                    let size = min(geometry.size.width, geometry.size.height)
+                    ZStack {
+                        ForEach([0.25, 0.50, 0.75, 1.00], id: \.self) { factor in
+                            Circle()
+                                .stroke(
+                                    Color.secondary.opacity(factor == 1.00 ? 0.45 : 0.22),
+                                    style: StrokeStyle(
+                                        lineWidth: factor == 1.00 ? 1.4 : 0.8,
+                                        dash: factor == 1.00 ? [] : [4, 4]
+                                    )
+                                )
+                                .frame(
+                                    width: size * factor,
+                                    height: size * factor
+                                )
+                        }
+                        skyMapAxis(size: size, horizontal: true)
+                        skyMapAxis(size: size, horizontal: false)
+
+                        Text("N")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .position(x: size / 2, y: 10)
+                        Text("E")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .position(x: size - 10, y: size / 2)
+                        Text("S")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .position(x: size / 2, y: size - 10)
+                        Text("W")
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .position(x: 10, y: size / 2)
+
+                        ForEach(plottableSignals) { signal in
+                            satelliteMarker(signal)
+                                .position(point(for: signal, size: size))
+                        }
+                    }
+                    .frame(width: size, height: size)
+                    .position(
+                        x: geometry.size.width / 2,
+                        y: geometry.size.height / 2
+                    )
+                }
+                .frame(minHeight: 260)
+                .padding(12)
+                .background(
+                    LinearGradient(
+                        colors: [
+                            Color.accentColor.opacity(0.11),
+                            Color.secondary.opacity(0.05),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    in: RoundedRectangle(cornerRadius: 16)
+                )
+
+                skyMapLegend
+            }
+        }
+    }
+
+    private func skyMapAxis(size: CGFloat, horizontal: Bool) -> some View {
+        Path { path in
+            if horizontal {
+                path.move(to: CGPoint(x: 16, y: size / 2))
+                path.addLine(to: CGPoint(x: size - 16, y: size / 2))
+            } else {
+                path.move(to: CGPoint(x: size / 2, y: 16))
+                path.addLine(to: CGPoint(x: size / 2, y: size - 16))
+            }
+        }
+        .stroke(Color.secondary.opacity(0.18), lineWidth: 0.8)
+    }
+
+    private func satelliteMarker(_ signal: ReceiverSatelliteSignal) -> some View {
+        ZStack {
+            Circle()
+                .fill(constellationColor(signal.constellation).opacity(0.88))
+                .frame(
+                    width: markerSize(signal),
+                    height: markerSize(signal)
+                )
+                .overlay {
+                    Circle()
+                        .stroke(
+                            signal.usedInFix == true
+                                ? Color.white.opacity(0.95)
+                                : Color.black.opacity(0.25),
+                            lineWidth: signal.usedInFix == true ? 2.2 : 0.8
+                        )
+                }
+                .shadow(
+                    color: constellationColor(signal.constellation).opacity(0.35),
+                    radius: signal.usedInFix == true ? 5 : 2
+                )
+            Text(signal.satelliteID)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+        }
+        .help(
+            "\(signal.constellation) SV \(signal.satelliteID), "
+                + "\(signal.elevationText) elevation, "
+                + "\(signal.azimuthText) azimuth, "
+                + "\(signal.cn0Text), \(signal.usedText)"
+        )
+    }
+
+    private var skyMapLegend: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(constellationsInUse, id: \.self) { constellation in
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(constellationColor(constellation))
+                            .frame(width: 8, height: 8)
+                        Text(constellation)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Color.secondary.opacity(0.07),
+                        in: Capsule()
+                    )
+                }
+            }
+        }
+    }
+
+    private var constellationsInUse: [String] {
+        Array(Set(plottableSignals.map(\.constellation))).sorted()
+    }
+
+    private func point(
+        for signal: ReceiverSatelliteSignal,
+        size: CGFloat
+    ) -> CGPoint {
+        let elevation = min(90, max(0, signal.elevation ?? 0))
+        let azimuth = Double(signal.azimuth ?? 0) * .pi / 180.0
+        let radius = (size / 2) - 24
+        let normalizedRadius = CGFloat(90 - elevation) / 90.0
+        return CGPoint(
+            x: size / 2 + CGFloat(sin(azimuth)) * radius * normalizedRadius,
+            y: size / 2 - CGFloat(cos(azimuth)) * radius * normalizedRadius
+        )
+    }
+
+    private func markerSize(_ signal: ReceiverSatelliteSignal) -> CGFloat {
+        let cn0 = min(55, max(10, signal.cn0 ?? 18))
+        return 12 + CGFloat(cn0 - 10) * 0.22
+    }
+
+    private func constellationColor(_ constellation: String) -> Color {
+        switch constellation {
+        case "GPS": .blue
+        case "GLONASS": .pink
+        case "Galileo": .purple
+        case "BeiDou": .orange
+        case "QZSS": .mint
+        case "NavIC": .brown
+        case "SBAS": .gray
+        case "Mixed GNSS": .cyan
+        default: .teal
         }
     }
 }
