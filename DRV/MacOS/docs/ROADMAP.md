@@ -45,6 +45,7 @@ the bounded ABI v8 read path.
 - Continuous bounded polling capture in the SwiftUI app and CLI, with live
   app progress, raw capture save, and support-bundle export
 - Receiver stream summary dashboard for decoded UBX and NMEA captures
+- Receiver satellite signal table and support-bundle CSV export
 - Interrupt-backed stream capture
 - MSI-X interrupt allocation and dispatch
 - PPS and external timestamp events

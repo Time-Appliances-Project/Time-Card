@@ -1709,6 +1709,56 @@ private struct TimeCardUBXPoll: Identifiable, Equatable {
     }
 }
 
+private struct ReceiverSatelliteSignal: Identifiable, Equatable {
+    let source: String
+    let constellation: String
+    let satelliteID: String
+    let cn0: Int?
+    let elevation: Int?
+    let azimuth: Int?
+    let usedInFix: Bool?
+    let quality: String
+    let flags: UInt32?
+
+    var id: String {
+        [
+            source,
+            constellation,
+            satelliteID,
+            elevationText,
+            azimuthText,
+            cn0Text,
+        ].joined(separator: "|")
+    }
+
+    var cn0Text: String {
+        cn0.map { "\($0) dB-Hz" } ?? "Unavailable"
+    }
+
+    var elevationText: String {
+        elevation.map { "\($0)°" } ?? "Unavailable"
+    }
+
+    var azimuthText: String {
+        azimuth.map { "\($0)°" } ?? "Unavailable"
+    }
+
+    var usedText: String {
+        switch usedInFix {
+        case true:
+            return "Used"
+        case false:
+            return "Tracked"
+        case nil:
+            return "Unknown"
+        }
+    }
+
+    var flagsText: String {
+        flags.map { String(format: "0x%08x", $0) } ?? "Unavailable"
+    }
+}
+
 private struct TimeCardUBXFrame: Identifiable, Equatable {
     let id = UUID()
     let offset: Int
@@ -1782,6 +1832,38 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
         }
     }
 
+    var navSatelliteSignals: [ReceiverSatelliteSignal] {
+        guard messageName == "NAV-SAT",
+              payload.count >= 8 else {
+            return []
+        }
+        let reported = Int(payload[5])
+        let available = max(0, (payload.count - 8) / 12)
+        let count = min(reported, available)
+        guard count > 0 else { return [] }
+
+        return (0..<count).map { index in
+            let offset = 8 + index * 12
+            let gnssID = payload[offset]
+            let svID = payload[offset + 1]
+            let cn0 = Int(payload[offset + 2])
+            let elevation = Int(Int8(bitPattern: payload[offset + 3]))
+            let azimuth = Int(Self.readInt16(payload, at: offset + 4))
+            let flags = Self.readUInt32(payload, at: offset + 8)
+            return ReceiverSatelliteSignal(
+                source: "UBX NAV-SAT",
+                constellation: Self.gnssName(gnssID),
+                satelliteID: String(svID),
+                cn0: cn0 == 0 ? nil : cn0,
+                elevation: elevation,
+                azimuth: azimuth,
+                usedInFix: (flags & 0x08) != 0,
+                quality: "quality \(flags & 0x07)",
+                flags: flags
+            )
+        }
+    }
+
     private var navPVTSummary: String {
         guard payload.count >= 92 else {
             return "NAV-PVT payload is shorter than expected."
@@ -1833,7 +1915,27 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
         guard payload.count >= 8 else {
             return "NAV-SAT payload is shorter than expected."
         }
-        return "Version \(payload[4]), \(payload[5]) satellite record(s)."
+        let signals = navSatelliteSignals
+        guard !signals.isEmpty else {
+            return "Version \(payload[4]), \(payload[5]) satellite record(s)."
+        }
+        let used = signals.filter { $0.usedInFix == true }.count
+        let cn0Values = signals.compactMap(\.cn0)
+        let averageText: String
+        if cn0Values.isEmpty {
+            averageText = ""
+        } else {
+            let average = Double(cn0Values.reduce(0, +)) / Double(cn0Values.count)
+            averageText = String(format: ", average C/N0 %.1f dB-Hz", average)
+        }
+        let constellationText = Dictionary(
+            grouping: signals,
+            by: \.constellation
+        )
+        .map { key, value in "\(key) \(value.count)" }
+        .sorted()
+        .joined(separator: ", ")
+        return "\(signals.count) visible, \(used) used\(averageText), \(constellationText)."
     }
 
     private var navSVINSummary: String {
@@ -1964,8 +2066,25 @@ private struct TimeCardUBXFrame: Identifiable, Equatable {
             (UInt32(bytes[offset + 3]) << 24)
     }
 
+    private static func readInt16(_ bytes: [UInt8], at offset: Int) -> Int16 {
+        Int16(bitPattern: readUInt16(bytes, at: offset))
+    }
+
     private static func readInt32(_ bytes: [UInt8], at offset: Int) -> Int32 {
         Int32(bitPattern: readUInt32(bytes, at: offset))
+    }
+
+    private static func gnssName(_ identifier: UInt8) -> String {
+        switch identifier {
+        case 0: "GPS"
+        case 1: "SBAS"
+        case 2: "Galileo"
+        case 3: "BeiDou"
+        case 5: "QZSS"
+        case 6: "GLONASS"
+        case 7: "NavIC"
+        default: "GNSS \(identifier)"
+        }
     }
 
     private static func cString(_ bytes: ArraySlice<UInt8>) -> String {
@@ -2011,6 +2130,80 @@ private struct ReceiverStreamFact: Identifiable {
     let id: String
     let label: String
     let value: String
+}
+
+private enum ReceiverStreamDecoder {
+    static func satelliteSignals(
+        nmeaSentences: [NMEASentence],
+        ubxFrames: [TimeCardUBXFrame]
+    ) -> [ReceiverSatelliteSignal] {
+        if let ubxFrame = ubxFrames.last(where: {
+            $0.checksumValid && $0.messageName == "NAV-SAT"
+        }) {
+            let signals = ubxFrame.navSatelliteSignals
+            if !signals.isEmpty {
+                return signals
+            }
+        }
+        return nmeaSentences
+            .filter {
+                $0.formatter == "GSV" &&
+                    ($0.expectedChecksum == nil || $0.checksumValid)
+            }
+            .flatMap(\.gsvSatelliteSignals)
+    }
+
+    static func satelliteSource(
+        nmeaSentences: [NMEASentence],
+        ubxFrames: [TimeCardUBXFrame]
+    ) -> String {
+        if ubxFrames.last(where: {
+            $0.checksumValid &&
+                $0.messageName == "NAV-SAT" &&
+                !$0.navSatelliteSignals.isEmpty
+        }) != nil {
+            return "Latest UBX NAV-SAT frame"
+        }
+        if nmeaSentences.contains(where: {
+            $0.formatter == "GSV" &&
+                ($0.expectedChecksum == nil || $0.checksumValid) &&
+                !$0.gsvSatelliteSignals.isEmpty
+        }) {
+            return "Decoded NMEA GSV sentences"
+        }
+        return "No satellite signal records decoded"
+    }
+
+    static func satelliteCSVText(
+        signals: [ReceiverSatelliteSignal],
+        csvLine: ([String]) -> String
+    ) -> String {
+        var rows = [csvLine([
+            "source",
+            "constellation",
+            "satellite_id",
+            "c_n0_dbhz",
+            "elevation_deg",
+            "azimuth_deg",
+            "used_in_fix",
+            "quality",
+            "flags",
+        ])]
+        for signal in signals {
+            rows.append(csvLine([
+                signal.source,
+                signal.constellation,
+                signal.satelliteID,
+                signal.cn0.map(String.init) ?? "",
+                signal.elevation.map(String.init) ?? "",
+                signal.azimuth.map(String.init) ?? "",
+                signal.usedInFix.map { $0 ? "yes" : "no" } ?? "",
+                signal.quality,
+                signal.flags.map { String(format: "0x%08x", $0) } ?? "",
+            ]))
+        }
+        return rows.joined(separator: "\n")
+    }
 }
 
 private struct ReceiverStreamSummaryView: View {
@@ -2065,6 +2258,64 @@ private struct ReceiverStreamSummaryView: View {
                 VStack(spacing: 8) {
                     ForEach(facts) { fact in
                         InfoRow(label: fact.label, value: fact.value)
+                    }
+                }
+            }
+
+            if !satelliteSignals.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Label("Satellite signal table", systemImage: "sparkles")
+                            .font(.headline)
+                        Spacer()
+                        StatusPill(
+                            "\(satelliteSignals.count) record(s)",
+                            .mint
+                        )
+                    }
+                    Text(satelliteSignalSource)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    ScrollView(.horizontal) {
+                        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+                            GridRow {
+                                satelliteHeader("Source")
+                                satelliteHeader("GNSS")
+                                satelliteHeader("SV")
+                                satelliteHeader("C/N0")
+                                satelliteHeader("Elevation")
+                                satelliteHeader("Azimuth")
+                                satelliteHeader("Use")
+                                satelliteHeader("Quality")
+                                satelliteHeader("Flags")
+                            }
+                            Divider()
+                                .gridCellColumns(9)
+                            ForEach(satelliteSignals) { signal in
+                                GridRow {
+                                    satelliteCell(signal.source)
+                                    satelliteCell(signal.constellation)
+                                    satelliteCell(signal.satelliteID)
+                                    satelliteCell(signal.cn0Text)
+                                    satelliteCell(signal.elevationText)
+                                    satelliteCell(signal.azimuthText)
+                                    StatusPill(
+                                        signal.usedText,
+                                        satelliteUseColor(signal.usedInFix)
+                                    )
+                                    satelliteCell(signal.quality)
+                                    satelliteCell(signal.flagsText)
+                                }
+                            }
+                        }
+                        .font(.caption.monospacedDigit())
+                        .textSelection(.enabled)
+                        .padding(12)
+                        .background(
+                            Color.secondary.opacity(0.07),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
                     }
                 }
             }
@@ -2162,6 +2413,20 @@ private struct ReceiverStreamSummaryView: View {
         satelliteFrame != nil || satelliteSentence != nil
     }
 
+    private var satelliteSignals: [ReceiverSatelliteSignal] {
+        ReceiverStreamDecoder.satelliteSignals(
+            nmeaSentences: nmeaSentences,
+            ubxFrames: ubxFrames
+        )
+    }
+
+    private var satelliteSignalSource: String {
+        ReceiverStreamDecoder.satelliteSource(
+            nmeaSentences: nmeaSentences,
+            ubxFrames: ubxFrames
+        )
+    }
+
     private var timingFrame: TimeCardUBXFrame? {
         ubxFrames.last {
             $0.checksumValid && $0.messageName == "TIM-TP"
@@ -2238,6 +2503,28 @@ private struct ReceiverStreamSummaryView: View {
         }
         return rows
     }
+
+    private func satelliteHeader(_ text: String) -> some View {
+        Text(text)
+            .fontWeight(.semibold)
+            .foregroundStyle(.secondary)
+    }
+
+    private func satelliteCell(_ text: String) -> some View {
+        Text(text)
+            .lineLimit(1)
+    }
+
+    private func satelliteUseColor(_ usedInFix: Bool?) -> Color {
+        switch usedInFix {
+        case true:
+            return .green
+        case false:
+            return .secondary
+        case nil:
+            return .orange
+        }
+    }
 }
 
 private struct SerialPortCard: View {
@@ -2297,6 +2584,33 @@ private struct NMEASentence: Identifiable, Equatable {
         default:
             return "\(label) with \(fields.count) field(s)."
         }
+    }
+
+    var gsvSatelliteSignals: [ReceiverSatelliteSignal] {
+        guard formatter == "GSV" else { return [] }
+        var signals: [ReceiverSatelliteSignal] = []
+        var index = 3
+        while index + 3 < fields.count {
+            guard let satelliteID = field(index) else {
+                index += 4
+                continue
+            }
+            signals.append(
+                ReceiverSatelliteSignal(
+                    source: "NMEA \(label)",
+                    constellation: nmeaConstellationName,
+                    satelliteID: satelliteID,
+                    cn0: intField(index + 3),
+                    elevation: intField(index + 1),
+                    azimuth: intField(index + 2),
+                    usedInFix: nil,
+                    quality: "reported",
+                    flags: nil
+                )
+            )
+            index += 4
+        }
+        return signals
     }
 
     static func parse(_ line: String) -> NMEASentence? {
@@ -2404,6 +2718,11 @@ private struct NMEASentence: Identifiable, Equatable {
         field(index) ?? fallback
     }
 
+    private func intField(_ index: Int) -> Int? {
+        guard let text = field(index) else { return nil }
+        return Int(text)
+    }
+
     private func coordinate(value: String?, hemisphere: String?) -> String {
         guard let value,
               let hemisphere,
@@ -2444,6 +2763,18 @@ private struct NMEASentence: Identifiable, Equatable {
         case "2": "2-D"
         case "3": "3-D"
         default: code ?? "unknown"
+        }
+    }
+
+    private var nmeaConstellationName: String {
+        switch talker {
+        case "GP": "GPS"
+        case "GL": "GLONASS"
+        case "GA": "Galileo"
+        case "GB", "BD": "BeiDou"
+        case "GQ": "QZSS"
+        case "GN": "Mixed GNSS"
+        default: talker
         }
     }
 }
@@ -4925,7 +5256,7 @@ private struct OperationsView: View {
 
                         Text(
                             supportBundleMessage.isEmpty
-                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, hardware UART, raw UART capture bytes, sampling history, SMA, sensors, I2C, LEDs, and the session log."
+                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, hardware UART, raw UART capture bytes, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
                                 : supportBundleMessage
                         )
                         .font(.caption)
@@ -5106,6 +5437,11 @@ private struct OperationsView: View {
             named: "hardware-uart-capture.bin",
             into: stagingURL
         )
+        try writeSupportText(
+            receiverSatellitesCSVText,
+            named: "receiver-satellites.csv",
+            into: stagingURL
+        )
         try writeSupportText(samplingHistoryCSVText, named: "sampling-history.csv", into: stagingURL)
         try writeSupportText(smaRoutesCSVText, named: "sma-routes.csv", into: stagingURL)
         try writeSupportText(sensorCSVText, named: "sensors.csv", into: stagingURL)
@@ -5159,6 +5495,7 @@ private struct OperationsView: View {
             "serial-capture.txt",
             "hardware-uart.txt",
             "hardware-uart-capture.bin",
+            "receiver-satellites.csv",
             "sampling-history.csv",
             "sma-routes.csv",
             "sensors.csv",
@@ -5356,6 +5693,26 @@ private struct OperationsView: View {
             lines.append("No hardware UART capture recorded.")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private var receiverSatelliteSignals: [ReceiverSatelliteSignal] {
+        let data = monitor.uartCapture?.data ?? monitor.uartReadResult?.data ?? []
+        let nmeaText = String(decoding: data, as: UTF8.self)
+        let nmeaSentences = nmeaText
+            .split(whereSeparator: \.isNewline)
+            .compactMap { NMEASentence.parse(String($0)) }
+        let ubxFrames = TimeCardUBXFrame.parseFrames(from: data)
+        return ReceiverStreamDecoder.satelliteSignals(
+            nmeaSentences: nmeaSentences,
+            ubxFrames: ubxFrames
+        )
+    }
+
+    private var receiverSatellitesCSVText: String {
+        ReceiverStreamDecoder.satelliteCSVText(
+            signals: receiverSatelliteSignals,
+            csvLine: supportCSVLine
+        )
     }
 
     private var samplingHistoryCSVText: String {
