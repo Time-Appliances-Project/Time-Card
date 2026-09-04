@@ -4,6 +4,18 @@ This repository contains the native macOS driver and Control Center for the OCP
 Time Card. It uses PCIDriverKit, packages the driver in a SwiftUI monitoring
 app, and provides a small command-line diagnostic client.
 
+## Screenshots
+
+Representative macOS Control Center screenshots:
+
+| Overview | GNSS and UART |
+| --- | --- |
+| ![TimeCardMacOS overview dashboard](docs/screenshots/control-center-overview.png) | ![TimeCardMacOS GNSS and UART workbench](docs/screenshots/control-center-gnss-uart.png) |
+
+| LEDs and sensors | Operations and exports |
+| --- | --- |
+| ![TimeCardMacOS LEDs, I2C, sensors, and IMU workspace](docs/screenshots/control-center-leds-sensors.png) | ![TimeCardMacOS profiles, self-test, diagnostics, and support bundle exports](docs/screenshots/control-center-operations.png) |
+
 ## Current milestone
 
 The current implementation provides:

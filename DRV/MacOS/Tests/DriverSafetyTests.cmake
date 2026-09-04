@@ -247,6 +247,16 @@ if(NOT EXISTS "${control_center_view_source}")
         "Control Center SwiftUI view not found: ${control_center_view_source}")
 endif()
 file(READ "${control_center_view_source}" control_center_view)
+foreach(required_screenshot IN ITEMS
+        "docs/screenshots/control-center-overview.png"
+        "docs/screenshots/control-center-gnss-uart.png"
+        "docs/screenshots/control-center-leds-sensors.png"
+        "docs/screenshots/control-center-operations.png")
+    if(NOT EXISTS "${TIMECARD_SOURCE_DIR}/${required_screenshot}")
+        message(FATAL_ERROR
+            "macOS Control Center screenshot is missing: ${required_screenshot}")
+    endif()
+endforeach()
 foreach(required_control_center_view IN ITEMS
         "GNSSWorkspaceView"
         "I2CAndLEDView"
