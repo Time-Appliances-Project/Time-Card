@@ -2541,16 +2541,25 @@ private struct ReceiverStreamMessage: Identifiable, Equatable {
     static func rtcm3(
         offset: Int,
         payloadLength: Int,
-        byteCount: Int
+        byteCount: Int,
+        messageType: Int?,
+        expectedCRC: UInt32,
+        calculatedCRC: UInt32
     ) -> ReceiverStreamMessage {
-        ReceiverStreamMessage(
+        let crcValid = expectedCRC == calculatedCRC
+        let typeText = messageType.map { "message type \($0), " } ?? ""
+        return ReceiverStreamMessage(
             offset: offset,
             byteCount: byteCount,
             protocolName: "RTCM3",
             name: "RTCM3",
-            summary: "RTCM3 correction frame, payload \(payloadLength) byte(s).",
-            detail: "CRC24Q bytes are present but not validated yet.",
-            checksumState: .notChecked
+            summary: "RTCM3 \(typeText)payload \(payloadLength) byte(s).",
+            detail: String(
+                format: "CRC24Q expected 0x%06x, calculated 0x%06x.",
+                expectedCRC,
+                calculatedCRC
+            ),
+            checksumState: crcValid ? .ok : .failed
         )
     }
 
@@ -2647,6 +2656,9 @@ private struct ReceiverStreamMessage: Identifiable, Equatable {
               bytes[offset] == 0xd3 else {
             return nil
         }
+        guard (bytes[offset + 1] & 0xfc) == 0 else {
+            return nil
+        }
         let payloadLength = (Int(bytes[offset + 1] & 0x03) << 8) |
             Int(bytes[offset + 2])
         let frameLength = 3 + payloadLength + 3
@@ -2654,14 +2666,40 @@ private struct ReceiverStreamMessage: Identifiable, Equatable {
               offset + frameLength <= bytes.count else {
             return nil
         }
+        let crcOffset = offset + 3 + payloadLength
+        let expectedCRC = (UInt32(bytes[crcOffset]) << 16) |
+            (UInt32(bytes[crcOffset + 1]) << 8) |
+            UInt32(bytes[crcOffset + 2])
+        let calculatedCRC = crc24q(bytes[offset..<crcOffset])
+        let messageType = payloadLength >= 2
+            ? ((Int(bytes[offset + 3]) << 4) | (Int(bytes[offset + 4]) >> 4))
+            : nil
         return (
             ReceiverStreamMessage.rtcm3(
                 offset: offset,
                 payloadLength: payloadLength,
-                byteCount: frameLength
+                byteCount: frameLength,
+                messageType: messageType,
+                expectedCRC: expectedCRC,
+                calculatedCRC: calculatedCRC
             ),
             frameLength
         )
+    }
+
+    private static func crc24q(_ bytes: ArraySlice<UInt8>) -> UInt32 {
+        var crc: UInt32 = 0
+        for byte in bytes {
+            crc ^= UInt32(byte) << 16
+            for _ in 0..<8 {
+                crc <<= 1
+                if (crc & 0x01000000) != 0 {
+                    crc ^= 0x01864cfb
+                }
+            }
+            crc &= 0x00ffffff
+        }
+        return crc
     }
 }
 
@@ -2710,7 +2748,9 @@ private struct ReceiverMixedStreamView: View {
         let ubx = messages.filter { $0.protocolName == "UBX" }.count
         let nmea = messages.filter { $0.protocolName == "NMEA" }.count
         let rtcm = messages.filter { $0.protocolName == "RTCM3" }.count
-        return "\(messages.count) decoded, \(ubx) UBX, \(nmea) NMEA, \(rtcm) RTCM3"
+        let failed = messages.filter { $0.checksumState == .failed }.count
+        let checksumText = failed == 0 ? "" : ", \(failed) checksum fail"
+        return "\(messages.count) decoded, \(ubx) UBX, \(nmea) NMEA, \(rtcm) RTCM3\(checksumText)"
     }
 }
 

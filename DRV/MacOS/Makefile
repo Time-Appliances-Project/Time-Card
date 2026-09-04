@@ -6,7 +6,9 @@ check:
 	cmake -S . -B .build/cmake -DCMAKE_BUILD_TYPE=Debug
 	cmake --build .build/cmake --parallel
 	ctest --test-dir .build/cmake --output-on-failure
+	cmake -E make_directory .build/cmake/swift-module-cache
 	xcrun swiftc -parse-as-library -swift-version 5 \
+		-module-cache-path .build/cmake/swift-module-cache \
 		App/TimeCardClient.swift Tests/TimeCardClientTests.swift \
 		-framework IOKit -framework CoreFoundation \
 		-o .build/cmake/timecard-control-center-model-tests

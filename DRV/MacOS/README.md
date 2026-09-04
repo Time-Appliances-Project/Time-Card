@@ -276,9 +276,10 @@ and it does not yet apply a UTC/TAI correction.
   validity bits. Receiver stream preview is available through bounded UART
   reads when the FPGA exposes 16550 ports. Safe UBX poll writes are available
   through the UART workspace. The decoder can show mixed UBX, NMEA, and RTCM3
-  receiver traffic, and can summarize UBX NAV-SAT and NMEA GSV satellite
-  records in a sky map and signal table, while interrupt-backed continuous
-  streaming and guarded persistent u-blox configuration remain planned.
+  receiver traffic, validate RTCM3 CRC24Q checksums, and summarize UBX NAV-SAT
+  and NMEA GSV satellite records in a sky map and signal table, while
+  interrupt-backed continuous streaming and guarded persistent u-blox
+  configuration remain planned.
 - The Control Center labels card time as raw and does not calculate a card to
   macOS offset until the driver exposes a trusted UTC-to-TAI contract.
 - The driver does not create a Linux-style `/dev/ptpN` device.
