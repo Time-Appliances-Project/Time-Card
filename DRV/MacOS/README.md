@@ -71,6 +71,8 @@ The current implementation provides:
   - a native SwiftUI subsystem topology diagram that maps PCIe, DriverKit, PHC,
     macOS service, GNSS, ToD, SMA, I2C, sensors, LEDs, and FPGA cores against
     live capabilities
+  - an FPGA core readiness matrix that mirrors the Windows FPGA Engines catalog
+    and exports live, ready, ABI-needed, and roadmap state to support bundles
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,

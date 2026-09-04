@@ -6313,7 +6313,7 @@ private struct OperationsView: View {
 
                         Text(
                             supportBundleMessage.isEmpty
-                                ? "The ZIP includes diagnostics, self-test, configuration profiles, serial inventory, serial preview, hardware UART, raw UART capture bytes, mixed receiver decode, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
+                                ? "The ZIP includes diagnostics, self-test, configuration profiles, FPGA core readiness, serial inventory, serial preview, hardware UART, raw UART capture bytes, mixed receiver decode, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
                                 : supportBundleMessage
                         )
                         .font(.caption)
@@ -6491,6 +6491,11 @@ private struct OperationsView: View {
             named: "configuration-profiles.txt",
             into: stagingURL
         )
+        try writeSupportText(
+            fpgaCoreReadinessText,
+            named: "fpga-core-readiness.txt",
+            into: stagingURL
+        )
         try writeSupportText(serialPortsCSVText, named: "serial-ports.csv", into: stagingURL)
         try writeSupportText(serialCaptureText, named: "serial-capture.txt", into: stagingURL)
         try writeSupportText(hardwareUARTText, named: "hardware-uart.txt", into: stagingURL)
@@ -6555,6 +6560,7 @@ private struct OperationsView: View {
             "live-snapshot.json",
             "self-test.txt",
             "configuration-profiles.txt",
+            "fpga-core-readiness.txt",
             "serial-ports.csv",
             "serial-capture.txt",
             "hardware-uart.txt",
@@ -6645,6 +6651,10 @@ private struct OperationsView: View {
 
     private var configurationProfilesText: String {
         TimeCardConfigurationProfilePlan.reportText(for: monitor.snapshot)
+    }
+
+    private var fpgaCoreReadinessText: String {
+        TimeCardFPGACoreReadiness.reportText(for: monitor.snapshot)
     }
 
     private var sessionLogText: String {
@@ -7163,6 +7173,13 @@ private struct SubsystemMapView: View {
                 }
 
                 ControlCenterPanel(
+                    title: "FPGA core readiness matrix",
+                    subtitle: "Windows FPGA Engines features mapped to this card"
+                ) {
+                    FPGACoreReadinessMatrixView(snapshot: monitor.snapshot)
+                }
+
+                ControlCenterPanel(
                     title: "Subsystem capability map",
                     subtitle: "Windows topology imported as a macOS readiness map"
                 ) {
@@ -7379,6 +7396,442 @@ private struct TimeCardTopologyDiagramView: View {
         if snapshot?.gnssTelemetryAvailable == true { return .green }
         if snapshot?.supportsUART == true { return .teal }
         return .secondary
+    }
+}
+
+private struct FPGACoreReadinessMatrixView: View {
+    let snapshot: TimeCardDeviceSnapshot?
+
+    private var rows: [TimeCardFPGACoreReadiness] {
+        TimeCardFPGACoreReadiness.rows(for: snapshot)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                readinessSummaryPill("Live", rows.filter { $0.state == "Live" }.count, .green)
+                readinessSummaryPill("Ready", rows.filter { $0.state == "Ready" }.count, .teal)
+                readinessSummaryPill(
+                    "ABI needed",
+                    rows.filter { $0.state == "ABI needed" }.count,
+                    .orange
+                )
+                readinessSummaryPill("Roadmap", rows.filter { $0.state == "Roadmap" }.count, .purple)
+                Spacer()
+                StatusPill(
+                    snapshot.map { "ABI v\($0.abiVersion)" } ?? "No snapshot",
+                    snapshot == nil ? .secondary : .blue
+                )
+            }
+
+            ForEach(TimeCardFPGACoreReadiness.groupedRows(for: snapshot), id: \.0) { group in
+                VStack(alignment: .leading, spacing: 9) {
+                    Text(group.0)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(group.1) { row in
+                        FPGACoreReadinessRow(row: row)
+                    }
+                }
+            }
+
+            Text(
+                "This matrix mirrors the Windows FPGA Engines catalog but "
+                    + "only marks a core live when the current DriverKit ABI "
+                    + "and FPGA image expose readback evidence."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+        }
+    }
+
+    private func readinessSummaryPill(
+        _ label: String,
+        _ count: Int,
+        _ color: Color
+    ) -> some View {
+        HStack(spacing: 6) {
+            Text("\(count)")
+                .font(.caption.weight(.bold))
+                .monospacedDigit()
+            Text(label)
+                .font(.caption)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .foregroundStyle(color)
+        .background(color.opacity(0.12), in: Capsule())
+        .overlay(Capsule().stroke(color.opacity(0.24), lineWidth: 1))
+    }
+}
+
+private struct FPGACoreReadinessRow: View {
+    let row: TimeCardFPGACoreReadiness
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: row.symbol)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(row.accent)
+                .frame(width: 34, height: 34)
+                .background(
+                    row.accent.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.core)
+                        .font(.headline)
+                    StatusPill(row.state, row.accent)
+                    Spacer()
+                    Text(row.windowsFeature)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(row.evidence)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+
+                Text(row.nextStep)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(12)
+        .background(
+            row.accent.opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(row.accent.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct TimeCardFPGACoreReadiness: Identifiable {
+    let id: String
+    let family: String
+    let core: String
+    let windowsFeature: String
+    let state: String
+    let evidence: String
+    let nextStep: String
+    let symbol: String
+
+    var accent: Color {
+        switch state {
+        case "Live": .green
+        case "Ready": .teal
+        case "Partial", "ABI needed": .orange
+        case "Roadmap": .purple
+        case "Waiting": .blue
+        default: .secondary
+        }
+    }
+
+    static func groupedRows(
+        for snapshot: TimeCardDeviceSnapshot?
+    ) -> [(String, [Self])] {
+        let rows = rows(for: snapshot)
+        return [
+            "Clock and time scale",
+            "Receiver and serial",
+            "Signal I/O",
+            "Board services",
+            "Programming and maintenance",
+        ].compactMap { family in
+            let matches = rows.filter { $0.family == family }
+            return matches.isEmpty ? nil : (family, matches)
+        }
+    }
+
+    static func rows(for snapshot: TimeCardDeviceSnapshot?) -> [Self] {
+        let connected = snapshot != nil
+        let capabilities = snapshot?.capabilityNames ?? []
+
+        func has(_ name: String) -> Bool {
+            capabilities.contains(name)
+        }
+
+        func status(
+            live: Bool,
+            ready: Bool = false,
+            partial: Bool = false
+        ) -> String {
+            if live { return "Live" }
+            if ready { return "Ready" }
+            if partial { return "Partial" }
+            return connected ? "ABI needed" : "Waiting"
+        }
+
+        func row(
+            _ id: String,
+            _ family: String,
+            _ core: String,
+            _ windowsFeature: String,
+            _ state: String,
+            _ evidence: String,
+            _ nextStep: String,
+            _ symbol: String
+        ) -> Self {
+            Self(
+                id: id,
+                family: family,
+                core: core,
+                windowsFeature: windowsFeature,
+                state: state,
+                evidence: evidence,
+                nextStep: nextStep,
+                symbol: symbol
+            )
+        }
+
+        let clockEvidence: String
+        if let snapshot {
+            clockEvidence = "Clock v\(TimeCardFormatting.hex(UInt64(snapshot.clockVersion))) reports \(TimeCardFormatting.syncStatus(snapshot)); source \(TimeCardFormatting.clockSource(snapshot))."
+        } else {
+            clockEvidence = "Waiting for a live DriverKit snapshot."
+        }
+
+        let todEvidence: String
+        if let snapshot, snapshot.todTelemetryAvailable {
+            todEvidence = "ToD v\(TimeCardFormatting.hex(UInt64(snapshot.todVersion))) exposes UTC and leap summaries."
+        } else if has("ToD") {
+            todEvidence = "ToD capability is advertised, but summary fields are gated on this image."
+        } else {
+            todEvidence = "ToD summary registers are not exposed by this FPGA image."
+        }
+
+        let gnssEvidence: String
+        if let snapshot, snapshot.gnssTelemetryAvailable {
+            let satellites = snapshot.seenSatellites.map { "\($0) seen" } ?? "satellites unavailable"
+            let locked = snapshot.lockedSatellites.map { "\($0) locked" } ?? "locks unavailable"
+            gnssEvidence = "\(snapshot.gnssFixName), \(satellites), \(locked)."
+        } else if snapshot?.supportsUART == true {
+            gnssEvidence = "GNSS register summary is absent, but the receiver path is reachable through UART labs."
+        } else {
+            gnssEvidence = connected
+                ? "GNSS receiver access is not advertised."
+                : "Waiting for a live DriverKit snapshot."
+        }
+
+        return [
+            row(
+                "phc-core",
+                "Clock and time scale",
+                "Precision clock core",
+                "PHC monitor",
+                status(live: has("Clock read")),
+                clockEvidence,
+                has("Clock set")
+                    ? "Pair with a discipline service before one-click source changes."
+                    : "Expose the guarded clock-set selector for discipline workflows.",
+                "clock"
+            ),
+            row(
+                "cross-timestamp",
+                "Clock and time scale",
+                "Cross timestamp",
+                "Clock correlation",
+                status(live: has("Cross timestamp")),
+                has("Cross timestamp")
+                    ? "DriverKit exposes bounded host/card correlation."
+                    : "Cross timestamp capability is not advertised.",
+                "Keep sampling-window history in support bundles for drift analysis.",
+                "arrow.triangle.2.circlepath"
+            ),
+            row(
+                "tod-parser",
+                "Clock and time scale",
+                "ToD parser",
+                "UTC and leap summary",
+                snapshot?.todTelemetryAvailable == true
+                    ? "Live" : (has("ToD") ? "Partial" : (connected ? "Unavailable" : "Waiting")),
+                todEvidence,
+                "Add read-back-verified source selection before profile apply.",
+                "calendar.badge.clock"
+            ),
+            row(
+                "pps-master-slave",
+                "Clock and time scale",
+                "PPS master/slave",
+                "PPS controls",
+                connected ? "ABI needed" : "Waiting",
+                has("SMA") && has("Clock set")
+                    ? "Route and clock-set primitives are present; PPS phase control is not exposed yet."
+                    : "Needs SMA route and PPS phase measurement exposure.",
+                "Add versioned PPS generator, capture, and phase selectors.",
+                "waveform.path.ecg"
+            ),
+            row(
+                "timestamp-channels",
+                "Clock and time scale",
+                "Timestamp channels",
+                "Timestamp laboratory",
+                connected ? "ABI needed" : "Waiting",
+                "The Windows tool exposes timestamp channels; macOS has no channel table ABI yet.",
+                "Define bounded event readback and channel capability masks.",
+                "timer"
+            ),
+            row(
+                "gnss-summary",
+                "Receiver and serial",
+                "GNSS summary",
+                "Fix and satellite dashboard",
+                snapshot?.gnssTelemetryAvailable == true
+                    ? "Live" : (snapshot?.supportsUART == true ? "Partial" : (connected ? "Unavailable" : "Waiting")),
+                gnssEvidence,
+                "Prefer UBX NAV-PVT, NAV-SAT, NAV-TIMELS, and TIM-TP when registers are absent.",
+                "location.north.line"
+            ),
+            row(
+                "gnss-uart",
+                "Receiver and serial",
+                "GNSS UART",
+                "Receiver poll and capture",
+                status(
+                    live: false,
+                    ready: snapshot?.supportsUARTWrite == true,
+                    partial: snapshot?.supportsUART == true
+                ),
+                snapshot?.supportsUARTWrite == true
+                    ? "Safe UBX poll writes and bounded UART capture are available."
+                    : "UART read/write support is not fully exposed.",
+                "Add persistent receiver configuration only with explicit confirmation.",
+                "terminal"
+            ),
+            row(
+                "nmea-generator",
+                "Receiver and serial",
+                "NMEA generator",
+                "NMEA output engine",
+                connected ? "ABI needed" : "Waiting",
+                snapshot?.supportsUART == true
+                    ? "Serial data path is present; NMEA engine registers are not exposed."
+                    : "Needs UART and NMEA register discovery.",
+                "Add NMEA enable, rate, sentence mask, and readback selectors.",
+                "dot.radiowaves.left.and.right"
+            ),
+            row(
+                "sma-fabric",
+                "Signal I/O",
+                "SMA route fabric",
+                "Connector routing",
+                status(live: has("SMA")),
+                has("SMA")
+                    ? "SMA routing capability is advertised for this board profile."
+                    : "Route fabric is not advertised.",
+                "Keep fixed-route and variant warnings visible before applying routes.",
+                "cable.connector"
+            ),
+            row(
+                "periodic-generators",
+                "Signal I/O",
+                "Periodic generators",
+                "Signal generator panel",
+                connected ? "ABI needed" : "Waiting",
+                "The Windows generator controls are cataloged, but macOS lacks generator selectors.",
+                "Add frequency, duty, phase, start time, repeat, and status readback.",
+                "waveform"
+            ),
+            row(
+                "frequency-counters",
+                "Signal I/O",
+                "Frequency counters",
+                "Counter panel",
+                connected ? "ABI needed" : "Waiting",
+                "Counter results and gate intervals are not exposed by the current ABI.",
+                "Add counter query, gate-time configuration, and overflow reporting.",
+                "number"
+            ),
+            row(
+                "irigb-decoder",
+                "Signal I/O",
+                "IRIG-B decoder",
+                "IRIG-B workspace",
+                "Roadmap",
+                "Needs an FPGA image contract that identifies the IRIG-B core and register span.",
+                "Add core detection before any decode or generator controls.",
+                "wave.3.forward"
+            ),
+            row(
+                "dcf77-decoder",
+                "Signal I/O",
+                "DCF77 decoder",
+                "DCF77 workspace",
+                "Roadmap",
+                "Needs an FPGA image contract that identifies the DCF77 core and register span.",
+                "Add core detection before any decode or generator controls.",
+                "antenna.radiowaves.left.and.right"
+            ),
+            row(
+                "i2c-fabric",
+                "Board services",
+                "I2C fabric",
+                "I2C diagnostics",
+                status(live: has("I2C")),
+                has("I2C")
+                    ? "I2C controller, mux, and known-device probes are available."
+                    : "I2C capability is not advertised.",
+                "Continue expanding known-device decoders by board profile.",
+                "memorychip"
+            ),
+            row(
+                "led-controller",
+                "Board services",
+                "Status LED controller",
+                "LED controls",
+                status(live: has("LEDs")),
+                has("LEDs")
+                    ? "Manual and policy-driven LED readback paths are available."
+                    : "LED capability is not advertised.",
+                "Add named Windows LED policies after state restore is covered.",
+                "lightbulb.led"
+            ),
+            row(
+                "sensor-fabric",
+                "Board services",
+                "Sensor fabric",
+                "Sensors and IMU",
+                status(live: has("Sensors")),
+                has("Sensors")
+                    ? "Environmental telemetry is exposed through DriverKit."
+                    : "Sensor capability is not advertised.",
+                "Finish IMU fused-motion decoding for BNO055 and BNO08x.",
+                "gyroscope"
+            ),
+            row(
+                "spi-flash",
+                "Programming and maintenance",
+                "SPI flash programmer",
+                "FPGA flash update",
+                connected ? "Roadmap" : "Waiting",
+                "Flash erase, program, and readback are intentionally not exposed yet.",
+                "Add image validation first, then guarded erase, program, and verify selectors.",
+                "externaldrive.badge.timemachine"
+            ),
+        ]
+    }
+
+    static func reportText(for snapshot: TimeCardDeviceSnapshot?) -> String {
+        var lines = ["Time Card macOS FPGA core readiness matrix"]
+        for group in groupedRows(for: snapshot) {
+            lines.append("")
+            lines.append(group.0)
+            for row in group.1 {
+                lines.append("\(row.core): \(row.state)")
+                lines.append("  Windows feature: \(row.windowsFeature)")
+                lines.append("  Evidence: \(row.evidence)")
+                lines.append("  Next: \(row.nextStep)")
+            }
+        }
+        return lines.joined(separator: "\n")
     }
 }
 
