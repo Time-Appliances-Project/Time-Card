@@ -28,6 +28,9 @@ The current implementation provides:
   routing GPIO
 - Board LED query and guarded RGB LED setting for the SMA LEDs through the
   Time Card I2C LED controller
+- GNSS LED policy application through `timecardctl`, using ToD GNSS telemetry
+  when valid and a clock-sync fallback while the exact GNSS image contract is
+  still unavailable
 - A native SwiftUI Control Center with:
   - driver activation, update, and removal
   - live card discovery and explicit multi-card selection
@@ -38,7 +41,8 @@ The current implementation provides:
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
-  `sma-set`, `led`, `led-set`, and `led-sma-auto`
+  `sma-set`, `led`, `led-set`, `led-sma-auto`, `led-gnss-auto`, and
+  `led-auto`
 
 The common PHC block is available on every matched profile. ART uses its own
 fixed layout and has no standard TOD block, so the driver never reads one.
@@ -193,7 +197,7 @@ the new driver build.
 7. Open the Control Center and verify that the Overview, Precision Clock, and
    Hardware pages show the selected card.
 8. Run `timecardctl.app/Contents/MacOS/timecardctl status`, followed by the
-   same executable with `get`, `sma`, `led`, and `led-sma-auto`.
+   same executable with `get`, `sma`, `led`, and `led-auto`.
 9. Compare the reported card time, core versions, and available status fields
    with the Linux reference setup.
 
@@ -215,6 +219,10 @@ and it does not yet apply a UTC/TAI correction.
 - SMA LED policy is implemented for boards that use the Xilinx AXI IIC LED
   controller path: Meta/Facebook, Celestica/R4006, ADVA, and ADVA X1. ART LED
   support remains disabled until its OpenCores I2C path is ported.
+- GNSS LED policy currently uses raw ToD GNSS telemetry only when the driver
+  marks those fields valid. Otherwise GNSS1 falls back to the card clock sync
+  bit, and GNSS2 reports status unknown unless a future second-receiver source
+  is added.
 - Optional UTC, leap, GNSS, and satellite registers are deliberately gated
   until an exact per-card FPGA image contract is implemented.
 - The Control Center labels card time as raw and does not calculate a card to

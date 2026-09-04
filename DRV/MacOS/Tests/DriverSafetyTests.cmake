@@ -78,11 +78,15 @@ foreach(required_cli_sma IN ITEMS
         "command_led("
         "command_led_set("
         "command_led_sma_auto("
+        "command_led_gnss_auto("
+        "command_led_auto("
         "\"sma\""
         "\"sma-set\""
         "\"led\""
         "\"led-set\""
-        "\"led-sma-auto\"")
+        "\"led-sma-auto\""
+        "\"led-gnss-auto\""
+        "\"led-auto\"")
     string(FIND "${cli}" "${required_cli_sma}" cli_sma_offset)
     if(cli_sma_offset EQUAL -1)
         message(FATAL_ERROR

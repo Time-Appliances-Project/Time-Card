@@ -5,6 +5,7 @@
 #include <IOKit/IOKitLib.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,7 +26,9 @@ print_usage(FILE *stream)
             "       timecardctl sma-set connector disabled\n"
             "       timecardctl led [led]\n"
             "       timecardctl led-set led red green blue [current]\n"
-            "       timecardctl led-sma-auto\n");
+            "       timecardctl led-sma-auto\n"
+            "       timecardctl led-gnss-auto\n"
+            "       timecardctl led-auto\n");
 }
 
 static io_connect_t
@@ -135,6 +138,19 @@ call_inout(io_connect_t connection, uint32_t selector, void *input,
         return 1;
     }
     return 0;
+}
+
+static kern_return_t
+call_inout_result(io_connect_t connection, uint32_t selector, void *input,
+                  size_t inputSize, void *output, size_t expectedSize)
+{
+    size_t outputSize = expectedSize;
+    kern_return_t result = IOConnectCallStructMethod(
+        connection, selector, input, inputSize, output, &outputSize);
+
+    if (result == KERN_SUCCESS && outputSize != expectedSize)
+        return kIOReturnBadMedia;
+    return result;
 }
 
 static void
@@ -447,6 +463,86 @@ sma_led_color(const TimeCardSMAControl *sma, TimeCardLEDControl *led)
     }
 }
 
+static void
+gnss1_led_color(const TimeCardInfo *info, TimeCardLEDControl *led,
+                const char **state)
+{
+    led->led = TIMECARD_LED_GNSS1;
+    led->globalCurrent = 96u;
+    led->red = 145u;
+    led->green = 64u;
+    led->blue = 0u;
+    *state = "STATUS UNKNOWN";
+
+    if ((info->validFields & kTimeCardInfoValidGNSSStatus) != 0 &&
+        (info->validFields & kTimeCardInfoValidSatellites) != 0 &&
+        info->gnssStatus != UINT32_MAX && info->satellites != UINT32_MAX) {
+        const bool fixValid = (info->gnssStatus & (1u << 28)) != 0;
+        const bool fixOk = (info->gnssStatus & (1u << 16)) != 0;
+        const bool satValid = (info->satellites & (1u << 16)) != 0;
+        const bool anySatellite = (info->satellites & 0xffu) != 0;
+
+        if (fixValid && fixOk) {
+            led->red = 0u;
+            led->green = 180u;
+            led->blue = 30u;
+            *state = "FIX LOCKED";
+        } else if (satValid && anySatellite) {
+            led->red = 170u;
+            led->green = 78u;
+            led->blue = 0u;
+            *state = "SEARCHING";
+        } else {
+            led->red = 180u;
+            led->green = 0u;
+            led->blue = 0u;
+            *state = "NO FIX";
+        }
+        return;
+    }
+
+    if ((info->validFields & kTimeCardInfoValidClockStatus) != 0 &&
+        (info->clockStatus & 1u) != 0) {
+        led->red = 0u;
+        led->green = 180u;
+        led->blue = 30u;
+        *state = "CLOCK SYNC FALLBACK";
+    }
+}
+
+static void
+gnss2_led_color(TimeCardLEDControl *led, const char **state)
+{
+    led->led = TIMECARD_LED_GNSS2;
+    led->globalCurrent = 96u;
+    led->red = 145u;
+    led->green = 64u;
+    led->blue = 0u;
+    *state = "STATUS UNKNOWN";
+}
+
+static int
+set_policy_led(io_connect_t connection, TimeCardLEDControl *led,
+               const char *prefix, bool optional)
+{
+    led->size = sizeof(*led);
+    kern_return_t result = call_inout_result(
+        connection, kTimeCardMethodLEDSet, led, sizeof(*led), led,
+        sizeof(*led));
+    if (result == KERN_SUCCESS) {
+        printf("%s -> ", prefix);
+        print_led(led);
+        return 0;
+    }
+    if (optional && result == kIOReturnUnsupported) {
+        printf("%s -> LED not fitted on this board\n", prefix);
+        return 0;
+    }
+    fprintf(stderr, "timecardctl: method %u failed: 0x%08x\n",
+            kTimeCardMethodLEDSet, result);
+    return 1;
+}
+
 static int
 command_led_sma_auto(io_connect_t connection, int argc, char **argv)
 {
@@ -467,14 +563,59 @@ command_led_sma_auto(io_connect_t connection, int argc, char **argv)
                        &sma, sizeof(sma), &sma, sizeof(sma)))
             return 1;
         sma_led_color(&sma, &led);
-        if (call_inout(connection, kTimeCardMethodLEDSet,
-                       &led, sizeof(led), &led, sizeof(led)))
+        char prefix[32];
+        snprintf(prefix, sizeof(prefix), "SMA %u %-8s", connector,
+                 sma_direction_name(sma.direction));
+        if (set_policy_led(connection, &led, prefix, false))
             return 1;
-        printf("SMA %u %-8s -> ", connector,
-               sma_direction_name(sma.direction));
-        print_led(&led);
     }
     return 0;
+}
+
+static int
+command_led_gnss_auto(io_connect_t connection, int argc, char **argv)
+{
+    (void)argv;
+    TimeCardInfo info = {0};
+    TimeCardLEDControl led = {0};
+    const char *state = NULL;
+
+    if (argc != 2)
+        return 2;
+    if (call_output(connection, kTimeCardMethodGetInfo, &info, sizeof(info)))
+        return 1;
+    if (info.abiVersion != TIMECARD_ABI_VERSION) {
+        fprintf(stderr, "timecardctl: unsupported driver ABI %u\n",
+                info.abiVersion);
+        return 1;
+    }
+
+    gnss1_led_color(&info, &led, &state);
+    char prefix1[64];
+    snprintf(prefix1, sizeof(prefix1), "GNSS 1 %s", state);
+    if (set_policy_led(connection, &led, prefix1, false))
+        return 1;
+
+    led = (TimeCardLEDControl){0};
+    gnss2_led_color(&led, &state);
+    char prefix2[64];
+    snprintf(prefix2, sizeof(prefix2), "GNSS 2 %s", state);
+    if (set_policy_led(connection, &led, prefix2, true))
+        return 1;
+    return 0;
+}
+
+static int
+command_led_auto(io_connect_t connection, int argc, char **argv)
+{
+    (void)argv;
+    if (argc != 2)
+        return 2;
+    char *gnssArgv[] = {"timecardctl", "led-gnss-auto"};
+    char *smaArgv[] = {"timecardctl", "led-sma-auto"};
+    if (command_led_gnss_auto(connection, 2, gnssArgv))
+        return 1;
+    return command_led_sma_auto(connection, 2, smaArgv);
 }
 
 static int
@@ -547,6 +688,10 @@ main(int argc, char **argv)
         status = command_led_set(connection, argc, argv);
     else if (strcmp(argv[1], "led-sma-auto") == 0)
         status = command_led_sma_auto(connection, argc, argv);
+    else if (strcmp(argv[1], "led-gnss-auto") == 0)
+        status = command_led_gnss_auto(connection, argc, argv);
+    else if (strcmp(argv[1], "led-auto") == 0)
+        status = command_led_auto(connection, argc, argv);
     else {
         print_usage(stderr);
         status = 2;
