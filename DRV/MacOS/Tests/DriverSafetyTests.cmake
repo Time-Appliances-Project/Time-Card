@@ -162,6 +162,8 @@ foreach(required_control_center_sma IN ITEMS
         "TimeCardI2CTransferSnapshot"
         "TimeCardI2CMuxSnapshot"
         "TimeCardLEDState"
+        "TimeCardSerialPort"
+        "listSerialPorts"
         "selector: 6"
         "selector: 7"
         "selector: 8"
@@ -194,7 +196,8 @@ foreach(required_control_center_monitor IN ITEMS
         "smaLEDPlan"
         "runReadOnlySelfTest"
         "TimeCardSelfTestReport"
-        "buildSelfTestReport")
+        "buildSelfTestReport"
+        "refreshSerialPorts")
     string(FIND "${control_center_monitor}" "${required_control_center_monitor}" monitor_offset)
     if(monitor_offset EQUAL -1)
         message(FATAL_ERROR
@@ -223,7 +226,10 @@ foreach(required_control_center_view IN ITEMS
         "Copy JSON"
         "Copy CSV"
         "telemetryJSONText"
-        "telemetryCSVText")
+        "telemetryCSVText"
+        "UARTWorkspaceView"
+        "macOS serial ports"
+        "Refresh Ports")
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)
         message(FATAL_ERROR

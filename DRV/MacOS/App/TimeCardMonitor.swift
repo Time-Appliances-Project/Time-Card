@@ -177,6 +177,9 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var selfTestReport: TimeCardSelfTestReport?
     @Published private(set) var selfTestInProgress = false
     @Published private(set) var selfTestMessage = ""
+    @Published private(set) var serialPorts: [TimeCardSerialPort] = []
+    @Published private(set) var serialRefreshInProgress = false
+    @Published private(set) var serialMessage = ""
 
     private var refreshTimer: Timer?
     private var nextAutomaticAttempt = Date.distantPast
@@ -187,6 +190,7 @@ final class TimeCardMonitor: ObservableObject {
 
     init() {
         refresh()
+        refreshSerialPorts()
         refreshTimer = Timer.scheduledTimer(
             withTimeInterval: 1.0, repeats: true
         ) { [weak self] _ in
@@ -218,6 +222,25 @@ final class TimeCardMonitor: ObservableObject {
         selfTestReport = nil
         selfTestMessage = ""
         refresh()
+    }
+
+    func refreshSerialPorts() {
+        guard !serialRefreshInProgress else { return }
+        serialRefreshInProgress = true
+        serialMessage = "Refreshing macOS serial ports..."
+
+        Task { [weak self] in
+            let ports = await Task.detached(priority: .utility) {
+                TimeCardClient.listSerialPorts()
+            }.value
+
+            guard let self else { return }
+            self.serialRefreshInProgress = false
+            self.serialPorts = ports
+            self.serialMessage = ports.isEmpty
+                ? "No macOS serial ports were found."
+                : "\(ports.count) macOS serial port(s) found."
+        }
     }
 
     func refresh() {

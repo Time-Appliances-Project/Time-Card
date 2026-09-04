@@ -3,6 +3,7 @@
 import CoreFoundation
 import Foundation
 import IOKit
+import IOKit.serial
 
 struct TimeCardServiceDescriptor: Identifiable, Hashable, Sendable {
     let id: UInt64
@@ -271,6 +272,28 @@ struct ColorComponents: Equatable, Sendable {
     let red: UInt32
     let green: UInt32
     let blue: UInt32
+}
+
+struct TimeCardSerialPort: Identifiable, Equatable, Sendable {
+    let calloutDevice: String
+    let dialinDevice: String?
+    let ttyDevice: String?
+    let baseName: String?
+    let bsdType: String?
+
+    var id: String {
+        calloutDevice
+    }
+
+    var displayName: String {
+        if let baseName, !baseName.isEmpty {
+            return baseName
+        }
+        if let ttyDevice, !ttyDevice.isEmpty {
+            return ttyDevice
+        }
+        return URL(fileURLWithPath: calloutDevice).lastPathComponent
+    }
 }
 
 struct TimeCardI2CStatusSnapshot: Equatable, Sendable {
@@ -839,6 +862,62 @@ enum TimeCardClient {
         return services.sorted { $0.id < $1.id }
     }
 
+    static func listSerialPorts() -> [TimeCardSerialPort] {
+        let matching = IOServiceMatching(
+            kIOSerialBSDServiceValue
+        ) as NSMutableDictionary
+        matching[kIOSerialBSDTypeKey] = kIOSerialBSDAllTypes
+
+        var iterator: io_iterator_t = 0
+        let result = IOServiceGetMatchingServices(
+            kIOMainPortDefault, matching, &iterator
+        )
+        guard result == KERN_SUCCESS else {
+            return []
+        }
+        defer { IOObjectRelease(iterator) }
+
+        var ports: [TimeCardSerialPort] = []
+        while true {
+            let service = IOIteratorNext(iterator)
+            guard service != IO_OBJECT_NULL else { break }
+            defer { IOObjectRelease(service) }
+
+            guard let calloutDevice = serialStringProperty(
+                service,
+                key: kIOCalloutDeviceKey
+            ) else {
+                continue
+            }
+            ports.append(
+                TimeCardSerialPort(
+                    calloutDevice: calloutDevice,
+                    dialinDevice: serialStringProperty(
+                        service,
+                        key: kIODialinDeviceKey
+                    ),
+                    ttyDevice: serialStringProperty(
+                        service,
+                        key: kIOTTYDeviceKey
+                    ),
+                    baseName: serialStringProperty(
+                        service,
+                        key: kIOTTYBaseNameKey
+                    ),
+                    bsdType: serialStringProperty(
+                        service,
+                        key: kIOSerialBSDTypeKey
+                    )
+                )
+            )
+        }
+
+        return ports.sorted {
+            $0.displayName.localizedStandardCompare($1.displayName)
+                == .orderedAscending
+        }
+    }
+
     static func readSnapshot(
         for descriptor: TimeCardServiceDescriptor
     ) throws -> TimeCardDeviceSnapshot {
@@ -1186,6 +1265,18 @@ enum TimeCardClient {
                 "I2C address must be a 7-bit address from 0x08 through 0x77."
             )
         }
+    }
+
+    private static func serialStringProperty(
+        _ service: io_object_t,
+        key: String
+    ) -> String? {
+        IORegistryEntryCreateCFProperty(
+            service,
+            key as CFString,
+            kCFAllocatorDefault,
+            0
+        )?.takeRetainedValue() as? String
     }
 
     private static func openConnection(

@@ -68,7 +68,7 @@ struct ContentView: View {
                 case .gnss:
                     GNSSWorkspaceView()
                 case .uart:
-                    CapabilityWorkspaceView(workspace: .uart)
+                    UARTWorkspaceView()
                 case .sma:
                     SMARoutingView()
                 case .timing:
@@ -660,6 +660,170 @@ private struct GNSSWorkspaceView: View {
             return "Leap info valid, next \(Int32(bitPattern: snapshot.leap)) s."
         }
         return "Leap information is not marked valid."
+    }
+}
+
+private struct UARTWorkspaceView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlCenterHeader()
+
+                ControlCenterPanel(
+                    title: "UART and NMEA Laboratory",
+                    subtitle: "Native macOS serial discovery with Time Card stream gap tracking"
+                ) {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundStyle(.teal)
+                            .frame(width: 58, height: 58)
+                            .background(.teal.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(
+                                "The macOS Control Center now enumerates native "
+                                    + "serial devices through IOKit. The Time Card "
+                                    + "UART stream itself still needs a guarded "
+                                    + "DriverKit stream ABI before UBX/NMEA capture "
+                                    + "can attach directly to the card."
+                            )
+                            .foregroundStyle(.secondary)
+
+                            HStack(spacing: 8) {
+                                StatusPill(serialState, serialColor)
+                                StatusPill("Driver stream gated", .secondary)
+                            }
+                        }
+
+                        Spacer()
+
+                        Button("Refresh Ports") {
+                            monitor.refreshSerialPorts()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(monitor.serialRefreshInProgress)
+                    }
+
+                    if !monitor.serialMessage.isEmpty {
+                        Divider()
+                        Text(monitor.serialMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                ControlCenterPanel(
+                    title: "Feature coverage",
+                    subtitle: "Windows UART workspace mapped to macOS readiness"
+                ) {
+                    VStack(spacing: 10) {
+                        FeatureRow(
+                            name: "Generic macOS serial ports",
+                            state: serialState,
+                            note: "Enumerates IOSerialBSDClient devices and exposes callout and dial-in paths."
+                        )
+                        FeatureRow(
+                            name: "Time Card UART streams",
+                            state: "Gated",
+                            note: "Needs a DriverKit stream read/write ABI for the FPGA UART endpoints."
+                        )
+                        FeatureRow(
+                            name: "NMEA capture and export",
+                            state: "Partial",
+                            note: "Telemetry export is live; continuous UART capture needs stream samples."
+                        )
+                        FeatureRow(
+                            name: "u-blox UBX receiver traffic",
+                            state: "Gated",
+                            note: "Needs guarded receiver stream access before UBX requests are sent."
+                        )
+                    }
+                }
+
+                ControlCenterPanel(
+                    title: "macOS serial ports",
+                    subtitle: "Read-only IOKit inventory"
+                ) {
+                    if monitor.serialRefreshInProgress {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Refreshing serial ports...")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if monitor.serialPorts.isEmpty {
+                        ContentUnavailableView(
+                            "No serial ports found",
+                            systemImage: "cable.connector.slash",
+                            description: Text(
+                                "Connect a USB serial adapter or expose a receiver "
+                                    + "serial endpoint, then refresh this page."
+                            )
+                        )
+                        .frame(height: 170)
+                    } else {
+                        LazyVGrid(
+                            columns: [
+                                GridItem(.adaptive(minimum: 260), spacing: 12)
+                            ],
+                            spacing: 12
+                        ) {
+                            ForEach(monitor.serialPorts) { port in
+                                SerialPortCard(port: port)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(24)
+        }
+        .onAppear {
+            monitor.refreshSerialPorts()
+        }
+    }
+
+    private var serialState: String {
+        if monitor.serialRefreshInProgress {
+            return "Waiting"
+        }
+        return monitor.serialPorts.isEmpty ? "Unavailable" : "Live"
+    }
+
+    private var serialColor: Color {
+        switch serialState {
+        case "Live": .green
+        case "Waiting": .orange
+        default: .secondary
+        }
+    }
+}
+
+private struct SerialPortCard: View {
+    let port: TimeCardSerialPort
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(port.displayName)
+                    .font(.headline)
+                Spacer()
+                StatusPill(port.bsdType ?? "Serial", .teal)
+            }
+
+            InfoRow(label: "Callout", value: port.calloutDevice)
+            InfoRow(label: "Dial-in", value: port.dialinDevice ?? "Unavailable")
+            InfoRow(label: "TTY", value: port.ttyDevice ?? "Unavailable")
+        }
+        .padding(14)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.teal.opacity(0.18), lineWidth: 1)
+        )
     }
 }
 
