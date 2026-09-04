@@ -669,6 +669,7 @@ private struct I2CAndLEDView: View {
     @State private var i2cSubaddressLength: UInt32 = 0
     @State private var i2cSubaddressText = ""
     @State private var i2cReadLengthText = "1"
+    @State private var i2cMuxChannelMask: UInt32 = 0
     @State private var i2cFormMessage = ""
 
     var body: some View {
@@ -760,6 +761,65 @@ private struct I2CAndLEDView: View {
                         subtitle: "Bounded reads and bus scan through the DriverKit ABI"
                     ) {
                         VStack(alignment: .leading, spacing: 14) {
+                            HStack(alignment: .bottom, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Mux branch")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Picker("", selection: $i2cMuxChannelMask) {
+                                        Text("None 0x00").tag(UInt32(0))
+                                        Text("Channel 0x01").tag(UInt32(1))
+                                        Text("Channel 0x02").tag(UInt32(2))
+                                        Text("Channel 0x04").tag(UInt32(4))
+                                        Text("Channel 0x08").tag(UInt32(8))
+                                        Text("All 0x0f").tag(UInt32(15))
+                                    }
+                                    .labelsHidden()
+                                    .frame(width: 142)
+                                }
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Current")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(muxValue)
+                                        .font(.system(.body, design: .monospaced))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .frame(width: 84, alignment: .leading)
+                                        .background(
+                                            Color.secondary.opacity(0.08),
+                                            in: RoundedRectangle(cornerRadius: 8)
+                                        )
+                                        .textSelection(.enabled)
+                                }
+
+                                Button("Apply Mux") {
+                                    i2cFormMessage = ""
+                                    monitor.setI2CMux(channelMask: i2cMuxChannelMask)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(i2cActionDisabled)
+
+                                Button("Use Current") {
+                                    i2cMuxChannelMask =
+                                        monitor.i2cMux?.channelMask ?? 0
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(monitor.i2cMux == nil)
+
+                                Spacer()
+                            }
+
+                            Text(
+                                "Changing the mux branch controls which downstream "
+                                    + "devices the read and scan tools can see. "
+                                    + "Sensor and LED refreshes restore their own "
+                                    + "temporary branch selection."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
                             HStack(alignment: .bottom, spacing: 12) {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text("Address")
@@ -890,7 +950,7 @@ private struct I2CAndLEDView: View {
                                 name: "Mux query",
                                 state: monitor.i2cMux?.isPresent == true
                                     ? "Live" : "Unavailable",
-                                note: "Current mux channel mask is read without changing the active branch."
+                                note: "Current mux channel mask is read and can be set through selector 12."
                             )
                             FeatureRow(
                                 name: "RGB subsystem LEDs",

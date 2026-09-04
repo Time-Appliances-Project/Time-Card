@@ -284,6 +284,56 @@ final class TimeCardMonitor: ObservableObject {
         }
     }
 
+    func setI2CMux(channelMask: UInt32) {
+        guard !i2cOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            i2cOperationMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.capabilityNames.contains("I2C") == true else {
+            i2cOperationMessage = "I2C is not advertised by this driver."
+            return
+        }
+
+        i2cOperationInProgress = true
+        i2cOperationMessage = String(
+            format: "Setting I2C mux channel mask to 0x%02x...",
+            channelMask & 0xff
+        )
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<TimeCardI2CMuxSnapshot, Error>.success(
+                        try TimeCardClient.setI2CMux(
+                            for: descriptor,
+                            channelMask: channelMask
+                        )
+                    )
+                } catch {
+                    return Result<TimeCardI2CMuxSnapshot, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.i2cOperationInProgress = false
+            switch result {
+            case .success(let mux):
+                self.i2cMux = mux
+                self.i2cScanResults.removeAll(keepingCapacity: true)
+                self.i2cTransfer = nil
+                self.i2cOperationMessage = String(
+                    format: "I2C mux set and verified at 0x%02x.",
+                    mux.channelMask & 0xff
+                )
+                self.refresh()
+            case .failure(let error):
+                self.i2cOperationMessage =
+                    "I2C mux set failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func readI2C(
         address: UInt32,
         subaddress: UInt32,

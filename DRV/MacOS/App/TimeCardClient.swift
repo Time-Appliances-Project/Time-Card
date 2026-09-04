@@ -1092,6 +1092,27 @@ enum TimeCardClient {
         return raw.snapshot
     }
 
+    static func setI2CMux(
+        for descriptor: TimeCardServiceDescriptor,
+        channelMask: UInt32
+    ) throws -> TimeCardI2CMuxSnapshot {
+        guard (channelMask & ~0x0f) == 0 else {
+            throw TimeCardClientError.invalidI2CRequest(
+                "I2C mux channel mask must fit in 0x00 through 0x0f."
+            )
+        }
+
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var raw = TimeCardI2CMuxRaw(
+            size: UInt32(MemoryLayout<TimeCardI2CMuxRaw>.size),
+            channelMask: channelMask
+        )
+        try callInOut(connection: connection, selector: 12, value: &raw)
+        return raw.snapshot
+    }
+
     static func queryLEDStates(
         for descriptor: TimeCardServiceDescriptor
     ) throws -> [TimeCardLEDState] {
