@@ -1238,6 +1238,16 @@ private struct UARTWorkspaceView: View {
                 }
 
                 ControlCenterPanel(
+                    title: "Receiver mixed stream decoder",
+                    subtitle: "Protocol-aware UBX, NMEA, and RTCM3 timeline"
+                ) {
+                    ReceiverMixedStreamView(
+                        messages: receiverMixedMessages,
+                        sourceDescription: receiverMixedSourceDescription
+                    )
+                }
+
+                ControlCenterPanel(
                     title: "u-blox UBX decoder lab",
                     subtitle: "Decode binary receiver frames from capture bytes or pasted hex"
                 ) {
@@ -1637,6 +1647,57 @@ private struct UARTWorkspaceView: View {
         }
         let valid = frames.filter(\.checksumValid).count
         return "\(frames.count) frame(s), \(valid) checksum OK"
+    }
+
+    private var receiverMixedMessages: [ReceiverStreamMessage] {
+        let bytes = receiverMixedStreamBytes
+        let parsed = ReceiverStreamMessage.parse(from: bytes)
+        if !parsed.isEmpty {
+            return parsed
+        }
+
+        let nmeaFallback = decodedNMEASentences.enumerated().map {
+            ReceiverStreamMessage(sentence: $0.element, index: $0.offset)
+        }
+        let ubxFallback = decodedUBXFrames.enumerated().map {
+            ReceiverStreamMessage(frame: $0.element, index: $0.offset)
+        }
+        return nmeaFallback + ubxFallback
+    }
+
+    private var receiverMixedStreamBytes: [UInt8] {
+        if let capture = monitor.uartCapture, !capture.data.isEmpty {
+            return capture.data
+        }
+        if let capture = monitor.serialCapture, !capture.data.isEmpty {
+            return capture.data
+        }
+        if let read = monitor.uartReadResult, !read.data.isEmpty {
+            return read.data
+        }
+        if !ubxInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return ubxInputBytes
+        }
+        return Array(nmeaText.utf8)
+    }
+
+    private var receiverMixedSourceDescription: String {
+        if let capture = monitor.uartCapture, !capture.data.isEmpty {
+            return "Latest Time Card hardware UART capture, \(capture.byteCount) byte(s)."
+        }
+        if let capture = monitor.serialCapture, !capture.data.isEmpty {
+            return "Latest macOS serial preview capture, \(capture.byteCount) byte(s)."
+        }
+        if let read = monitor.uartReadResult, !read.data.isEmpty {
+            return "Latest Time Card hardware UART read, \(read.byteCount) byte(s)."
+        }
+        if !ubxInputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Current UBX decoder input."
+        }
+        if !nmeaText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Current NMEA decoder input."
+        }
+        return "No receiver stream bytes loaded yet."
     }
 
     private func parseHexBytes(_ text: String) -> [UInt8]? {
@@ -2203,6 +2264,330 @@ private enum ReceiverStreamDecoder {
             ]))
         }
         return rows.joined(separator: "\n")
+    }
+}
+
+private enum ReceiverStreamChecksumState: Equatable {
+    case ok
+    case failed
+    case missing
+    case notChecked
+
+    var label: String {
+        switch self {
+        case .ok: "Checksum OK"
+        case .failed: "Checksum fail"
+        case .missing: "No checksum"
+        case .notChecked: "Not checked"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .ok: .green
+        case .failed: .red
+        case .missing: .secondary
+        case .notChecked: .orange
+        }
+    }
+}
+
+private struct ReceiverStreamMessage: Identifiable, Equatable {
+    let offset: Int
+    let byteCount: Int
+    let protocolName: String
+    let name: String
+    let summary: String
+    let detail: String
+    let checksumState: ReceiverStreamChecksumState
+
+    var id: String {
+        "\(offset)-\(byteCount)-\(protocolName)-\(name)"
+    }
+
+    var offsetText: String {
+        String(format: "0x%04x", max(0, offset))
+    }
+
+    init(
+        offset: Int,
+        byteCount: Int,
+        protocolName: String,
+        name: String,
+        summary: String,
+        detail: String,
+        checksumState: ReceiverStreamChecksumState
+    ) {
+        self.offset = offset
+        self.byteCount = byteCount
+        self.protocolName = protocolName
+        self.name = name
+        self.summary = summary
+        self.detail = detail
+        self.checksumState = checksumState
+    }
+
+    init(sentence: NMEASentence, offset: Int, byteCount: Int) {
+        self.init(
+            offset: offset,
+            byteCount: byteCount,
+            protocolName: "NMEA",
+            name: sentence.label,
+            summary: sentence.summary,
+            detail: sentence.raw,
+            checksumState: sentence.expectedChecksum == nil
+                ? .missing
+                : (sentence.checksumValid ? .ok : .failed)
+        )
+    }
+
+    init(sentence: NMEASentence, index: Int) {
+        self.init(
+            sentence: sentence,
+            offset: index,
+            byteCount: Array(sentence.raw.utf8).count
+        )
+    }
+
+    init(frame: TimeCardUBXFrame, offset: Int, byteCount: Int) {
+        self.init(
+            offset: offset,
+            byteCount: byteCount,
+            protocolName: "UBX",
+            name: frame.messageName,
+            summary: frame.summary,
+            detail: frame.checksumText,
+            checksumState: frame.checksumValid ? .ok : .failed
+        )
+    }
+
+    init(frame: TimeCardUBXFrame, index: Int) {
+        self.init(
+            frame: frame,
+            offset: frame.offset == 0 ? index : frame.offset,
+            byteCount: Int(frame.length) + 8
+        )
+    }
+
+    static func rtcm3(
+        offset: Int,
+        payloadLength: Int,
+        byteCount: Int
+    ) -> ReceiverStreamMessage {
+        ReceiverStreamMessage(
+            offset: offset,
+            byteCount: byteCount,
+            protocolName: "RTCM3",
+            name: "RTCM3",
+            summary: "RTCM3 correction frame, payload \(payloadLength) byte(s).",
+            detail: "CRC24Q bytes are present but not validated yet.",
+            checksumState: .notChecked
+        )
+    }
+
+    static func parse(from bytes: [UInt8]) -> [ReceiverStreamMessage] {
+        guard !bytes.isEmpty else { return [] }
+        var messages: [ReceiverStreamMessage] = []
+        var index = 0
+        while index < bytes.count {
+            if let parsed = parseUBX(in: bytes, at: index) {
+                messages.append(parsed.message)
+                index += parsed.consumed
+                continue
+            }
+            if let parsed = parseNMEA(in: bytes, at: index) {
+                messages.append(parsed.message)
+                index += parsed.consumed
+                continue
+            }
+            if let parsed = parseRTCM3(in: bytes, at: index) {
+                messages.append(parsed.message)
+                index += parsed.consumed
+                continue
+            }
+            index += 1
+        }
+        return messages
+    }
+
+    private static func parseUBX(
+        in bytes: [UInt8],
+        at offset: Int
+    ) -> (message: ReceiverStreamMessage, consumed: Int)? {
+        guard offset + 8 <= bytes.count,
+              bytes[offset] == 0xb5,
+              bytes[offset + 1] == 0x62 else {
+            return nil
+        }
+        let length = Int(bytes[offset + 4]) | (Int(bytes[offset + 5]) << 8)
+        let frameLength = length + 8
+        guard offset + frameLength <= bytes.count else {
+            return nil
+        }
+        let fragment = Array(bytes[offset..<(offset + frameLength)])
+        guard let frame = TimeCardUBXFrame.parseFrames(from: fragment).first else {
+            return nil
+        }
+        return (
+            ReceiverStreamMessage(
+                frame: frame,
+                offset: offset,
+                byteCount: frameLength
+            ),
+            frameLength
+        )
+    }
+
+    private static func parseNMEA(
+        in bytes: [UInt8],
+        at offset: Int
+    ) -> (message: ReceiverStreamMessage, consumed: Int)? {
+        guard bytes[offset] == 0x24 else { return nil }
+        var end = offset + 1
+        while end < bytes.count,
+              bytes[end] != 0x0a,
+              bytes[end] != 0x0d {
+            end += 1
+        }
+        guard end > offset + 1 else { return nil }
+        let lineBytes = Array(bytes[offset..<end])
+        let line = String(decoding: lineBytes, as: UTF8.self)
+        guard let sentence = NMEASentence.parse(line) else {
+            return nil
+        }
+        var consumedEnd = end
+        while consumedEnd < bytes.count,
+              bytes[consumedEnd] == 0x0a || bytes[consumedEnd] == 0x0d {
+            consumedEnd += 1
+        }
+        return (
+            ReceiverStreamMessage(
+                sentence: sentence,
+                offset: offset,
+                byteCount: consumedEnd - offset
+            ),
+            consumedEnd - offset
+        )
+    }
+
+    private static func parseRTCM3(
+        in bytes: [UInt8],
+        at offset: Int
+    ) -> (message: ReceiverStreamMessage, consumed: Int)? {
+        guard offset + 6 <= bytes.count,
+              bytes[offset] == 0xd3 else {
+            return nil
+        }
+        let payloadLength = (Int(bytes[offset + 1] & 0x03) << 8) |
+            Int(bytes[offset + 2])
+        let frameLength = 3 + payloadLength + 3
+        guard payloadLength <= 1023,
+              offset + frameLength <= bytes.count else {
+            return nil
+        }
+        return (
+            ReceiverStreamMessage.rtcm3(
+                offset: offset,
+                payloadLength: payloadLength,
+                byteCount: frameLength
+            ),
+            frameLength
+        )
+    }
+}
+
+private struct ReceiverMixedStreamView: View {
+    let messages: [ReceiverStreamMessage]
+    let sourceDescription: String
+
+    private var displayedMessages: ArraySlice<ReceiverStreamMessage> {
+        messages.prefix(80)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(sourceDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                StatusPill(streamSummaryText, messages.isEmpty ? .secondary : .blue)
+            }
+
+            if messages.isEmpty {
+                Text(
+                    "No mixed receiver messages decoded yet. Capture UART bytes "
+                        + "or load paste/capture data into the UBX or NMEA labs."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else {
+                LazyVStack(spacing: 8) {
+                    ForEach(displayedMessages) { message in
+                        ReceiverMixedStreamRow(message: message)
+                    }
+                }
+                if messages.count > displayedMessages.count {
+                    Text("Showing first \(displayedMessages.count) of \(messages.count) decoded message(s).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var streamSummaryText: String {
+        guard !messages.isEmpty else { return "No decoded messages" }
+        let ubx = messages.filter { $0.protocolName == "UBX" }.count
+        let nmea = messages.filter { $0.protocolName == "NMEA" }.count
+        let rtcm = messages.filter { $0.protocolName == "RTCM3" }.count
+        return "\(messages.count) decoded, \(ubx) UBX, \(nmea) NMEA, \(rtcm) RTCM3"
+    }
+}
+
+private struct ReceiverMixedStreamRow: View {
+    let message: ReceiverStreamMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(message.offsetText)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                StatusPill(message.protocolName, protocolColor)
+                Text(message.name)
+                    .font(.headline)
+                Spacer()
+                Text("\(message.byteCount) B")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                StatusPill(message.checksumState.label, message.checksumState.color)
+            }
+            Text(message.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            Text(message.detail)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+                .textSelection(.enabled)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            Color.secondary.opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+    }
+
+    private var protocolColor: Color {
+        switch message.protocolName {
+        case "UBX": .teal
+        case "NMEA": .green
+        case "RTCM3": .orange
+        default: .secondary
+        }
     }
 }
 
@@ -5466,7 +5851,7 @@ private struct OperationsView: View {
 
                         Text(
                             supportBundleMessage.isEmpty
-                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, hardware UART, raw UART capture bytes, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
+                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, hardware UART, raw UART capture bytes, mixed receiver decode, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
                                 : supportBundleMessage
                         )
                         .font(.caption)
@@ -5642,6 +6027,7 @@ private struct OperationsView: View {
         try writeSupportText(serialPortsCSVText, named: "serial-ports.csv", into: stagingURL)
         try writeSupportText(serialCaptureText, named: "serial-capture.txt", into: stagingURL)
         try writeSupportText(hardwareUARTText, named: "hardware-uart.txt", into: stagingURL)
+        try writeSupportText(receiverStreamText, named: "receiver-stream.txt", into: stagingURL)
         try writeSupportData(
             Data(monitor.uartCapture?.data ?? []),
             named: "hardware-uart-capture.bin",
@@ -5704,6 +6090,7 @@ private struct OperationsView: View {
             "serial-ports.csv",
             "serial-capture.txt",
             "hardware-uart.txt",
+            "receiver-stream.txt",
             "hardware-uart-capture.bin",
             "receiver-satellites.csv",
             "sampling-history.csv",
@@ -5905,8 +6292,29 @@ private struct OperationsView: View {
         return lines.joined(separator: "\n")
     }
 
+    private var receiverStreamText: String {
+        let data = monitor.uartCapture?.data ??
+            monitor.uartReadResult?.data ??
+            monitor.serialCapture?.data ?? []
+        let messages = ReceiverStreamMessage.parse(from: data)
+        guard !messages.isEmpty else {
+            return "No mixed receiver stream messages decoded from latest UART capture or read."
+        }
+        return messages.map { message in
+            [
+                "\(message.offsetText) \(message.protocolName) \(message.name)",
+                "Bytes: \(message.byteCount)",
+                "Checksum: \(message.checksumState.label)",
+                "Summary: \(message.summary)",
+                "Detail: \(message.detail)",
+            ].joined(separator: "\n")
+        }.joined(separator: "\n\n")
+    }
+
     private var receiverSatelliteSignals: [ReceiverSatelliteSignal] {
-        let data = monitor.uartCapture?.data ?? monitor.uartReadResult?.data ?? []
+        let data = monitor.uartCapture?.data ??
+            monitor.uartReadResult?.data ??
+            monitor.serialCapture?.data ?? []
         let nmeaText = String(decoding: data, as: UTF8.self)
         let nmeaSentences = nmeaText
             .split(whereSeparator: \.isNewline)

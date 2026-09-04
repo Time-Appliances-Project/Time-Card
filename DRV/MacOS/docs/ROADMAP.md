@@ -44,6 +44,7 @@ the bounded ABI v8 read path.
 - Bounded UART writes, guarded UBX poll requests, and poll-response capture
 - Continuous bounded polling capture in the SwiftUI app and CLI, with live
   app progress, raw capture save, and support-bundle export
+- Mixed UBX, NMEA, and RTCM3 receiver stream timeline
 - Receiver stream summary dashboard for decoded UBX and NMEA captures
 - Receiver satellite signal table and support-bundle CSV export
 - Receiver satellite sky map from UBX NAV-SAT and NMEA GSV records
