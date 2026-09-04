@@ -81,6 +81,8 @@ The current implementation provides:
   - a board-variant compatibility matrix for Meta/Facebook, Celestica R4006,
     Orolia/Safran ART, ADVA, and ADVA X1 profiles, also exported in support ZIPs
   - a rolling bracketed sampling-window chart
+  - native save dialogs for telemetry JSON/CSV, diagnostics, self-test
+    reports, and session-log text/JSON, plus support ZIP session-log JSON
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
   `sma-set`, `led`, `led-set`, `led-sma-auto`, `led-gnss-auto`, `led-auto`,

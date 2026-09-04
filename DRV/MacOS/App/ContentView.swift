@@ -6335,7 +6335,7 @@ private struct TelemetryStudioView: View {
                     FeatureRow(
                         name: "CSV and JSON export",
                         state: monitor.snapshot == nil ? "Waiting" : "Live",
-                        note: "Copies structured JSON and CSV samples from the current macOS telemetry model."
+                        note: "Copies or saves structured JSON and CSV samples from the current macOS telemetry model."
                     )
                 }
 
@@ -6371,6 +6371,28 @@ private struct TelemetryStudioView: View {
                                 }
                                 .buttonStyle(.bordered)
 
+                                Button("Save JSON") {
+                                    saveTelemetry(
+                                        telemetryJSONText,
+                                        defaultName:
+                                            "TimeCardMacOS-Telemetry-\(telemetryTimestampForFilename).json",
+                                        allowedContentTypes: [.json],
+                                        successPrefix: "Saved JSON telemetry"
+                                    )
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button("Save CSV") {
+                                    saveTelemetry(
+                                        telemetryCSVText,
+                                        defaultName:
+                                            "TimeCardMacOS-Telemetry-\(telemetryTimestampForFilename).csv",
+                                        allowedContentTypes: [.commaSeparatedText],
+                                        successPrefix: "Saved CSV telemetry"
+                                    )
+                                }
+                                .buttonStyle(.bordered)
+
                                 Spacer()
 
                                 Text(telemetryExportSummary)
@@ -6398,6 +6420,45 @@ private struct TelemetryStudioView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         telemetryExportMessage = message
+    }
+
+    private func saveTelemetry(
+        _ text: String,
+        defaultName: String,
+        allowedContentTypes: [UTType],
+        successPrefix: String
+    ) {
+        let panel = NSSavePanel()
+        panel.title = "Save Time Card Telemetry"
+        panel.nameFieldStringValue = defaultName
+        panel.allowedContentTypes = allowedContentTypes
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            telemetryExportMessage = "Telemetry save canceled."
+            return
+        }
+
+        do {
+            try text.write(
+                to: destinationURL,
+                atomically: true,
+                encoding: .utf8
+            )
+            telemetryExportMessage = "\(successPrefix) to \(destinationURL.path)."
+            NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
+        } catch {
+            telemetryExportMessage =
+                "Telemetry save failed: \(error.localizedDescription)"
+        }
+    }
+
+    private var telemetryTimestampForFilename: String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
     }
 
     private var telemetryExportSummary: String {
@@ -6799,8 +6860,11 @@ private struct TelemetryStudioView: View {
 private struct OperationsView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
     @State private var copiedDiagnostics = false
+    @State private var diagnosticsExportMessage = ""
+    @State private var selfTestExportMessage = ""
     @State private var supportBundleMessage = ""
     @State private var copiedSessionLog = false
+    @State private var sessionLogExportMessage = ""
 
     var body: some View {
         ScrollView {
@@ -6855,6 +6919,19 @@ private struct OperationsView: View {
                                     !monitor.serviceDetected
                             )
 
+                            Button("Save Self-Test Report") {
+                                selfTestExportMessage = saveOperationText(
+                                    selfTestText,
+                                    title: "Save Time Card Self-Test Report",
+                                    defaultName:
+                                        "TimeCardMacOS-SelfTest-\(supportBundleTimestampForFilename).txt",
+                                    allowedContentTypes: [.plainText],
+                                    successPrefix: "Saved self-test report"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(monitor.selfTestReport == nil)
+
                             if monitor.selfTestInProgress {
                                 ProgressView()
                                     .controlSize(.small)
@@ -6886,6 +6963,13 @@ private struct OperationsView: View {
                                 .textSelection(.enabled)
                         }
 
+                        if !selfTestExportMessage.isEmpty {
+                            Text(selfTestExportMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
                         Divider()
 
                         VStack(spacing: 10) {
@@ -6902,22 +6986,47 @@ private struct OperationsView: View {
 
                 ControlCenterPanel(
                     title: "Diagnostics",
-                    subtitle: "Copyable support report"
+                    subtitle: "Copyable and saveable support report"
                 ) {
-                    Button("Copy Diagnostics") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(
-                            diagnosticsText,
-                            forType: .string
-                        )
-                        copiedDiagnostics = true
-                    }
-                    .buttonStyle(.borderedProminent)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Button("Copy Diagnostics") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(
+                                    diagnosticsText,
+                                    forType: .string
+                                )
+                                copiedDiagnostics = true
+                            }
+                            .buttonStyle(.borderedProminent)
 
-                    Text(copiedDiagnostics ? "Diagnostics copied." : diagnosticsText)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                            Button("Save Diagnostics") {
+                                diagnosticsExportMessage = saveOperationText(
+                                    diagnosticsText,
+                                    title: "Save Time Card Diagnostics",
+                                    defaultName:
+                                        "TimeCardMacOS-Diagnostics-\(supportBundleTimestampForFilename).txt",
+                                    allowedContentTypes: [.plainText],
+                                    successPrefix: "Saved diagnostics"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+
+                            Spacer()
+                        }
+
+                        if !diagnosticsExportMessage.isEmpty {
+                            Text(diagnosticsExportMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
+                        Text(copiedDiagnostics ? "Diagnostics copied." : diagnosticsText)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
                 }
 
                 ControlCenterPanel(
@@ -6930,6 +7039,30 @@ private struct OperationsView: View {
                                 saveSupportBundle()
                             }
                             .buttonStyle(.borderedProminent)
+
+                            Button("Save Session Log") {
+                                sessionLogExportMessage = saveOperationText(
+                                    sessionLogText,
+                                    title: "Save Time Card Session Log",
+                                    defaultName:
+                                        "TimeCardMacOS-Session-\(supportBundleTimestampForFilename).txt",
+                                    allowedContentTypes: [.plainText],
+                                    successPrefix: "Saved session log"
+                                )
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Save Session JSON") {
+                                sessionLogExportMessage = saveOperationText(
+                                    sessionLogJSONText,
+                                    title: "Save Time Card Session JSON",
+                                    defaultName:
+                                        "TimeCardMacOS-Session-\(supportBundleTimestampForFilename).json",
+                                    allowedContentTypes: [.json],
+                                    successPrefix: "Saved session JSON"
+                                )
+                            }
+                            .buttonStyle(.bordered)
 
                             Button("Copy Session Log") {
                                 NSPasteboard.general.clearContents()
@@ -6964,6 +7097,13 @@ private struct OperationsView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
 
+                        if !sessionLogExportMessage.isEmpty {
+                            Text(sessionLogExportMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
                         Text(
                             copiedSessionLog
                                 ? "Session log copied."
@@ -6982,6 +7122,36 @@ private struct OperationsView: View {
                 }
             }
             .padding(24)
+        }
+    }
+
+    private func saveOperationText(
+        _ text: String,
+        title: String,
+        defaultName: String,
+        allowedContentTypes: [UTType],
+        successPrefix: String
+    ) -> String {
+        let panel = NSSavePanel()
+        panel.title = title
+        panel.nameFieldStringValue = defaultName
+        panel.allowedContentTypes = allowedContentTypes
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            return "Save canceled."
+        }
+
+        do {
+            try text.write(
+                to: destinationURL,
+                atomically: true,
+                encoding: .utf8
+            )
+            NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
+            return "\(successPrefix) to \(destinationURL.path)."
+        } catch {
+            return "Save failed: \(error.localizedDescription)"
         }
     }
 
@@ -7128,6 +7298,7 @@ private struct OperationsView: View {
         )
         try writeSupportText(diagnosticsText, named: "diagnostics.txt", into: stagingURL)
         try writeSupportText(sessionLogText, named: "session-log.txt", into: stagingURL)
+        try writeSupportText(sessionLogJSONText, named: "session-log.json", into: stagingURL)
         try writeSupportText(liveSnapshotText, named: "live-snapshot.json", into: stagingURL)
         try writeSupportText(selfTestText, named: "self-test.txt", into: stagingURL)
         try writeSupportText(
@@ -7211,6 +7382,7 @@ private struct OperationsView: View {
         let files = [
             "diagnostics.txt",
             "session-log.txt",
+            "session-log.json",
             "live-snapshot.json",
             "self-test.txt",
             "configuration-profiles.txt",
@@ -7348,6 +7520,22 @@ private struct OperationsView: View {
         return monitor.sessionLog.map { entry in
             "\(TimeCardFormatting.date(entry.timestamp)) [\(entry.severity.rawValue)] \(entry.category): \(entry.message)"
         }.joined(separator: "\n")
+    }
+
+    private var sessionLogJSONText: String {
+        let object: [String: Any] = [
+            "generatedAt": TimeCardFormatting.date(Date()),
+            "eventCount": monitor.sessionLog.count,
+            "events": monitor.sessionLog.map { entry in
+                [
+                    "timestamp": TimeCardFormatting.date(entry.timestamp),
+                    "severity": entry.severity.rawValue,
+                    "category": entry.category,
+                    "message": entry.message,
+                ]
+            },
+        ]
+        return supportJSONText(object)
     }
 
     private var sessionLogPreviewText: String {
