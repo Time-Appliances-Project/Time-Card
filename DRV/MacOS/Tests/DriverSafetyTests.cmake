@@ -180,6 +180,25 @@ foreach(required_control_center_sma IN ITEMS
     endif()
 endforeach()
 
+set(control_center_monitor_source "${TIMECARD_SOURCE_DIR}/App/TimeCardMonitor.swift")
+if(NOT EXISTS "${control_center_monitor_source}")
+    message(FATAL_ERROR
+        "Control Center monitor not found: ${control_center_monitor_source}")
+endif()
+file(READ "${control_center_monitor_source}" control_center_monitor)
+foreach(required_control_center_monitor IN ITEMS
+        "applyGNSSLEDPolicy"
+        "applySMALEDPolicy"
+        "applyAllLEDPolicy"
+        "gnssLEDPlans"
+        "smaLEDPlan")
+    string(FIND "${control_center_monitor}" "${required_control_center_monitor}" monitor_offset)
+    if(monitor_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Control Center monitor must expose LED policy controls")
+    endif()
+endforeach()
+
 set(control_center_view_source "${TIMECARD_SOURCE_DIR}/App/ContentView.swift")
 if(NOT EXISTS "${control_center_view_source}")
     message(FATAL_ERROR

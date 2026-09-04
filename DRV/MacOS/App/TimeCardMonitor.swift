@@ -24,6 +24,20 @@ struct SensorHistoryPoint: Identifiable, Equatable, Sendable {
     let value: Double
 }
 
+private struct TimeCardLEDPlan: Sendable {
+    let led: TimeCardLEDKind
+    let red: UInt32
+    let green: UInt32
+    let blue: UInt32
+    let globalCurrent: UInt32
+    let optional: Bool
+}
+
+private struct TimeCardLEDPolicyResult: Sendable {
+    let states: [TimeCardLEDState]
+    let routes: [TimeCardSMARoute]
+}
+
 private enum TimeCardRefreshOutcome: Sendable {
     case success(
         services: [TimeCardServiceDescriptor],
@@ -376,14 +390,7 @@ final class TimeCardMonitor: ObservableObject {
             self.i2cOperationInProgress = false
             switch result {
             case .success(let state):
-                var states = self.ledStates
-                if let index = states.firstIndex(where: { $0.led == state.led }) {
-                    states[index] = state
-                } else {
-                    states.append(state)
-                    states.sort { $0.led.rawValue < $1.led.rawValue }
-                }
-                self.ledStates = states
+                self.mergeLEDStates([state])
                 self.i2cOperationMessage =
                     "\(state.led.label) LED set and verified at RGB \(state.rgbText)."
                 self.refresh()
@@ -391,6 +398,258 @@ final class TimeCardMonitor: ObservableObject {
                 self.i2cOperationMessage =
                     "\(led.label) LED set failed: \(error.localizedDescription)"
             }
+        }
+    }
+
+    func applyGNSSLEDPolicy() {
+        applyLEDPolicy(
+            label: "GNSS LED policy",
+            includeGNSS: true,
+            includeSMA: false
+        )
+    }
+
+    func applySMALEDPolicy() {
+        applyLEDPolicy(
+            label: "SMA LED policy",
+            includeGNSS: false,
+            includeSMA: true
+        )
+    }
+
+    func applyAllLEDPolicy() {
+        applyLEDPolicy(
+            label: "GNSS and SMA LED policy",
+            includeGNSS: true,
+            includeSMA: true
+        )
+    }
+
+    private func applyLEDPolicy(
+        label: String,
+        includeGNSS: Bool,
+        includeSMA: Bool
+    ) {
+        guard !i2cOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            i2cOperationMessage = "No Time Card is selected."
+            return
+        }
+        guard let currentSnapshot = snapshot else {
+            i2cOperationMessage = "No Time Card status snapshot is available."
+            return
+        }
+        guard currentSnapshot.capabilityNames.contains("LEDs") else {
+            i2cOperationMessage = "LED control is not advertised by this driver."
+            return
+        }
+        if includeSMA && !currentSnapshot.capabilityNames.contains("SMA") {
+            i2cOperationMessage = "SMA routing is not advertised by this driver."
+            return
+        }
+
+        i2cOperationInProgress = true
+        i2cOperationMessage = "Applying \(label)..."
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                () -> Result<TimeCardLEDPolicyResult, Error> in
+                do {
+                    var states: [TimeCardLEDState] = []
+                    var routes: [TimeCardSMARoute] = []
+
+                    if includeGNSS {
+                        for plan in TimeCardMonitor.gnssLEDPlans(
+                            for: currentSnapshot
+                        ) {
+                            if let state = try TimeCardMonitor.applyLEDPlan(
+                                plan,
+                                descriptor: descriptor
+                            ) {
+                                states.append(state)
+                            }
+                        }
+                    }
+
+                    if includeSMA {
+                        routes = try TimeCardClient.querySMARoutes(
+                            for: descriptor
+                        )
+                        for route in routes where route.isPresent {
+                            guard let plan = TimeCardMonitor.smaLEDPlan(
+                                for: route
+                            ) else {
+                                continue
+                            }
+                            if let state = try TimeCardMonitor.applyLEDPlan(
+                                plan,
+                                descriptor: descriptor
+                            ) {
+                                states.append(state)
+                            }
+                        }
+                    }
+
+                    return .success(
+                        TimeCardLEDPolicyResult(
+                            states: states,
+                            routes: routes
+                        )
+                    )
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.i2cOperationInProgress = false
+            switch result {
+            case .success(let policyResult):
+                self.mergeLEDStates(policyResult.states)
+                if !policyResult.routes.isEmpty {
+                    self.smaRoutes = policyResult.routes
+                }
+                self.i2cOperationMessage =
+                    "\(label) applied to \(policyResult.states.count) LED(s)."
+                self.refresh()
+            case .failure(let error):
+                self.i2cOperationMessage =
+                    "\(label) failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func mergeLEDStates(_ updates: [TimeCardLEDState]) {
+        var states = ledStates
+        for update in updates {
+            if let index = states.firstIndex(where: { $0.led == update.led }) {
+                states[index] = update
+            } else {
+                states.append(update)
+            }
+        }
+        states.sort { $0.led.rawValue < $1.led.rawValue }
+        ledStates = states
+    }
+
+    nonisolated private static func gnssLEDPlans(
+        for snapshot: TimeCardDeviceSnapshot
+    ) -> [TimeCardLEDPlan] {
+        var gnss1 = TimeCardLEDPlan(
+            led: .gnss1,
+            red: 145,
+            green: 64,
+            blue: 0,
+            globalCurrent: 96,
+            optional: false
+        )
+
+        if snapshot.gnssTelemetryAvailable,
+           let fixValid = snapshot.gnssFixValidityBitSet,
+           let fixOK = snapshot.gnssFixOK,
+           let satValid = snapshot.satelliteDataValid,
+           let seenSatellites = snapshot.seenSatellites {
+            if fixValid && fixOK {
+                gnss1 = TimeCardLEDPlan(
+                    led: .gnss1,
+                    red: 0,
+                    green: 180,
+                    blue: 30,
+                    globalCurrent: 96,
+                    optional: false
+                )
+            } else if satValid && seenSatellites != 0 {
+                gnss1 = TimeCardLEDPlan(
+                    led: .gnss1,
+                    red: 170,
+                    green: 78,
+                    blue: 0,
+                    globalCurrent: 96,
+                    optional: false
+                )
+            } else {
+                gnss1 = TimeCardLEDPlan(
+                    led: .gnss1,
+                    red: 180,
+                    green: 0,
+                    blue: 0,
+                    globalCurrent: 96,
+                    optional: false
+                )
+            }
+        } else if snapshot.clockInSync == true {
+            gnss1 = TimeCardLEDPlan(
+                led: .gnss1,
+                red: 0,
+                green: 180,
+                blue: 30,
+                globalCurrent: 96,
+                optional: false
+            )
+        }
+
+        return [
+            gnss1,
+            TimeCardLEDPlan(
+                led: .gnss2,
+                red: 145,
+                green: 64,
+                blue: 0,
+                globalCurrent: 96,
+                optional: true
+            ),
+        ]
+    }
+
+    nonisolated private static func smaLEDPlan(
+        for route: TimeCardSMARoute
+    ) -> TimeCardLEDPlan? {
+        guard let led = TimeCardLEDKind(rawValue: route.connector + 1) else {
+            return nil
+        }
+        var red: UInt32 = 130
+        var green: UInt32 = 55
+        var blue: UInt32 = 0
+        if route.isDisabled || route.direction == .disabled {
+            red = 50
+            green = 35
+            blue = 0
+        } else if route.direction == .input {
+            red = 0
+            green = 65
+            blue = 180
+        } else if route.direction == .output {
+            red = 0
+            green = 165
+            blue = 30
+        }
+        return TimeCardLEDPlan(
+            led: led,
+            red: red,
+            green: green,
+            blue: blue,
+            globalCurrent: 96,
+            optional: false
+        )
+    }
+
+    nonisolated private static func applyLEDPlan(
+        _ plan: TimeCardLEDPlan,
+        descriptor: TimeCardServiceDescriptor
+    ) throws -> TimeCardLEDState? {
+        do {
+            return try TimeCardClient.setLEDState(
+                for: descriptor,
+                led: plan.led,
+                red: plan.red,
+                green: plan.green,
+                blue: plan.blue,
+                globalCurrent: plan.globalCurrent
+            )
+        } catch TimeCardClientError.methodFailed(let selector, let result)
+            where plan.optional && selector == 7 &&
+                result == kIOReturnUnsupported {
+            return nil
         }
     }
 

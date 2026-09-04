@@ -974,6 +974,38 @@ private struct I2CAndLEDView: View {
                             )
                             .font(.caption)
                             .foregroundStyle(.secondary)
+
+                            Divider()
+
+                            HStack(spacing: 10) {
+                                Button("Apply GNSS Policy") {
+                                    i2cFormMessage = ""
+                                    monitor.applyGNSSLEDPolicy()
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(ledActionDisabled)
+
+                                Button("Apply SMA Policy") {
+                                    i2cFormMessage = ""
+                                    monitor.applySMALEDPolicy()
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(ledActionDisabled)
+
+                                Button("Apply All LED Policy") {
+                                    i2cFormMessage = ""
+                                    monitor.applyAllLEDPolicy()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(ledActionDisabled)
+
+                                Text(
+                                    "Policies match the CLI defaults for GNSS "
+                                        + "status and SMA direction colors."
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
                         }
                     }
 
@@ -1020,7 +1052,7 @@ private struct I2CAndLEDView: View {
                             FeatureRow(
                                 name: "RGB subsystem LEDs",
                                 state: presentLEDCount > 0 ? "Live" : "Unavailable",
-                                note: "GNSS and SMA LED color/current readback and manual setting use selectors 6 and 7."
+                                note: "Readback, manual setting, and GNSS/SMA policy presets use selectors 6 and 7."
                             )
                             FeatureRow(
                                 name: "Known-device scan",
