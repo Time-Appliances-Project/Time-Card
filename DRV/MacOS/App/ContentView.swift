@@ -66,7 +66,7 @@ struct ContentView: View {
                 case .clock:
                     PrecisionClockView()
                 case .gnss:
-                    CapabilityWorkspaceView(workspace: .gnss)
+                    GNSSWorkspaceView()
                 case .uart:
                     CapabilityWorkspaceView(workspace: .uart)
                 case .sma:
@@ -455,6 +455,211 @@ private struct PrecisionClockView: View {
             }
             .padding(24)
         }
+    }
+}
+
+private struct GNSSWorkspaceView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlCenterHeader()
+
+                if let snapshot = monitor.snapshot {
+                    HStack(spacing: 14) {
+                        MetricCard(
+                            title: "GNSS fix",
+                            value: snapshot.gnssFixName,
+                            detail: gnssFixDetail(snapshot),
+                            systemImage: snapshot.gnssFixOK == true
+                                ? "location.circle.fill"
+                                : "location.slash",
+                            accent: snapshot.gnssFixOK == true
+                                ? .green : .orange
+                        )
+                        MetricCard(
+                            title: "Satellites",
+                            value: satelliteValue(snapshot),
+                            detail: satelliteDetail(snapshot),
+                            systemImage: "antenna.radiowaves.left.and.right",
+                            accent: snapshot.satelliteDataValid == true
+                                ? .cyan : .secondary
+                        )
+                        MetricCard(
+                            title: "UTC summary",
+                            value: utcValue(snapshot),
+                            detail: leapDetail(snapshot),
+                            systemImage: snapshot.utcOffsetValid == true
+                                ? "clock.badge.checkmark"
+                                : "clock.badge.exclamationmark",
+                            accent: snapshot.utcOffsetValid == true
+                                ? .green : .orange
+                        )
+                    }
+
+                    HStack(alignment: .top, spacing: 18) {
+                        ControlCenterPanel(
+                            title: "Time-of-Day core",
+                            subtitle: "DriverKit register snapshot"
+                        ) {
+                            InfoRow(
+                                label: "Capability",
+                                value: snapshot.capabilityNames.contains("ToD")
+                                    ? "Available" : "Not present"
+                            )
+                            InfoRow(
+                                label: "ToD version",
+                                value: TimeCardFormatting.validHex(
+                                    snapshot.todVersion,
+                                    valid: snapshot.hasValidField(1 << 3)
+                                )
+                            )
+                            InfoRow(
+                                label: "ToD status",
+                                value: TimeCardFormatting.validHex(
+                                    snapshot.todStatus,
+                                    valid: snapshot.hasValidField(1 << 4)
+                                )
+                            )
+                            InfoRow(
+                                label: "ToD offset",
+                                value: snapshot.todOffset == 0
+                                    ? "Not present"
+                                    : TimeCardFormatting.hex(snapshot.todOffset)
+                            )
+                        }
+
+                        ControlCenterPanel(
+                            title: "GNSS and UTC summary",
+                            subtitle: "Windows-compatible raw fields"
+                        ) {
+                            InfoRow(
+                                label: "GNSS status",
+                                value: TimeCardFormatting.validHex(
+                                    snapshot.gnssStatus,
+                                    valid: snapshot.gnssTelemetryAvailable
+                                )
+                            )
+                            InfoRow(
+                                label: "Satellites",
+                                value: TimeCardFormatting.validHex(
+                                    snapshot.satellites,
+                                    valid: snapshot.gnssTelemetryAvailable
+                                )
+                            )
+                            InfoRow(
+                                label: "UTC status",
+                                value: TimeCardFormatting.validHex(
+                                    snapshot.utcStatus,
+                                    valid: snapshot.todTelemetryAvailable
+                                )
+                            )
+                            InfoRow(
+                                label: "Leap status",
+                                value: TimeCardFormatting.validHex(
+                                    snapshot.leap,
+                                    valid: snapshot.todTelemetryAvailable
+                                )
+                            )
+                        }
+                    }
+
+                    ControlCenterPanel(
+                        title: "Receiver feature coverage",
+                        subtitle: "Windows Control Center parity map"
+                    ) {
+                        VStack(spacing: 10) {
+                            FeatureRow(
+                                name: "ToD core status",
+                                state: snapshot.hasValidField(1 << 4)
+                                    ? "Live" : "Unavailable",
+                                note: "Version and status are read through the current macOS ABI."
+                            )
+                            FeatureRow(
+                                name: "UTC and leap summary",
+                                state: snapshot.todTelemetryAvailable
+                                    ? "Live" : "Gated",
+                                note: "Uses ToD UTC and leap summary registers when the FPGA image exposes them."
+                            )
+                            FeatureRow(
+                                name: "GNSS fix and satellite counts",
+                                state: snapshot.gnssTelemetryAvailable
+                                    ? "Live" : "Gated",
+                                note: "Decodes the same fix and satellite summary fields used by the Windows dashboard."
+                            )
+                            FeatureRow(
+                                name: "u-blox identity and firmware",
+                                state: "Backend pending",
+                                note: "Needs a guarded DriverKit UART stream ABI before UBX requests can be sent."
+                            )
+                            FeatureRow(
+                                name: "Sky map and constellation view",
+                                state: "Backend pending",
+                                note: "Needs UBX-NAV-SAT samples from the receiver stream."
+                            )
+                            FeatureRow(
+                                name: "Survey-in and fixed-position controls",
+                                state: "Backend pending",
+                                note: "Needs a write-gated receiver configuration ABI with persistence warnings."
+                            )
+                        }
+                    }
+                } else {
+                    MonitorUnavailableView()
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    private func gnssFixDetail(_ snapshot: TimeCardDeviceSnapshot) -> String {
+        guard snapshot.gnssTelemetryAvailable else {
+            return "GNSS summary registers are not exposed yet."
+        }
+        if snapshot.gnssFixOK == true {
+            return "Receiver reports a valid timing fix."
+        }
+        if snapshot.gnssFixValidityBitSet == true {
+            return "Fix field is valid, but fix OK is not asserted."
+        }
+        return "Fix validity bit is not asserted."
+    }
+
+    private func satelliteValue(_ snapshot: TimeCardDeviceSnapshot) -> String {
+        guard let seen = snapshot.seenSatellites,
+              let locked = snapshot.lockedSatellites else {
+            return "Unavailable"
+        }
+        return "\(seen) seen / \(locked) locked"
+    }
+
+    private func satelliteDetail(_ snapshot: TimeCardDeviceSnapshot) -> String {
+        guard snapshot.gnssTelemetryAvailable else {
+            return "Satellite summary is not exposed yet."
+        }
+        return snapshot.satelliteDataValid == true
+            ? "Satellite count is marked valid."
+            : "Satellite count is not marked valid."
+    }
+
+    private func utcValue(_ snapshot: TimeCardDeviceSnapshot) -> String {
+        guard let offset = snapshot.utcOffsetSeconds else {
+            return "Unavailable"
+        }
+        return snapshot.utcOffsetValid == true
+            ? "UTC +\(offset) s"
+            : "UTC not valid"
+    }
+
+    private func leapDetail(_ snapshot: TimeCardDeviceSnapshot) -> String {
+        guard snapshot.todTelemetryAvailable else {
+            return "UTC/leap summary is not exposed yet."
+        }
+        if snapshot.leapInformationValid == true {
+            return "Leap info valid, next \(Int32(bitPattern: snapshot.leap)) s."
+        }
+        return "Leap information is not marked valid."
     }
 }
 

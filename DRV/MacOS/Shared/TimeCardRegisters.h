@@ -325,6 +325,15 @@ TimeCardRegisterMapHasTOD(const TimeCardRegisterMap *map)
 }
 
 static inline bool
+TimeCardRegisterMapHasTODTelemetry(const TimeCardRegisterMap *map,
+                                   uint64_t barSize)
+{
+    return TimeCardRegisterMapHasTOD(map) &&
+        TimeCardRangeFits(
+            barSize, map->todOffset, kTimeCardTodSatellites + 4u);
+}
+
+static inline bool
 TimeCardRegisterMapHasSMA(const TimeCardRegisterMap *map)
 {
     return map != NULL &&

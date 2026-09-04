@@ -33,6 +33,8 @@ The current implementation provides:
   still unavailable
 - Safe I2C diagnostics through DriverKit: AXI IIC status, zero-byte address
   probes, bounded reads, and guarded mux query/set
+- Optional ToD telemetry summary reads for UTC status, leap status, GNSS fix,
+  and satellite counts when the active FPGA image exposes that register span
 - Environmental sensor query for LM75B board temperature sensors, SHT3x
   humidity/temperature, ICP-10100 pressure/temperature with CRC and OTP
   compensation, plus BNO08x SHTP-header and BNO055 identity probes
@@ -40,7 +42,8 @@ The current implementation provides:
   - driver activation, update, and removal
   - live card discovery and explicit multi-card selection
   - PCI identity, board profile, register-map, BAR, and capability views
-  - raw card time, clock status, ToD status, and cross-timestamp telemetry
+  - raw card time, clock status, ToD status, UTC/leap summary, GNSS fix
+    summary, satellite counts, and cross-timestamp telemetry
   - live SMA connector status and route controls when the active FPGA image
     exposes writable routing
   - live Sensors and IMU workspace with environmental metric cards, board
@@ -57,19 +60,19 @@ The common PHC block is available on every matched profile. ART uses its own
 fixed layout and has no standard TOD block, so the driver never reads one.
 ADVA profiles use the fixed common clock/TOD addresses published by current
 upstream Linux, independent of their interrupt capability. The UTC, leap,
-GNSS, and satellite telemetry registers are synthesis-optional. They remain
-untouched until a future exact-image contract can prove that a specific FPGA
-image implements them.
+GNSS, and satellite telemetry registers are synthesis-optional. The driver
+reads them only when the mapped BAR covers the optional ToD telemetry span and
+marks each field valid independently.
 
 Current upstream Linux defines the classic Meta/Celestica map and the fixed ART
 and ADVA maps. The shifted revision-02 map comes from this repository's
 LitePCIe gateware and Windows/Linux support; it is not currently in upstream
 Linux. The Meta/Facebook classic profile is hardware-validated on an Intel Mac
 Pro, including ABI v7 status, SMA fixed-route readback, SMA/GNSS LED policy
-application, I2C diagnostics, and LM75B/SHT3x/ICP-10100 environmental sensor
-telemetry with compensated ICP-10100 pressure. BNO08x SHTP-header probing is
-wired for the Celestica mux route and reported separately from decoded fused
-motion.
+application, I2C diagnostics, optional ToD GNSS/UTC summary telemetry, and
+LM75B/SHT3x/ICP-10100 environmental sensor telemetry with compensated
+ICP-10100 pressure. BNO08x SHTP-header probing is wired for the Celestica mux
+route and reported separately from decoded fused motion.
 Every other profile is covered by host-side layout and safety tests but still
 requires physical-card validation before a production release.
 Celestica cards programmed with the generic Meta PCI identity continue to
@@ -240,12 +243,13 @@ and it does not yet apply a UTC/TAI correction.
 - SMA LED policy is implemented for boards that use the Xilinx AXI IIC LED
   controller path: Meta/Facebook, Celestica/R4006, ADVA, and ADVA X1. ART LED
   support remains disabled until its OpenCores I2C path is ported.
-- GNSS LED policy currently uses raw ToD GNSS telemetry only when the driver
-  marks those fields valid. Otherwise GNSS1 falls back to the card clock sync
-  bit, and GNSS2 reports status unknown unless a future second-receiver source
-  is added.
-- Optional UTC, leap, GNSS, and satellite registers are deliberately gated
-  until an exact per-card FPGA image contract is implemented.
+- GNSS LED policy currently uses raw ToD GNSS telemetry when the driver marks
+  those fields valid. Otherwise GNSS1 falls back to the card clock sync bit,
+  and GNSS2 reports status unknown unless a future second-receiver source is
+  added.
+- Optional UTC, leap, GNSS, and satellite registers are guarded by BAR span and
+  validity bits. Receiver stream decoding and guarded u-blox configuration still
+  require a future UART ABI.
 - The Control Center labels card time as raw and does not calculate a card to
   macOS offset until the driver exposes a trusted UTC-to-TAI contract.
 - The driver does not create a Linux-style `/dev/ptpN` device.

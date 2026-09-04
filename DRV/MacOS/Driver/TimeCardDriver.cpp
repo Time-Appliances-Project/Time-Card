@@ -486,6 +486,33 @@ TimeCardDriver::GetInfo(TimeCardInfo *info)
                     &info->todStatus)) {
                 info->validFields |= kTimeCardInfoValidTODStatus;
             }
+            if (TimeCardRegisterMapHasTODTelemetry(
+                    &ivars->registers, ivars->barSize)) {
+                if (ReadRegister32(
+                        ivars->pciDevice, ivars->memoryIndex,
+                        ivars->registers.todOffset + kTimeCardTodUtcStatus,
+                        &info->utcStatus)) {
+                    info->validFields |= kTimeCardInfoValidUTCStatus;
+                }
+                if (ReadRegister32(
+                        ivars->pciDevice, ivars->memoryIndex,
+                        ivars->registers.todOffset + kTimeCardTodLeap,
+                        &info->leap)) {
+                    info->validFields |= kTimeCardInfoValidLeap;
+                }
+                if (ReadRegister32(
+                        ivars->pciDevice, ivars->memoryIndex,
+                        ivars->registers.todOffset + kTimeCardTodGnssStatus,
+                        &info->gnssStatus)) {
+                    info->validFields |= kTimeCardInfoValidGNSSStatus;
+                }
+                if (ReadRegister32(
+                        ivars->pciDevice, ivars->memoryIndex,
+                        ivars->registers.todOffset + kTimeCardTodSatellites,
+                        &info->satellites)) {
+                    info->validFields |= kTimeCardInfoValidSatellites;
+                }
+            }
         }
     }
     IOLockUnlock(ivars->registerLock);

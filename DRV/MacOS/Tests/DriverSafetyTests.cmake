@@ -6,17 +6,22 @@ if(NOT EXISTS "${driver_source}")
 endif()
 file(READ "${driver_source}" driver)
 
-# These registers are synthesis-optional and may only be added after an exact
-# per-device FPGA image contract exists.
-foreach(forbidden_register IN ITEMS
+# These registers are synthesis-optional. They may only be read through a
+# driver path that first proves the optional ToD telemetry span fits in BAR0.
+string(FIND "${driver}" "TimeCardRegisterMapHasTODTelemetry(" tod_span_guard)
+if(tod_span_guard EQUAL -1)
+    message(FATAL_ERROR
+        "Driver must guard optional ToD telemetry by BAR span")
+endif()
+foreach(optional_register IN ITEMS
         kTimeCardTodUtcStatus
         kTimeCardTodLeap
         kTimeCardTodGnssStatus
         kTimeCardTodSatellites)
-    string(FIND "${driver}" "${forbidden_register}" forbidden_offset)
-    if(NOT forbidden_offset EQUAL -1)
+    string(FIND "${driver}" "${optional_register}" optional_offset)
+    if(optional_offset EQUAL -1)
         message(FATAL_ERROR
-            "Driver accesses gated optional register ${forbidden_register}")
+            "Driver must expose guarded optional register ${optional_register}")
     endif()
 endforeach()
 
@@ -85,9 +90,13 @@ foreach(required_cli_sma IN ITEMS
         "command_i2c_read("
         "command_i2c_mux("
         "command_sensors("
+        "gnss_fix_name("
         "icp10100_pressure_pascals("
         "print_sensor_capabilities("
         "print_imu_probe_detail("
+        "UTC status:"
+        "GNSS status:"
+        "Satellites:"
         "SHTP header"
         "chip ID"
         "BNO08x"
@@ -140,6 +149,9 @@ foreach(required_control_center_sma IN ITEMS
         "selector: 5"
         "querySensors"
         "TimeCardSensorSnapshot"
+        "todTelemetryAvailable"
+        "gnssTelemetryAvailable"
+        "gnssFixName"
         "selector: 13")
     string(FIND "${control_center}" "${required_control_center_sma}" control_sma_offset)
     if(control_sma_offset EQUAL -1)
@@ -148,11 +160,31 @@ foreach(required_control_center_sma IN ITEMS
     endif()
 endforeach()
 
+set(control_center_view_source "${TIMECARD_SOURCE_DIR}/App/ContentView.swift")
+if(NOT EXISTS "${control_center_view_source}")
+    message(FATAL_ERROR
+        "Control Center SwiftUI view not found: ${control_center_view_source}")
+endif()
+file(READ "${control_center_view_source}" control_center_view)
+foreach(required_control_center_view IN ITEMS
+        "GNSSWorkspaceView"
+        "UTC and leap summary"
+        "GNSS fix and satellite counts")
+    string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
+    if(view_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Control Center must expose the GNSS summary workspace")
+    endif()
+endforeach()
+
 foreach(required_sensor_driver IN ITEMS
         "TimeCardBNO08xHeaderValid"
         "TimeCardBNO08xProbeLocked"
         "TimeCardBNO055ProbeLocked"
-        "TimeCardSensorCapabilitiesForBoard")
+        "TimeCardSensorCapabilitiesForBoard"
+        "TimeCardRegisterMapHasTODTelemetry"
+        "kTimeCardTodGnssStatus"
+        "kTimeCardInfoValidGNSSStatus")
     string(FIND "${driver}" "${required_sensor_driver}" sensor_driver_offset)
     if(sensor_driver_offset EQUAL -1)
         message(FATAL_ERROR

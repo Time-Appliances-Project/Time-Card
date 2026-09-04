@@ -10,6 +10,9 @@ enum TimeCardClientTests {
             "Swift structures must preserve the DriverKit ABI v7 layout"
         )
 
+        let utcStatus: UInt32 = (1 << 8) | (1 << 16) | 18
+        let gnssStatus: UInt32 = (1 << 28) | (1 << 16) | (3 << 17)
+        let satellites: UInt32 = (1 << 16) | (12 << 8) | 15
         let snapshot = TimeCardDeviceSnapshot(
             service: TimeCardServiceDescriptor(id: 0x1234),
             abiVersion: 7,
@@ -24,12 +27,16 @@ enum TimeCardClientTests {
             clockOffset: 0x0100_0000,
             todOffset: 0x0105_0000,
             capabilities: 0xf,
-            validFields: 0x1f,
+            validFields: 0x1ff,
             clockVersion: 0x0102_0000,
             clockStatus: 1,
             clockSelect: 0xabcd_00fe,
             todVersion: 0x0102_0000,
             todStatus: 0,
+            utcStatus: utcStatus,
+            leap: 0,
+            gnssStatus: gnssStatus,
+            satellites: satellites,
             cardSeconds: 1_800_000_000,
             cardNanoseconds: 123_456_789,
             systemTimeBeforeNanoseconds: 10_000,
@@ -44,6 +51,18 @@ enum TimeCardClientTests {
         precondition(snapshot.systemMidpointNanoseconds == 10_450)
         precondition(snapshot.clockInSync == true)
         precondition(snapshot.configuredClockSource == 0xfe)
+        precondition(snapshot.todTelemetryAvailable)
+        precondition(snapshot.gnssTelemetryAvailable)
+        precondition(snapshot.utcOffsetSeconds == 18)
+        precondition(snapshot.utcOffsetValid == true)
+        precondition(snapshot.leapInformationValid == true)
+        precondition(snapshot.gnssFixOK == true)
+        precondition(snapshot.gnssFixValidityBitSet == true)
+        precondition(snapshot.gnssFixCode == 3)
+        precondition(snapshot.gnssFixName == "3-D fix")
+        precondition(snapshot.seenSatellites == 15)
+        precondition(snapshot.lockedSatellites == 12)
+        precondition(snapshot.satelliteDataValid == true)
         precondition(snapshot.capabilityNames == [
             "Clock read", "Clock set", "Cross timestamp", "ToD",
         ])
@@ -68,6 +87,10 @@ enum TimeCardClientTests {
             clockSelect: 0,
             todVersion: 0,
             todStatus: 0,
+            utcStatus: 0,
+            leap: 0,
+            gnssStatus: 0,
+            satellites: 0,
             cardSeconds: 0,
             cardNanoseconds: 0,
             systemTimeBeforeNanoseconds: 20_000,
@@ -77,6 +100,8 @@ enum TimeCardClientTests {
         precondition(art.layoutName == "ART")
         precondition(art.clockInSync == nil)
         precondition(!art.capabilityNames.contains("ToD"))
+        precondition(!art.todTelemetryAvailable)
+        precondition(!art.gnssTelemetryAvailable)
 
         let temperatureFlags: UInt32 = (1 << 0) | (1 << 1) |
             (1 << 3) | (1 << 7)

@@ -175,6 +175,25 @@ print_card_time(const TimeCardTime *cardTime)
     }
 }
 
+static const char *
+gnss_fix_name(uint32_t code)
+{
+    switch (code) {
+    case 0:
+        return "No fix";
+    case 1:
+        return "Dead reckoning";
+    case 2:
+        return "2-D fix";
+    case 3:
+        return "3-D fix";
+    case 4:
+        return "GNSS + dead reckoning";
+    default:
+        return "Unknown";
+    }
+}
+
 static int
 command_status(io_connect_t connection)
 {
@@ -248,8 +267,41 @@ command_status(io_connect_t connection)
             printf("TOD status:       0x%08x\n", info.todStatus);
         else
             printf("TOD status:       unavailable for this core version\n");
+        if ((info.validFields & kTimeCardInfoValidUTCStatus) != 0 &&
+            (info.validFields & kTimeCardInfoValidLeap) != 0) {
+            const bool utcValid = (info.utcStatus & (1u << 8)) != 0;
+            const bool leapValid = (info.utcStatus & (1u << 16)) != 0;
+            printf("UTC status:       0x%08x (%s, offset +%" PRIu32
+                   " s)\n", info.utcStatus,
+                   utcValid ? "valid" : "not valid",
+                   info.utcStatus & 0xffu);
+            printf("Leap status:      0x%08x (%s, next %" PRId32
+                   " s)\n", info.leap,
+                   leapValid ? "valid" : "not valid",
+                   (int32_t)info.leap);
+        } else {
+            printf("UTC/leap:         not exposed by this FPGA image\n");
+        }
+        if ((info.validFields & kTimeCardInfoValidGNSSStatus) != 0 &&
+            (info.validFields & kTimeCardInfoValidSatellites) != 0) {
+            const bool fixValid = (info.gnssStatus & (1u << 28)) != 0;
+            const bool fixOk = (info.gnssStatus & (1u << 16)) != 0;
+            const uint32_t fixCode = (info.gnssStatus >> 17) & 0xffu;
+            const bool satelliteValid =
+                (info.satellites & (1u << 16)) != 0;
+            printf("GNSS status:      0x%08x (%s, %s%s)\n",
+                   info.gnssStatus, gnss_fix_name(fixCode),
+                   fixOk ? "fix OK" : "fix not asserted",
+                   fixValid ? "" : ", validity bit clear");
+            printf("Satellites:       0x%08x (seen %" PRIu32
+                   ", locked %" PRIu32 ", %s)\n",
+                   info.satellites, info.satellites & 0xffu,
+                   (info.satellites >> 8) & 0xffu,
+                   satelliteValid ? "valid" : "not valid");
+        } else {
+            printf("GNSS summary:     not exposed by this FPGA image\n");
+        }
     }
-    printf("Optional GNSS:    gated pending an exact FPGA image contract\n");
     return 0;
 }
 

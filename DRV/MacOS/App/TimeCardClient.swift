@@ -32,6 +32,10 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
     let clockSelect: UInt32
     let todVersion: UInt32
     let todStatus: UInt32
+    let utcStatus: UInt32
+    let leap: UInt32
+    let gnssStatus: UInt32
+    let satellites: UInt32
     let cardSeconds: UInt64
     let cardNanoseconds: UInt32
     let systemTimeBeforeNanoseconds: UInt64
@@ -88,6 +92,71 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
     var configuredClockSource: UInt32? {
         guard hasValidField(1 << 2) else { return nil }
         return clockSelect & 0xff
+    }
+
+    var todTelemetryAvailable: Bool {
+        hasValidField(1 << 5) && hasValidField(1 << 6)
+    }
+
+    var gnssTelemetryAvailable: Bool {
+        hasValidField(1 << 7) && hasValidField(1 << 8)
+    }
+
+    var utcOffsetSeconds: UInt32? {
+        guard todTelemetryAvailable else { return nil }
+        return utcStatus & 0xff
+    }
+
+    var utcOffsetValid: Bool? {
+        guard todTelemetryAvailable else { return nil }
+        return (utcStatus & (1 << 8)) != 0
+    }
+
+    var leapInformationValid: Bool? {
+        guard todTelemetryAvailable else { return nil }
+        return (utcStatus & (1 << 16)) != 0
+    }
+
+    var seenSatellites: UInt32? {
+        guard gnssTelemetryAvailable else { return nil }
+        return satellites & 0xff
+    }
+
+    var lockedSatellites: UInt32? {
+        guard gnssTelemetryAvailable else { return nil }
+        return (satellites >> 8) & 0xff
+    }
+
+    var satelliteDataValid: Bool? {
+        guard gnssTelemetryAvailable else { return nil }
+        return (satellites & (1 << 16)) != 0
+    }
+
+    var gnssFixOK: Bool? {
+        guard gnssTelemetryAvailable else { return nil }
+        return (gnssStatus & (1 << 16)) != 0
+    }
+
+    var gnssFixValidityBitSet: Bool? {
+        guard gnssTelemetryAvailable else { return nil }
+        return (gnssStatus & (1 << 28)) != 0
+    }
+
+    var gnssFixCode: UInt32? {
+        guard gnssTelemetryAvailable else { return nil }
+        return (gnssStatus >> 17) & 0xff
+    }
+
+    var gnssFixName: String {
+        guard let code = gnssFixCode else { return "Not available" }
+        switch code {
+        case 0: return "No fix"
+        case 1: return "Dead reckoning"
+        case 2: return "2-D fix"
+        case 3: return "3-D fix"
+        case 4: return "GNSS + dead reckoning"
+        default: return "Unknown"
+        }
     }
 
     var capabilityNames: [String] {
@@ -601,6 +670,10 @@ enum TimeCardClient {
             clockSelect: info.clockSelect,
             todVersion: info.todVersion,
             todStatus: info.todStatus,
+            utcStatus: info.utcStatus,
+            leap: info.leap,
+            gnssStatus: info.gnssStatus,
+            satellites: info.satellites,
             cardSeconds: timestamp.cardTime.seconds,
             cardNanoseconds: timestamp.cardTime.nanoseconds,
             systemTimeBeforeNanoseconds:
