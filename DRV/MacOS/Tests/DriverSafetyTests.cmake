@@ -218,7 +218,12 @@ foreach(required_control_center_view IN ITEMS
         "LED controller readback"
         "Production readiness self-test"
         "Run Self-Test"
-        "advertised live subsystem")
+        "advertised live subsystem"
+        "Telemetry export"
+        "Copy JSON"
+        "Copy CSV"
+        "telemetryJSONText"
+        "telemetryCSVText")
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)
         message(FATAL_ERROR

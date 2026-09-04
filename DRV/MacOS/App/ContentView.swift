@@ -2447,6 +2447,7 @@ private struct SMARouteCard: View {
 
 private struct TelemetryStudioView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
+    @State private var telemetryExportMessage = ""
 
     var body: some View {
         ScrollView {
@@ -2475,13 +2476,465 @@ private struct TelemetryStudioView: View {
                     )
                     FeatureRow(
                         name: "CSV and JSON export",
-                        state: "Planned",
-                        note: "Diagnostics copy is available today."
+                        state: monitor.snapshot == nil ? "Waiting" : "Live",
+                        note: "Copies structured JSON and CSV samples from the current macOS telemetry model."
                     )
+                }
+
+                ControlCenterPanel(
+                    title: "Telemetry export",
+                    subtitle: "Copy live JSON or CSV for support, notebooks, and release testing"
+                ) {
+                    if monitor.snapshot == nil {
+                        ContentUnavailableView(
+                            "No telemetry snapshot",
+                            systemImage: "doc.badge.clock",
+                            description: Text(
+                                "Wait for the driver to connect before exporting telemetry."
+                            )
+                        )
+                        .frame(height: 150)
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack {
+                                Button("Copy JSON") {
+                                    copyTelemetry(
+                                        telemetryJSONText,
+                                        message: "JSON telemetry copied."
+                                    )
+                                }
+                                .buttonStyle(.borderedProminent)
+
+                                Button("Copy CSV") {
+                                    copyTelemetry(
+                                        telemetryCSVText,
+                                        message: "CSV telemetry copied."
+                                    )
+                                }
+                                .buttonStyle(.bordered)
+
+                                Spacer()
+
+                                Text(telemetryExportSummary)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text(
+                                telemetryExportMessage.isEmpty
+                                    ? telemetryPreviewText
+                                    : telemetryExportMessage
+                            )
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        }
+                    }
                 }
             }
             .padding(24)
         }
+    }
+
+    private func copyTelemetry(_ text: String, message: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        telemetryExportMessage = message
+    }
+
+    private var telemetryExportSummary: String {
+        let sensorCount = monitor.sensorTelemetry?.validReadings.count ?? 0
+        let ledCount = monitor.ledStates.filter(\.isPresent).count
+        return "\(monitor.samplingWindowHistory.count) samples, \(sensorCount) sensors, \(ledCount) LEDs"
+    }
+
+    private var telemetryPreviewText: String {
+        [
+            "Ready to copy current telemetry.",
+            "JSON includes device, clock, GNSS, SMA, sensors, I2C, LEDs, and self-test.",
+            "CSV includes sampling-window, sensor, SMA, LED, GNSS, and self-test rows.",
+        ].joined(separator: "\n")
+    }
+
+    private var telemetryJSONText: String {
+        let object = telemetryJSONObject
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(
+                withJSONObject: object,
+                options: [.prettyPrinted, .sortedKeys]
+              ),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{\n  \"error\" : \"Telemetry JSON encoding failed\"\n}"
+        }
+        return text
+    }
+
+    private var telemetryJSONObject: [String: Any] {
+        guard let snapshot = monitor.snapshot else {
+            return [
+                "generatedAt": TimeCardFormatting.date(Date()),
+                "state": String(describing: monitor.state),
+                "error": monitor.errorMessage,
+            ]
+        }
+
+        return [
+            "generatedAt": TimeCardFormatting.date(Date()),
+            "state": String(describing: monitor.state),
+            "device": [
+                "board": snapshot.boardName,
+                "pciIdentity": snapshot.pciIdentity,
+                "pciRevision": String(
+                    format: "0x%02x",
+                    snapshot.pciRevision & 0xff
+                ),
+                "layout": snapshot.layoutName,
+                "driverVersion": snapshot.driverVersionText,
+                "abiVersion": Int(snapshot.abiVersion),
+                "bar0": TimeCardFormatting.hex(snapshot.barSize),
+                "capabilities": snapshot.capabilityNames,
+            ],
+            "clock": [
+                "rawTimestamp": TimeCardFormatting.rawTimestamp(snapshot),
+                "clockStatus": TimeCardFormatting.validHex(
+                    snapshot.clockStatus,
+                    valid: snapshot.hasValidField(1 << 1)
+                ),
+                "sync": TimeCardFormatting.syncStatus(snapshot),
+                "source": TimeCardFormatting.clockSource(snapshot),
+                "sampleWindowNanoseconds":
+                    String(snapshot.sampleWindowNanoseconds),
+            ],
+            "tod": [
+                "available": snapshot.todTelemetryAvailable,
+                "status": TimeCardFormatting.validHex(
+                    snapshot.todStatus,
+                    valid: snapshot.hasValidField(1 << 4)
+                ),
+                "utcOffsetSeconds": snapshot.utcOffsetSeconds.map(String.init)
+                    ?? "unavailable",
+            ],
+            "gnss": [
+                "available": snapshot.gnssTelemetryAvailable,
+                "fix": snapshot.gnssFixName,
+                "seenSatellites": snapshot.seenSatellites.map(String.init)
+                    ?? "unavailable",
+                "lockedSatellites": snapshot.lockedSatellites.map(String.init)
+                    ?? "unavailable",
+            ],
+            "samplingWindowHistory": monitor.samplingWindowHistory.map {
+                [
+                    "timestamp": TimeCardFormatting.date($0.timestamp),
+                    "nanoseconds": $0.nanoseconds,
+                ] as [String: Any]
+            },
+            "smaRoutes": monitor.smaRoutes.map(smaRouteJSON),
+            "sensors": monitor.sensorTelemetry.map(sensorJSON) ?? NSNull(),
+            "i2c": i2cJSON,
+            "ledStates": monitor.ledStates.map(ledJSON),
+            "selfTest": monitor.selfTestReport.map(selfTestJSON) ?? NSNull(),
+        ]
+    }
+
+    private var i2cJSON: Any {
+        guard monitor.i2cStatus != nil || monitor.i2cMux != nil else {
+            return NSNull()
+        }
+        var object: [String: Any] = [:]
+        if let status = monitor.i2cStatus {
+            object["status"] = [
+                "present": status.isPresent,
+                "enabled": status.isEnabled,
+                "busBusy": status.isBusBusy,
+                "control": TimeCardFormatting.byteHex(status.control),
+                "status": TimeCardFormatting.byteHex(status.status),
+                "interruptStatus":
+                    TimeCardFormatting.byteHex(status.interruptStatus),
+                "interruptEnable":
+                    TimeCardFormatting.byteHex(status.interruptEnable),
+                "txFifoOccupancy": Int(status.txFifoOccupancy),
+                "rxFifoOccupancy": Int(status.rxFifoOccupancy),
+                "knownDevices": status.knownDeviceNames,
+            ]
+        }
+        if let mux = monitor.i2cMux {
+            object["mux"] = [
+                "present": mux.isPresent,
+                "channelMask": TimeCardFormatting.byteHex(mux.channelMask),
+                "controllerStatus":
+                    TimeCardFormatting.byteHex(mux.controllerStatus),
+                "interruptStatus":
+                    TimeCardFormatting.byteHex(mux.interruptStatus),
+            ]
+        }
+        return object
+    }
+
+    private func smaRouteJSON(_ route: TimeCardSMARoute) -> [String: Any] {
+        [
+            "connector": Int(route.connector),
+            "direction": route.direction.label,
+            "function": TimeCardFormatting.hex(UInt64(route.function)),
+            "functionName": route.functionName,
+            "present": route.isPresent,
+            "fixedDirection": route.isFixedDirection,
+            "fixedFunction": route.isFixedFunction,
+            "inputMap": TimeCardFormatting.hex(UInt64(route.inputMap)),
+            "outputMap": TimeCardFormatting.hex(UInt64(route.outputMap)),
+        ]
+    }
+
+    private func sensorJSON(_ telemetry: TimeCardSensorSnapshot) -> [String: Any] {
+        [
+            "present": telemetry.isPresent,
+            "valid": telemetry.isValid,
+            "validReadings": telemetry.validReadings.count,
+            "totalReadings": telemetry.readings.count,
+            "muxChannelMask": TimeCardFormatting.byteHex(telemetry.muxChannelMask),
+            "restoredMuxChannelMask":
+                TimeCardFormatting.byteHex(telemetry.restoredMuxChannelMask),
+            "muxWasRestored": telemetry.muxWasRestored,
+            "capabilities": telemetry.capabilityNames,
+            "pressureHpa": telemetry.pressurePascals.map {
+                String(format: "%.3f", $0 / 100.0)
+            } ?? "unavailable",
+            "dewPointCelsius": telemetry.dewPointCelsius.map {
+                String(format: "%.3f", $0)
+            } ?? "unavailable",
+            "readings": telemetry.readings.map(sensorReadingJSON),
+        ]
+    }
+
+    private func sensorReadingJSON(
+        _ reading: TimeCardSensorReading
+    ) -> [String: Any] {
+        [
+            "kind": reading.kind.label,
+            "route": SensorUIFormatting.route(reading),
+            "present": reading.isPresent,
+            "valid": reading.isValid,
+            "configured": reading.isConfigured,
+            "crcOk": reading.hasValidCRC,
+            "calibrated": reading.isCalibrated,
+            "imu": reading.isIMU,
+            "temperatureCelsius": reading.temperatureCelsius.map {
+                String(format: "%.3f", $0)
+            } ?? "unavailable",
+            "humidityPercent": reading.humidityPercent.map {
+                String(format: "%.3f", $0)
+            } ?? "unavailable",
+            "raw0": TimeCardFormatting.hex(UInt64(reading.raw0)),
+            "raw1": TimeCardFormatting.hex(UInt64(reading.raw1)),
+            "raw2": TimeCardFormatting.hex(UInt64(reading.raw2)),
+        ]
+    }
+
+    private func ledJSON(_ led: TimeCardLEDState) -> [String: Any] {
+        [
+            "led": led.led.label,
+            "present": led.isPresent,
+            "enabled": led.isEnabled,
+            "rgb": led.rgbText,
+            "red": Int(led.red),
+            "green": Int(led.green),
+            "blue": Int(led.blue),
+            "globalCurrent": Int(led.globalCurrent),
+            "muxChannelMask": TimeCardFormatting.byteHex(led.muxChannelMask),
+            "faultStateValid": led.faultStateValid,
+            "openOutputMask": TimeCardFormatting.hex(UInt64(led.openOutputMask)),
+            "shortOutputMask": TimeCardFormatting.hex(UInt64(led.shortOutputMask)),
+        ]
+    }
+
+    private func selfTestJSON(
+        _ report: TimeCardSelfTestReport
+    ) -> [String: Any] {
+        [
+            "runAt": TimeCardFormatting.date(report.runAt),
+            "overallState": report.overallState,
+            "summary": report.summary,
+            "passCount": report.passCount,
+            "warningCount": report.warningCount,
+            "failCount": report.failCount,
+            "gatedCount": report.gatedCount,
+            "items": report.items.map {
+                [
+                    "name": $0.name,
+                    "state": $0.state,
+                    "detail": $0.detail,
+                ]
+            },
+        ]
+    }
+
+    private var telemetryCSVText: String {
+        var rows = [
+            csvLine(["series", "timestamp", "value", "unit", "detail"])
+        ]
+        let generatedAt = TimeCardFormatting.date(Date())
+
+        for point in monitor.samplingWindowHistory {
+            rows.append(
+                csvLine([
+                    "sampling_window",
+                    TimeCardFormatting.date(point.timestamp),
+                    String(format: "%.0f", point.nanoseconds),
+                    "ns",
+                    "bracketed cross timestamp",
+                ])
+            )
+        }
+
+        if let snapshot = monitor.snapshot {
+            rows.append(
+                csvLine([
+                    "clock_status",
+                    generatedAt,
+                    TimeCardFormatting.syncStatus(snapshot),
+                    "state",
+                    "source \(TimeCardFormatting.clockSource(snapshot))",
+                ])
+            )
+            rows.append(
+                csvLine([
+                    "gnss_fix",
+                    generatedAt,
+                    snapshot.gnssFixName,
+                    "state",
+                    snapshot.gnssTelemetryAvailable
+                        ? satelliteCSVDetail(snapshot)
+                        : "summary unavailable in this FPGA image",
+                ])
+            )
+        }
+
+        for route in monitor.smaRoutes {
+            rows.append(
+                csvLine([
+                    "sma_\(route.connector)",
+                    generatedAt,
+                    route.direction.label,
+                    "route",
+                    route.functionName,
+                ])
+            )
+        }
+
+        if let telemetry = monitor.sensorTelemetry {
+            for reading in telemetry.readings {
+                appendSensorCSVRows(
+                    reading,
+                    generatedAt: generatedAt,
+                    rows: &rows
+                )
+            }
+            if let pressure = telemetry.pressurePascals {
+                rows.append(
+                    csvLine([
+                        "icp_10100_pressure",
+                        generatedAt,
+                        String(format: "%.3f", pressure / 100.0),
+                        "hPa",
+                        "OTP compensated pressure",
+                    ])
+                )
+            }
+            if let dewPoint = telemetry.dewPointCelsius {
+                rows.append(
+                    csvLine([
+                        "dew_point",
+                        generatedAt,
+                        String(format: "%.3f", dewPoint),
+                        "C",
+                        "calculated from SHT3x humidity",
+                    ])
+                )
+            }
+        }
+
+        for led in monitor.ledStates {
+            rows.append(
+                csvLine([
+                    led.led.label.replacingOccurrences(of: " ", with: "_")
+                        .lowercased(),
+                    generatedAt,
+                    led.rgbText,
+                    "rgb",
+                    "current \(led.globalCurrent), present \(led.isPresent)",
+                ])
+            )
+        }
+
+        if let report = monitor.selfTestReport {
+            for item in report.items {
+                rows.append(
+                    csvLine([
+                        "self_test",
+                        TimeCardFormatting.date(report.runAt),
+                        item.state,
+                        "state",
+                        "\(item.name): \(item.detail)",
+                    ])
+                )
+            }
+        }
+
+        return rows.joined(separator: "\n")
+    }
+
+    private func appendSensorCSVRows(
+        _ reading: TimeCardSensorReading,
+        generatedAt: String,
+        rows: inout [String]
+    ) {
+        let series = reading.kind.label.replacingOccurrences(
+            of: " ",
+            with: "_"
+        ).lowercased()
+        if let temperature = reading.temperatureCelsius {
+            rows.append(
+                csvLine([
+                    "\(series)_temperature",
+                    generatedAt,
+                    String(format: "%.3f", temperature),
+                    "C",
+                    SensorUIFormatting.route(reading),
+                ])
+            )
+        }
+        if let humidity = reading.humidityPercent {
+            rows.append(
+                csvLine([
+                    "\(series)_humidity",
+                    generatedAt,
+                    String(format: "%.3f", humidity),
+                    "%RH",
+                    SensorUIFormatting.route(reading),
+                ])
+            )
+        }
+    }
+
+    private func satelliteCSVDetail(
+        _ snapshot: TimeCardDeviceSnapshot
+    ) -> String {
+        guard let seen = snapshot.seenSatellites,
+              let locked = snapshot.lockedSatellites else {
+            return "satellite summary unavailable"
+        }
+        return "\(seen) seen, \(locked) locked"
+    }
+
+    private func csvLine(_ fields: [String]) -> String {
+        fields.map(csvEscape).joined(separator: ",")
+    }
+
+    private func csvEscape(_ value: String) -> String {
+        if value.contains(",") || value.contains("\"") ||
+            value.contains("\n") {
+            return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+        }
+        return value
     }
 }
 
