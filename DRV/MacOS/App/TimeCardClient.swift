@@ -1113,6 +1113,40 @@ enum TimeCardClient {
         return raw.snapshot
     }
 
+    static func setLEDState(
+        for descriptor: TimeCardServiceDescriptor,
+        led: TimeCardLEDKind,
+        red: UInt32,
+        green: UInt32,
+        blue: UInt32,
+        globalCurrent: UInt32
+    ) throws -> TimeCardLEDState {
+        guard red <= 255 && green <= 255 && blue <= 255 else {
+            throw TimeCardClientError.invalidI2CRequest(
+                "LED red, green, and blue values must be between 0 and 255."
+            )
+        }
+        guard globalCurrent <= 255 else {
+            throw TimeCardClientError.invalidI2CRequest(
+                "LED current must be between 0 and 255."
+            )
+        }
+
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var raw = TimeCardLEDRaw(
+            size: UInt32(MemoryLayout<TimeCardLEDRaw>.size),
+            led: led.rawValue,
+            red: red,
+            green: green,
+            blue: blue,
+            globalCurrent: globalCurrent
+        )
+        try callInOut(connection: connection, selector: 7, value: &raw)
+        return raw.state
+    }
+
     static func queryLEDStates(
         for descriptor: TimeCardServiceDescriptor
     ) throws -> [TimeCardLEDState] {

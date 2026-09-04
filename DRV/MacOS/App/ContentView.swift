@@ -670,6 +670,11 @@ private struct I2CAndLEDView: View {
     @State private var i2cSubaddressText = ""
     @State private var i2cReadLengthText = "1"
     @State private var i2cMuxChannelMask: UInt32 = 0
+    @State private var selectedLED: TimeCardLEDKind = .gnss1
+    @State private var ledRedText = "145"
+    @State private var ledGreenText = "64"
+    @State private var ledBlueText = "0"
+    @State private var ledCurrentText = "96"
     @State private var i2cFormMessage = ""
 
     var body: some View {
@@ -913,6 +918,66 @@ private struct I2CAndLEDView: View {
                     }
 
                     ControlCenterPanel(
+                        title: "LED color laboratory",
+                        subtitle: "Manual GNSS and SMA LED control with verified readback"
+                    ) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(alignment: .bottom, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("LED")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Picker("", selection: $selectedLED) {
+                                        ForEach(TimeCardLEDKind.allCases) { led in
+                                            Text(led.label).tag(led)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .frame(width: 116)
+                                }
+
+                                LEDByteField(label: "Red", text: $ledRedText)
+                                LEDByteField(label: "Green", text: $ledGreenText)
+                                LEDByteField(label: "Blue", text: $ledBlueText)
+                                LEDByteField(label: "Current", text: $ledCurrentText)
+
+                                Circle()
+                                    .fill(ledPreviewColor)
+                                    .frame(width: 24, height: 24)
+                                    .overlay(
+                                        Circle().stroke(
+                                            .white.opacity(0.35),
+                                            lineWidth: 1
+                                        )
+                                    )
+                                    .padding(.bottom, 6)
+
+                                Spacer()
+
+                                Button("Load Readback") {
+                                    loadSelectedLEDReadback()
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(monitor.ledStates.isEmpty)
+
+                                Button("Apply LED") {
+                                    performLEDSet()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(ledActionDisabled)
+                            }
+
+                            Text(
+                                "Values are validated as 0 through 255 before "
+                                    + "selector 7 is called. Current 0 requests "
+                                    + "the driver default maximum."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    ControlCenterPanel(
                         title: "LED controller readback",
                         subtitle: "GNSS and SMA LED states from the I2C LED driver"
                     ) {
@@ -955,7 +1020,7 @@ private struct I2CAndLEDView: View {
                             FeatureRow(
                                 name: "RGB subsystem LEDs",
                                 state: presentLEDCount > 0 ? "Live" : "Unavailable",
-                                note: "GNSS and SMA LED color/current readback is live. App-side writes stay CLI-only for now."
+                                note: "GNSS and SMA LED color/current readback and manual setting use selectors 6 and 7."
                             )
                             FeatureRow(
                                 name: "Known-device scan",
@@ -1041,6 +1106,55 @@ private struct I2CAndLEDView: View {
             monitor.snapshot?.capabilityNames.contains("I2C") != true
     }
 
+    private var ledActionDisabled: Bool {
+        monitor.i2cOperationInProgress ||
+            monitor.snapshot?.capabilityNames.contains("LEDs") != true
+    }
+
+    private var ledPreviewColor: Color {
+        guard let red = try? parseByte(ledRedText, field: "LED red"),
+              let green = try? parseByte(ledGreenText, field: "LED green"),
+              let blue = try? parseByte(ledBlueText, field: "LED blue") else {
+            return .secondary.opacity(0.35)
+        }
+        return Color(
+            red: Double(red) / 255.0,
+            green: Double(green) / 255.0,
+            blue: Double(blue) / 255.0
+        )
+    }
+
+    private func loadSelectedLEDReadback() {
+        guard let state = monitor.ledStates.first(where: { $0.led == selectedLED }) else {
+            i2cFormMessage = "\(selectedLED.label) has no readback sample yet."
+            return
+        }
+        ledRedText = "\(state.red)"
+        ledGreenText = "\(state.green)"
+        ledBlueText = "\(state.blue)"
+        ledCurrentText = "\(state.globalCurrent)"
+        i2cFormMessage = "Loaded \(state.led.label) readback into the LED editor."
+    }
+
+    private func performLEDSet() {
+        do {
+            let red = try parseByte(ledRedText, field: "LED red")
+            let green = try parseByte(ledGreenText, field: "LED green")
+            let blue = try parseByte(ledBlueText, field: "LED blue")
+            let current = try parseByte(ledCurrentText, field: "LED current")
+            i2cFormMessage = ""
+            monitor.setLED(
+                led: selectedLED,
+                red: red,
+                green: green,
+                blue: blue,
+                globalCurrent: current
+            )
+        } catch {
+            i2cFormMessage = error.localizedDescription
+        }
+    }
+
     private func performI2CRead() {
         do {
             let address = try parseUnsigned(
@@ -1115,6 +1229,14 @@ private struct I2CAndLEDView: View {
         }
         return UInt32(value)
     }
+
+    private func parseByte(_ text: String, field: String) throws -> UInt32 {
+        let value = try parseUnsigned(text, field: field, defaultRadix: 10)
+        guard value <= 255 else {
+            throw I2CFormError.message("\(field) must be between 0 and 255.")
+        }
+        return value
+    }
 }
 
 private struct LEDReadbackCard: View {
@@ -1177,6 +1299,23 @@ private struct LEDReadbackCard: View {
             green: Double(min(led.color.green, 255)) / 255.0,
             blue: Double(min(led.color.blue, 255)) / 255.0
         )
+    }
+}
+
+private struct LEDByteField: View {
+    let label: String
+    @Binding var text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(label, text: $text)
+                .font(.system(.body, design: .monospaced))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 70)
+        }
     }
 }
 

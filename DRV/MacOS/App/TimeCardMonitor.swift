@@ -334,6 +334,66 @@ final class TimeCardMonitor: ObservableObject {
         }
     }
 
+    func setLED(
+        led: TimeCardLEDKind,
+        red: UInt32,
+        green: UInt32,
+        blue: UInt32,
+        globalCurrent: UInt32
+    ) {
+        guard !i2cOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            i2cOperationMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.capabilityNames.contains("LEDs") == true else {
+            i2cOperationMessage = "LED control is not advertised by this driver."
+            return
+        }
+
+        i2cOperationInProgress = true
+        i2cOperationMessage = "Setting \(led.label) LED..."
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<TimeCardLEDState, Error>.success(
+                        try TimeCardClient.setLEDState(
+                            for: descriptor,
+                            led: led,
+                            red: red,
+                            green: green,
+                            blue: blue,
+                            globalCurrent: globalCurrent
+                        )
+                    )
+                } catch {
+                    return Result<TimeCardLEDState, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.i2cOperationInProgress = false
+            switch result {
+            case .success(let state):
+                var states = self.ledStates
+                if let index = states.firstIndex(where: { $0.led == state.led }) {
+                    states[index] = state
+                } else {
+                    states.append(state)
+                    states.sort { $0.led.rawValue < $1.led.rawValue }
+                }
+                self.ledStates = states
+                self.i2cOperationMessage =
+                    "\(state.led.label) LED set and verified at RGB \(state.rgbText)."
+                self.refresh()
+            case .failure(let error):
+                self.i2cOperationMessage =
+                    "\(led.label) LED set failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func readI2C(
         address: UInt32,
         subaddress: UInt32,
