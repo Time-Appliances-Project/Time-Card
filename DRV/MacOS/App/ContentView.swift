@@ -2391,11 +2391,47 @@ private enum ReceiverStreamDecoder {
             return "No RTCM3 correction frames decoded."
         }
         let typeText = latest.rtcmMessageType.map {
-            "latest message type \($0)"
+            "latest \(rtcmMessageLabel($0))"
         } ?? "latest message type unavailable"
         let failed = rtcmMessages.filter { $0.checksumState == .failed }.count
         let failureText = failed == 0 ? "all CRCs OK" : "\(failed) CRC failure(s)"
         return "\(rtcmMessages.count) RTCM3 frame(s), \(typeText), \(failureText)."
+    }
+
+    static func rtcmMessageLabel(_ messageType: Int) -> String {
+        switch messageType {
+        case 1001: return "GPS L1 RTK observables (type 1001)"
+        case 1002: return "extended GPS L1 RTK observables (type 1002)"
+        case 1003: return "GPS L1/L2 RTK observables (type 1003)"
+        case 1004: return "extended GPS L1/L2 RTK observables (type 1004)"
+        case 1005: return "stationary RTK reference-station ARP (type 1005)"
+        case 1006: return "stationary RTK ARP with antenna height (type 1006)"
+        case 1007: return "antenna descriptor (type 1007)"
+        case 1008: return "antenna descriptor and serial number (type 1008)"
+        case 1019: return "GPS ephemeris (type 1019)"
+        case 1020: return "GLONASS ephemeris (type 1020)"
+        case 1033: return "receiver and antenna descriptor (type 1033)"
+        case 1042: return "BeiDou ephemeris (type 1042)"
+        case 1044: return "QZSS ephemeris (type 1044)"
+        case 1045: return "Galileo F/NAV ephemeris (type 1045)"
+        case 1046: return "Galileo I/NAV ephemeris (type 1046)"
+        case 1071...1077:
+            return "GPS MSM\(messageType - 1070) (type \(messageType))"
+        case 1081...1087:
+            return "GLONASS MSM\(messageType - 1080) (type \(messageType))"
+        case 1091...1097:
+            return "Galileo MSM\(messageType - 1090) (type \(messageType))"
+        case 1101...1107:
+            return "SBAS MSM\(messageType - 1100) (type \(messageType))"
+        case 1111...1117:
+            return "QZSS MSM\(messageType - 1110) (type \(messageType))"
+        case 1121...1127:
+            return "BeiDou MSM\(messageType - 1120) (type \(messageType))"
+        case 1230:
+            return "GLONASS code-phase bias (type 1230)"
+        default:
+            return "message type \(messageType)"
+        }
     }
 
     static func satelliteSignals(
@@ -2585,7 +2621,9 @@ private struct ReceiverStreamMessage: Identifiable, Equatable {
         calculatedCRC: UInt32
     ) -> ReceiverStreamMessage {
         let crcValid = expectedCRC == calculatedCRC
-        let typeText = messageType.map { "message type \($0), " } ?? ""
+        let typeText = messageType.map {
+            "\(ReceiverStreamDecoder.rtcmMessageLabel($0)), "
+        } ?? ""
         return ReceiverStreamMessage(
             offset: offset,
             byteCount: byteCount,

@@ -57,8 +57,9 @@ The current implementation provides:
     UBX poll writes, bounded poll-response capture, continuous polling capture
     with live progress, copy and raw capture export helpers, handoff into the
     NMEA and UBX decoder labs, a mixed UBX/NMEA/RTCM3 receiver timeline, and
-    receiver summary rollups for firmware, fix, satellites, timing, position, a
-    satellite sky map, and per-satellite signal records
+    receiver summary rollups for firmware, fix, satellites, timing, position,
+    RTCM3 correction names, a satellite sky map, and per-satellite signal
+    records
   - NMEA summaries for GGA, RMC, GSA, GSV, GLL, VTG, GNS, ZDA, GST, TXT, HDT,
     and THS receiver sentences
   - read-only UBX polls and summaries for receiver version, monitor hardware,
