@@ -305,6 +305,101 @@ struct TimeCardI2CMuxSnapshot: Equatable, Sendable {
     let interruptStatus: UInt32
 }
 
+struct TimeCardI2CProbeResult: Identifiable, Equatable, Sendable {
+    let address: UInt32
+    let isPresent: Bool
+    let controllerStatus: UInt32
+    let interruptStatus: UInt32
+
+    var id: UInt32 { address }
+
+    var addressText: String {
+        String(format: "0x%02x", address & 0xff)
+    }
+}
+
+struct TimeCardI2CTransferSnapshot: Equatable, Sendable {
+    let address: UInt32
+    let length: UInt32
+    let controllerStatus: UInt32
+    let interruptStatus: UInt32
+    let data: [UInt8]
+
+    init(
+        address: UInt32,
+        length: UInt32,
+        controllerStatus: UInt32,
+        interruptStatus: UInt32,
+        data: [UInt8]
+    ) {
+        self.address = address
+        self.length = length
+        self.controllerStatus = controllerStatus
+        self.interruptStatus = interruptStatus
+        self.data = data
+    }
+
+    init(rawBytes: [UInt8]) {
+        let reportedLength = TimeCardI2CTransferRawLayout.readUInt32(
+            rawBytes,
+            at: TimeCardI2CTransferRawLayout.lengthOffset
+        )
+        let available = max(
+            0,
+            rawBytes.count - TimeCardI2CTransferRawLayout.dataOffset
+        )
+        let dataLength = min(Int(reportedLength), available, 256)
+        let dataStart = TimeCardI2CTransferRawLayout.dataOffset
+        let dataEnd = dataStart + dataLength
+        self.init(
+            address: TimeCardI2CTransferRawLayout.readUInt32(
+                rawBytes,
+                at: TimeCardI2CTransferRawLayout.addressOffset
+            ),
+            length: reportedLength,
+            controllerStatus: TimeCardI2CTransferRawLayout.readUInt32(
+                rawBytes,
+                at: TimeCardI2CTransferRawLayout.controllerStatusOffset
+            ),
+            interruptStatus: TimeCardI2CTransferRawLayout.readUInt32(
+                rawBytes,
+                at: TimeCardI2CTransferRawLayout.interruptStatusOffset
+            ),
+            data: Array(rawBytes[dataStart..<dataEnd])
+        )
+    }
+
+    var addressText: String {
+        String(format: "0x%02x", address & 0xff)
+    }
+
+    var dataHex: String {
+        data.map { String(format: "%02x", $0) }.joined(separator: " ")
+    }
+
+    var asciiText: String {
+        String(
+            data.map { byte in
+                if byte >= 0x20 && byte <= 0x7e {
+                    return Character(UnicodeScalar(UInt32(byte))!)
+                }
+                return "."
+            }
+        )
+    }
+
+    var hexDumpLines: [String] {
+        guard !data.isEmpty else { return [] }
+        return stride(from: 0, to: data.count, by: 16).map { offset in
+            let chunk = data[offset..<min(offset + 16, data.count)]
+            let hex = chunk
+                .map { String(format: "%02x", $0) }
+                .joined(separator: " ")
+            return String(format: "%04x: %@", offset, hex)
+        }
+    }
+}
+
 enum TimeCardSMACatalog {
     static let inputFunctions: [TimeCardSMAFunction] = [
         .init(id: 0x0000, label: "10 MHz"),
@@ -525,6 +620,7 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
     case invalidClientLayout
     case incompatibleABI(UInt32)
     case invalidTimestamp
+    case invalidI2CRequest(String)
 
     var errorDescription: String? {
         switch self {
@@ -548,6 +644,8 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
             "Driver ABI \(version) is not supported by this Control Center."
         case .invalidTimestamp:
             "The driver returned an invalid cross timestamp."
+        case .invalidI2CRequest(let reason):
+            reason
         }
     }
 
@@ -653,6 +751,20 @@ enum TimeCardClient {
             && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.rxFifoOccupancy) == 36
             && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.knownDeviceMask) == 40
             && MemoryLayout<TimeCardI2CStatusRaw>.offset(of: \.reserved) == 44
+            && MemoryLayout<TimeCardI2CProbeRaw>.size == 32
+            && MemoryLayout<TimeCardI2CProbeRaw>.offset(of: \.size) == 0
+            && MemoryLayout<TimeCardI2CProbeRaw>.offset(of: \.address) == 4
+            && MemoryLayout<TimeCardI2CProbeRaw>.offset(of: \.present) == 8
+            && MemoryLayout<TimeCardI2CProbeRaw>.offset(of: \.controllerStatus) == 12
+            && MemoryLayout<TimeCardI2CProbeRaw>.offset(of: \.interruptStatus) == 16
+            && MemoryLayout<TimeCardI2CProbeRaw>.offset(of: \.reserved0) == 20
+            && MemoryLayout<TimeCardI2CReadRequestRaw>.size == 32
+            && MemoryLayout<TimeCardI2CReadRequestRaw>.offset(of: \.size) == 0
+            && MemoryLayout<TimeCardI2CReadRequestRaw>.offset(of: \.address) == 4
+            && MemoryLayout<TimeCardI2CReadRequestRaw>.offset(of: \.subaddressLength) == 8
+            && MemoryLayout<TimeCardI2CReadRequestRaw>.offset(of: \.subaddress) == 12
+            && MemoryLayout<TimeCardI2CReadRequestRaw>.offset(of: \.length) == 16
+            && MemoryLayout<TimeCardI2CReadRequestRaw>.offset(of: \.reserved0) == 20
             && MemoryLayout<TimeCardI2CMuxRaw>.size == 32
             && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.size) == 0
             && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.present) == 4
@@ -884,6 +996,90 @@ enum TimeCardClient {
         return raw.snapshot
     }
 
+    static func probeI2C(
+        for descriptor: TimeCardServiceDescriptor,
+        address: UInt32
+    ) throws -> TimeCardI2CProbeResult {
+        try validateI2CAddress(address)
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var raw = TimeCardI2CProbeRaw(
+            size: UInt32(MemoryLayout<TimeCardI2CProbeRaw>.size),
+            address: address
+        )
+        try callInOut(connection: connection, selector: 9, value: &raw)
+        return raw.result
+    }
+
+    static func scanI2CBus(
+        for descriptor: TimeCardServiceDescriptor
+    ) throws -> [TimeCardI2CProbeResult] {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        return try (0x08...0x77).map { address in
+            var raw = TimeCardI2CProbeRaw(
+                size: UInt32(MemoryLayout<TimeCardI2CProbeRaw>.size),
+                address: UInt32(address)
+            )
+            try callInOut(connection: connection, selector: 9, value: &raw)
+            return raw.result
+        }
+    }
+
+    static func readI2C(
+        for descriptor: TimeCardServiceDescriptor,
+        address: UInt32,
+        subaddress: UInt32,
+        subaddressLength: UInt32,
+        length: UInt32
+    ) throws -> TimeCardI2CTransferSnapshot {
+        try validateI2CAddress(address)
+        guard subaddressLength <= 2 else {
+            throw TimeCardClientError.invalidI2CRequest(
+                "I2C subaddress length must be 0, 1, or 2 bytes."
+            )
+        }
+        guard length > 0 && length <= 255 else {
+            throw TimeCardClientError.invalidI2CRequest(
+                "I2C read length must be between 1 and 255 bytes."
+            )
+        }
+        if subaddressLength == 1 && subaddress > 0xff {
+            throw TimeCardClientError.invalidI2CRequest(
+                "One-byte I2C subaddresses must fit in 0x00 through 0xff."
+            )
+        }
+        if subaddressLength == 2 && subaddress > 0xffff {
+            throw TimeCardClientError.invalidI2CRequest(
+                "Two-byte I2C subaddresses must fit in 0x0000 through 0xffff."
+            )
+        }
+
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var request = TimeCardI2CReadRequestRaw(
+            size: UInt32(MemoryLayout<TimeCardI2CReadRequestRaw>.size),
+            address: address,
+            subaddressLength: subaddressLength,
+            subaddress: subaddress,
+            length: length
+        )
+        var output = [UInt8](
+            repeating: 0,
+            count: TimeCardI2CTransferRawLayout.size
+        )
+        try callInOutBytes(
+            connection: connection,
+            selector: 10,
+            input: &request,
+            output: &output
+        )
+        return TimeCardI2CTransferSnapshot(rawBytes: output)
+    }
+
     static func queryI2CMux(
         for descriptor: TimeCardServiceDescriptor
     ) throws -> TimeCardI2CMuxSnapshot {
@@ -927,6 +1123,14 @@ enum TimeCardClient {
         raw.size = UInt32(MemoryLayout<TimeCardSensorTelemetryRaw>.size)
         try callOutput(connection: connection, selector: 13, output: &raw)
         return raw.snapshot
+    }
+
+    private static func validateI2CAddress(_ address: UInt32) throws {
+        guard address >= 0x08 && address <= 0x77 else {
+            throw TimeCardClientError.invalidI2CRequest(
+                "I2C address must be a 7-bit address from 0x08 through 0x77."
+            )
+        }
     }
 
     private static func openConnection(
@@ -1031,6 +1235,40 @@ enum TimeCardClient {
             throw TimeCardClientError.unexpectedOutput(
                 selector: selector,
                 expected: MemoryLayout<T>.size,
+                actual: outputSize
+            )
+        }
+    }
+
+    private static func callInOutBytes<T>(
+        connection: io_connect_t,
+        selector: UInt32,
+        input: inout T,
+        output: inout [UInt8]
+    ) throws {
+        var inputCopy = input
+        var outputSize = output.count
+        let result = output.withUnsafeMutableBytes { outputBytes in
+            withUnsafeBytes(of: &inputCopy) { inputBytes in
+                IOConnectCallStructMethod(
+                    connection,
+                    selector,
+                    inputBytes.baseAddress,
+                    inputBytes.count,
+                    outputBytes.baseAddress,
+                    &outputSize
+                )
+            }
+        }
+        guard result == KERN_SUCCESS else {
+            throw TimeCardClientError.methodFailed(
+                selector: selector, result: result
+            )
+        }
+        guard outputSize == output.count else {
+            throw TimeCardClientError.unexpectedOutput(
+                selector: selector,
+                expected: output.count,
                 actual: outputSize
             )
         }
@@ -1153,6 +1391,54 @@ private struct TimeCardI2CStatusRaw {
             rxFifoOccupancy: rxFifoOccupancy,
             knownDeviceMask: knownDeviceMask
         )
+    }
+}
+
+private struct TimeCardI2CProbeRaw {
+    var size: UInt32 = 0
+    var address: UInt32 = 0
+    var present: UInt32 = 0
+    var controllerStatus: UInt32 = 0
+    var interruptStatus: UInt32 = 0
+    var reserved0: UInt32 = 0
+    var reserved1: UInt32 = 0
+    var reserved2: UInt32 = 0
+
+    var result: TimeCardI2CProbeResult {
+        TimeCardI2CProbeResult(
+            address: address,
+            isPresent: present != 0,
+            controllerStatus: controllerStatus,
+            interruptStatus: interruptStatus
+        )
+    }
+}
+
+private struct TimeCardI2CReadRequestRaw {
+    var size: UInt32 = 0
+    var address: UInt32 = 0
+    var subaddressLength: UInt32 = 0
+    var subaddress: UInt32 = 0
+    var length: UInt32 = 0
+    var reserved0: UInt32 = 0
+    var reserved1: UInt32 = 0
+    var reserved2: UInt32 = 0
+}
+
+private enum TimeCardI2CTransferRawLayout {
+    static let size = 276
+    static let addressOffset = 4
+    static let lengthOffset = 8
+    static let controllerStatusOffset = 12
+    static let interruptStatusOffset = 16
+    static let dataOffset = 20
+
+    static func readUInt32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
+        guard bytes.count >= offset + 4 else { return 0 }
+        return UInt32(bytes[offset]) |
+            (UInt32(bytes[offset + 1]) << 8) |
+            (UInt32(bytes[offset + 2]) << 16) |
+            (UInt32(bytes[offset + 3]) << 24)
     }
 }
 

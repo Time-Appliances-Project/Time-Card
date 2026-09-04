@@ -85,6 +85,27 @@ enum TimeCardClientTests {
         precondition(i2c.isTransmitEmpty)
         precondition(i2c.knownDeviceNames == ["Mux", "LED"])
 
+        let probe = TimeCardI2CProbeResult(
+            address: 0x70,
+            isPresent: true,
+            controllerStatus: 0xc0,
+            interruptStatus: 0xd0
+        )
+        precondition(probe.addressText == "0x70")
+        precondition(probe.isPresent)
+
+        let transfer = TimeCardI2CTransferSnapshot(
+            address: 0x48,
+            length: 4,
+            controllerStatus: 0xc0,
+            interruptStatus: 0xd0,
+            data: [0x12, 0x34, 0x41, 0x00]
+        )
+        precondition(transfer.addressText == "0x48")
+        precondition(transfer.dataHex == "12 34 41 00")
+        precondition(transfer.asciiText == ".4A.")
+        precondition(transfer.hexDumpLines == ["0000: 12 34 41 00"])
+
         let mux = TimeCardI2CMuxSnapshot(
             isPresent: true,
             channelMask: 0x02,

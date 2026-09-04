@@ -150,13 +150,20 @@ foreach(required_control_center_sma IN ITEMS
         "querySensors"
         "TimeCardSensorSnapshot"
         "queryI2CStatus"
+        "probeI2C"
+        "scanI2CBus"
+        "readI2C"
         "queryI2CMux"
         "queryLEDStates"
         "TimeCardI2CStatusSnapshot"
+        "TimeCardI2CProbeResult"
+        "TimeCardI2CTransferSnapshot"
         "TimeCardI2CMuxSnapshot"
         "TimeCardLEDState"
         "selector: 6"
         "selector: 8"
+        "selector: 9"
+        "selector: 10"
         "selector: 11"
         "todTelemetryAvailable"
         "gnssTelemetryAvailable"
@@ -181,6 +188,7 @@ foreach(required_control_center_view IN ITEMS
         "UTC and leap summary"
         "GNSS fix and satellite counts"
         "I2C controller registers"
+        "I2C bus laboratory"
         "LED controller readback")
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)

@@ -665,6 +665,11 @@ private struct GNSSWorkspaceView: View {
 
 private struct I2CAndLEDView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
+    @State private var i2cAddressText = "0x70"
+    @State private var i2cSubaddressLength: UInt32 = 0
+    @State private var i2cSubaddressText = ""
+    @State private var i2cReadLengthText = "1"
+    @State private var i2cFormMessage = ""
 
     var body: some View {
         ScrollView {
@@ -751,6 +756,103 @@ private struct I2CAndLEDView: View {
                     }
 
                     ControlCenterPanel(
+                        title: "I2C bus laboratory",
+                        subtitle: "Bounded reads and bus scan through the DriverKit ABI"
+                    ) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            HStack(alignment: .bottom, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Address")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    TextField("0x70", text: $i2cAddressText)
+                                        .font(.system(.body, design: .monospaced))
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 82)
+                                }
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Subaddress")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Picker("", selection: $i2cSubaddressLength) {
+                                        Text("None").tag(UInt32(0))
+                                        Text("1 byte").tag(UInt32(1))
+                                        Text("2 bytes").tag(UInt32(2))
+                                    }
+                                    .labelsHidden()
+                                    .frame(width: 104)
+                                }
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Register")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    TextField("0x00", text: $i2cSubaddressText)
+                                        .font(.system(.body, design: .monospaced))
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 92)
+                                        .disabled(i2cSubaddressLength == 0)
+                                }
+
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Length")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    TextField("1", text: $i2cReadLengthText)
+                                        .font(.system(.body, design: .monospaced))
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 68)
+                                }
+
+                                Spacer()
+
+                                Button("Read") {
+                                    performI2CRead()
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(i2cActionDisabled)
+
+                                Button("Scan Bus") {
+                                    i2cFormMessage = ""
+                                    monitor.scanI2CBus()
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(i2cActionDisabled)
+                            }
+
+                            Text(
+                                "Reads are limited to 1 through 255 bytes and "
+                                    + "valid 7-bit I2C addresses 0x08 through 0x77."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                            if !i2cFormMessage.isEmpty {
+                                Text(i2cFormMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                                    .textSelection(.enabled)
+                            }
+
+                            if !monitor.i2cOperationMessage.isEmpty {
+                                Text(monitor.i2cOperationMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+
+                            if let transfer = monitor.i2cTransfer {
+                                I2CTransferResultView(transfer: transfer)
+                            }
+
+                            if !monitor.i2cScanResults.isEmpty {
+                                I2CScanResultsView(results: monitor.i2cScanResults)
+                            }
+                        }
+                    }
+
+                    ControlCenterPanel(
                         title: "LED controller readback",
                         subtitle: "GNSS and SMA LED states from the I2C LED driver"
                     ) {
@@ -797,13 +899,14 @@ private struct I2CAndLEDView: View {
                             )
                             FeatureRow(
                                 name: "Known-device scan",
-                                state: monitor.i2cStatus == nil ? "Unavailable" : "Partial",
-                                note: "Known mux and LED devices are shown. Full address scan remains CLI-only in this slice."
+                                state: monitor.i2cScanResults.isEmpty
+                                    ? "Ready" : "Live",
+                                note: "The app can scan valid 7-bit bus addresses through selector 9."
                             )
                             FeatureRow(
                                 name: "Arbitrary I2C reads",
-                                state: "Backend pending",
-                                note: "The driver has bounded read support, but the app still needs an operator-safe form."
+                                state: "Live",
+                                note: "Bounded app reads use selector 10 with address, subaddress, and length validation."
                             )
                         }
                     }
@@ -872,6 +975,86 @@ private struct I2CAndLEDView: View {
         if status.isTransmitEmpty { flags.append("TX empty") }
         return flags.joined(separator: ", ")
     }
+
+    private var i2cActionDisabled: Bool {
+        monitor.i2cOperationInProgress ||
+            monitor.snapshot?.capabilityNames.contains("I2C") != true
+    }
+
+    private func performI2CRead() {
+        do {
+            let address = try parseUnsigned(
+                i2cAddressText,
+                field: "I2C address",
+                defaultRadix: 16
+            )
+            guard address >= 0x08 && address <= 0x77 else {
+                throw I2CFormError.message(
+                    "I2C address must be between 0x08 and 0x77."
+                )
+            }
+            let subaddress = i2cSubaddressLength == 0 ? 0 : try parseUnsigned(
+                i2cSubaddressText,
+                field: "I2C subaddress",
+                defaultRadix: 16
+            )
+            let length = try parseUnsigned(
+                i2cReadLengthText,
+                field: "I2C read length",
+                defaultRadix: 10
+            )
+            guard length >= 1 && length <= 255 else {
+                throw I2CFormError.message(
+                    "I2C read length must be between 1 and 255 bytes."
+                )
+            }
+            if i2cSubaddressLength == 1 && subaddress > 0xff {
+                throw I2CFormError.message(
+                    "One-byte I2C subaddresses must fit in 0x00 through 0xff."
+                )
+            }
+            if i2cSubaddressLength == 2 && subaddress > 0xffff {
+                throw I2CFormError.message(
+                    "Two-byte I2C subaddresses must fit in 0x0000 through 0xffff."
+                )
+            }
+
+            i2cFormMessage = ""
+            monitor.readI2C(
+                address: address,
+                subaddress: subaddress,
+                subaddressLength: i2cSubaddressLength,
+                length: length
+            )
+        } catch {
+            i2cFormMessage = error.localizedDescription
+        }
+    }
+
+    private func parseUnsigned(
+        _ text: String,
+        field: String,
+        defaultRadix: Int
+    ) throws -> UInt32 {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw I2CFormError.message("\(field) is required.")
+        }
+        let radix: Int
+        let digits: Substring
+        if trimmed.lowercased().hasPrefix("0x") {
+            radix = 16
+            digits = trimmed.dropFirst(2)
+        } else {
+            radix = defaultRadix
+            digits = Substring(trimmed)
+        }
+        guard let value = UInt64(String(digits), radix: radix),
+              value <= UInt64(UInt32.max) else {
+            throw I2CFormError.message("\(field) is not a valid number.")
+        }
+        return UInt32(value)
+    }
 }
 
 private struct LEDReadbackCard: View {
@@ -934,6 +1117,121 @@ private struct LEDReadbackCard: View {
             green: Double(min(led.color.green, 255)) / 255.0,
             blue: Double(min(led.color.blue, 255)) / 255.0
         )
+    }
+}
+
+private struct I2CTransferResultView: View {
+    let transfer: TimeCardI2CTransferSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            HStack {
+                StatusPill("Readback", .green)
+                Text(
+                    String(
+                        format: "%u byte(s) from %@",
+                        transfer.length,
+                        transfer.addressText
+                    )
+                )
+                .font(.headline)
+                Spacer()
+                Text(
+                    String(
+                        format: "controller 0x%02x, interrupts 0x%02x",
+                        transfer.controllerStatus & 0xff,
+                        transfer.interruptStatus & 0xff
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+
+            Text(transfer.hexDumpLines.joined(separator: "\n"))
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    Color.secondary.opacity(0.07),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+
+            InfoRow(label: "ASCII", value: transfer.asciiText)
+        }
+    }
+}
+
+private struct I2CScanResultsView: View {
+    let results: [TimeCardI2CProbeResult]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            HStack {
+                StatusPill(
+                    presentResults.isEmpty ? "No ACK" : "Devices found",
+                    presentResults.isEmpty ? .orange : .green
+                )
+                Text(scanSummary)
+                    .font(.headline)
+                Spacer()
+            }
+
+            if presentResults.isEmpty {
+                Text("No devices responded during the last scan.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.adaptive(minimum: 82), spacing: 8)
+                    ],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(presentResults) { result in
+                        Text(result.addressText)
+                            .font(.system(.caption, design: .monospaced))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Color.green.opacity(0.12),
+                                in: Capsule()
+                            )
+                            .overlay(
+                                Capsule().stroke(.green.opacity(0.25))
+                            )
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+    }
+
+    private var presentResults: [TimeCardI2CProbeResult] {
+        results.filter(\.isPresent)
+    }
+
+    private var scanSummary: String {
+        if presentResults.isEmpty {
+            return "Scanned \(results.count) address(es)"
+        }
+        return "\(presentResults.count) of \(results.count) address(es) responded"
+    }
+}
+
+private enum I2CFormError: LocalizedError {
+    case message(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .message(let message):
+            message
+        }
     }
 }
 

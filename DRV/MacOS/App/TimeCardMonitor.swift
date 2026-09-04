@@ -65,6 +65,10 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var i2cMux: TimeCardI2CMuxSnapshot?
     @Published private(set) var ledStates: [TimeCardLEDState] = []
     @Published private(set) var i2cMessage = ""
+    @Published private(set) var i2cScanResults: [TimeCardI2CProbeResult] = []
+    @Published private(set) var i2cTransfer: TimeCardI2CTransferSnapshot?
+    @Published private(set) var i2cOperationInProgress = false
+    @Published private(set) var i2cOperationMessage = ""
 
     private var refreshTimer: Timer?
     private var nextAutomaticAttempt = Date.distantPast
@@ -100,6 +104,9 @@ final class TimeCardMonitor: ObservableObject {
         i2cMux = nil
         ledStates.removeAll(keepingCapacity: true)
         i2cMessage = ""
+        i2cScanResults.removeAll(keepingCapacity: true)
+        i2cTransfer = nil
+        i2cOperationMessage = ""
         refresh()
     }
 
@@ -223,6 +230,115 @@ final class TimeCardMonitor: ObservableObject {
                 self.refresh()
             case .failure(let error):
                 self.smaMessage = "SMA apply failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func scanI2CBus() {
+        guard !i2cOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            i2cOperationMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.capabilityNames.contains("I2C") == true else {
+            i2cScanResults = []
+            i2cOperationMessage = "I2C is not advertised by this driver."
+            return
+        }
+
+        i2cOperationInProgress = true
+        i2cTransfer = nil
+        i2cOperationMessage = "Scanning I2C addresses 0x08 through 0x77..."
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<[TimeCardI2CProbeResult], Error>.success(
+                        try TimeCardClient.scanI2CBus(for: descriptor)
+                    )
+                } catch {
+                    return Result<[TimeCardI2CProbeResult], Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.i2cOperationInProgress = false
+            switch result {
+            case .success(let results):
+                self.i2cScanResults = results
+                let present = results.filter(\.isPresent)
+                if present.isEmpty {
+                    self.i2cOperationMessage = "I2C scan completed: no devices responded."
+                } else {
+                    let addresses = present
+                        .map(\.addressText)
+                        .joined(separator: ", ")
+                    self.i2cOperationMessage =
+                        "I2C scan completed: \(present.count) device(s) responded at \(addresses)."
+                }
+                self.refresh()
+            case .failure(let error):
+                self.i2cOperationMessage =
+                    "I2C scan failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func readI2C(
+        address: UInt32,
+        subaddress: UInt32,
+        subaddressLength: UInt32,
+        length: UInt32
+    ) {
+        guard !i2cOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            i2cOperationMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.capabilityNames.contains("I2C") == true else {
+            i2cOperationMessage = "I2C is not advertised by this driver."
+            return
+        }
+
+        i2cOperationInProgress = true
+        i2cOperationMessage = String(
+            format: "Reading %u byte(s) from I2C 0x%02x...",
+            length,
+            address & 0xff
+        )
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<TimeCardI2CTransferSnapshot, Error>.success(
+                        try TimeCardClient.readI2C(
+                            for: descriptor,
+                            address: address,
+                            subaddress: subaddress,
+                            subaddressLength: subaddressLength,
+                            length: length
+                        )
+                    )
+                } catch {
+                    return Result<TimeCardI2CTransferSnapshot, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.i2cOperationInProgress = false
+            switch result {
+            case .success(let transfer):
+                self.i2cTransfer = transfer
+                self.i2cOperationMessage = String(
+                    format: "Read %u byte(s) from %@, controller 0x%02x.",
+                    transfer.length,
+                    transfer.addressText,
+                    transfer.controllerStatus & 0xff
+                )
+                self.refresh()
+            case .failure(let error):
+                self.i2cOperationMessage =
+                    "I2C read failed: \(error.localizedDescription)"
             }
         }
     }
@@ -435,6 +551,8 @@ final class TimeCardMonitor: ObservableObject {
             i2cStatus = nil
             i2cMux = nil
             ledStates.removeAll(keepingCapacity: true)
+            i2cScanResults.removeAll(keepingCapacity: true)
+            i2cTransfer = nil
             errorMessage = error.localizedDescription
             recoverySuggestion = error.recoverySuggestion ?? ""
             switch error {
@@ -457,6 +575,8 @@ final class TimeCardMonitor: ObservableObject {
             i2cStatus = nil
             i2cMux = nil
             ledStates.removeAll(keepingCapacity: true)
+            i2cScanResults.removeAll(keepingCapacity: true)
+            i2cTransfer = nil
             state = .failed
             errorMessage = message
             recoverySuggestion = ""
@@ -472,6 +592,8 @@ final class TimeCardMonitor: ObservableObject {
             selectedServiceID = newServiceID
             samplingWindowHistory.removeAll(keepingCapacity: true)
             sensorHistory.removeAll(keepingCapacity: true)
+            i2cScanResults.removeAll(keepingCapacity: true)
+            i2cTransfer = nil
         }
     }
 
