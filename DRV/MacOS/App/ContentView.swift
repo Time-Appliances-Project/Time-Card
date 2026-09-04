@@ -1229,11 +1229,12 @@ private struct UARTWorkspaceView: View {
 
                 ControlCenterPanel(
                     title: "Receiver stream summary",
-                    subtitle: "Roll-up of decoded UBX and NMEA capture data"
+                    subtitle: "Roll-up of decoded UBX, NMEA, and RTCM3 capture data"
                 ) {
                     ReceiverStreamSummaryView(
                         nmeaSentences: decodedNMEASentences,
-                        ubxFrames: decodedUBXFrames
+                        ubxFrames: decodedUBXFrames,
+                        mixedMessages: receiverMixedMessages
                     )
                 }
 
@@ -2363,6 +2364,40 @@ private struct ReceiverStreamFact: Identifiable {
 }
 
 private enum ReceiverStreamDecoder {
+    static func protocolSummary(messages: [ReceiverStreamMessage]) -> String {
+        guard !messages.isEmpty else {
+            return "No UBX, NMEA, or RTCM3 messages decoded."
+        }
+        let ubx = messages.filter { $0.protocolName == "UBX" }.count
+        let nmea = messages.filter { $0.protocolName == "NMEA" }.count
+        let rtcm = messages.filter { $0.protocolName == "RTCM3" }.count
+        return "\(nmea) NMEA, \(ubx) UBX, \(rtcm) RTCM3."
+    }
+
+    static func checksumSummary(messages: [ReceiverStreamMessage]) -> String {
+        guard !messages.isEmpty else {
+            return "No checksums decoded yet."
+        }
+        let ok = messages.filter { $0.checksumState == .ok }.count
+        let failed = messages.filter { $0.checksumState == .failed }.count
+        let missing = messages.filter { $0.checksumState == .missing }.count
+        let unchecked = messages.filter { $0.checksumState == .notChecked }.count
+        return "\(ok) OK, \(failed) failed, \(missing) missing, \(unchecked) unchecked."
+    }
+
+    static func rtcmSummary(messages: [ReceiverStreamMessage]) -> String {
+        let rtcmMessages = messages.filter { $0.protocolName == "RTCM3" }
+        guard let latest = rtcmMessages.last else {
+            return "No RTCM3 correction frames decoded."
+        }
+        let typeText = latest.rtcmMessageType.map {
+            "latest message type \($0)"
+        } ?? "latest message type unavailable"
+        let failed = rtcmMessages.filter { $0.checksumState == .failed }.count
+        let failureText = failed == 0 ? "all CRCs OK" : "\(failed) CRC failure(s)"
+        return "\(rtcmMessages.count) RTCM3 frame(s), \(typeText), \(failureText)."
+    }
+
     static func satelliteSignals(
         nmeaSentences: [NMEASentence],
         ubxFrames: [TimeCardUBXFrame]
@@ -2469,6 +2504,7 @@ private struct ReceiverStreamMessage: Identifiable, Equatable {
     let summary: String
     let detail: String
     let checksumState: ReceiverStreamChecksumState
+    let rtcmMessageType: Int?
 
     var id: String {
         "\(offset)-\(byteCount)-\(protocolName)-\(name)"
@@ -2485,7 +2521,8 @@ private struct ReceiverStreamMessage: Identifiable, Equatable {
         name: String,
         summary: String,
         detail: String,
-        checksumState: ReceiverStreamChecksumState
+        checksumState: ReceiverStreamChecksumState,
+        rtcmMessageType: Int? = nil
     ) {
         self.offset = offset
         self.byteCount = byteCount
@@ -2494,6 +2531,7 @@ private struct ReceiverStreamMessage: Identifiable, Equatable {
         self.summary = summary
         self.detail = detail
         self.checksumState = checksumState
+        self.rtcmMessageType = rtcmMessageType
     }
 
     init(sentence: NMEASentence, offset: Int, byteCount: Int) {
@@ -2559,7 +2597,8 @@ private struct ReceiverStreamMessage: Identifiable, Equatable {
                 expectedCRC,
                 calculatedCRC
             ),
-            checksumState: crcValid ? .ok : .failed
+            checksumState: crcValid ? .ok : .failed,
+            rtcmMessageType: messageType
         )
     }
 
@@ -2803,6 +2842,7 @@ private struct ReceiverMixedStreamRow: View {
 private struct ReceiverStreamSummaryView: View {
     let nmeaSentences: [NMEASentence]
     let ubxFrames: [TimeCardUBXFrame]
+    let mixedMessages: [ReceiverStreamMessage]
 
     private let columns = [
         GridItem(.adaptive(minimum: 220), spacing: 12)
@@ -2817,6 +2857,20 @@ private struct ReceiverStreamSummaryView: View {
                     detail: decodedStreamDetail,
                     systemImage: "waveform.path.ecg",
                     accent: decodedCount == 0 ? .secondary : .green
+                )
+                MetricCard(
+                    title: "Checksum health",
+                    value: checksumHealthValue,
+                    detail: checksumHealthDetail,
+                    systemImage: "checkmark.shield",
+                    accent: checksumHealthAccent
+                )
+                MetricCard(
+                    title: "RTCM3 corrections",
+                    value: rtcmValue,
+                    detail: rtcmDetail,
+                    systemImage: "dot.radiowaves.left.and.right",
+                    accent: rtcmAccent
                 )
                 MetricCard(
                     title: "Receiver version",
@@ -2918,7 +2972,7 @@ private struct ReceiverStreamSummaryView: View {
     }
 
     private var decodedCount: Int {
-        nmeaSentences.count + ubxFrames.count
+        mixedMessages.count
     }
 
     private var decodedStreamValue: String {
@@ -2926,10 +2980,58 @@ private struct ReceiverStreamSummaryView: View {
     }
 
     private var decodedStreamDetail: String {
-        let validUBX = ubxFrames.filter(\.checksumValid).count
-        let validNMEA = nmeaSentences.filter(\.checksumValid).count
-        return "\(nmeaSentences.count) NMEA (\(validNMEA) checksum OK), "
-            + "\(ubxFrames.count) UBX (\(validUBX) checksum OK)."
+        ReceiverStreamDecoder.protocolSummary(messages: mixedMessages)
+    }
+
+    private var checksumHealthValue: String {
+        guard !mixedMessages.isEmpty else { return "Waiting" }
+        let failed = mixedMessages.filter { $0.checksumState == .failed }.count
+        let checked = mixedMessages.filter { $0.checksumState == .ok }.count
+        if failed > 0 {
+            return "\(failed) failing"
+        }
+        if checked > 0 {
+            return "Healthy"
+        }
+        return "Unchecked"
+    }
+
+    private var checksumHealthDetail: String {
+        ReceiverStreamDecoder.checksumSummary(messages: mixedMessages)
+    }
+
+    private var checksumHealthAccent: Color {
+        guard !mixedMessages.isEmpty else { return .secondary }
+        if mixedMessages.contains(where: { $0.checksumState == .failed }) {
+            return .red
+        }
+        if mixedMessages.contains(where: { $0.checksumState == .ok }) {
+            return .green
+        }
+        return .orange
+    }
+
+    private var rtcmMessages: [ReceiverStreamMessage] {
+        mixedMessages.filter { $0.protocolName == "RTCM3" }
+    }
+
+    private var rtcmValue: String {
+        rtcmMessages.isEmpty ? "None" : "\(rtcmMessages.count)"
+    }
+
+    private var rtcmDetail: String {
+        ReceiverStreamDecoder.rtcmSummary(messages: mixedMessages)
+    }
+
+    private var rtcmAccent: Color {
+        guard !rtcmMessages.isEmpty else { return .secondary }
+        if rtcmMessages.contains(where: { $0.checksumState == .failed }) {
+            return .red
+        }
+        if rtcmMessages.contains(where: { $0.checksumState == .ok }) {
+            return .orange
+        }
+        return .secondary
     }
 
     private var receiverVersionFrame: TimeCardUBXFrame? {
@@ -3096,6 +3198,24 @@ private struct ReceiverStreamSummaryView: View {
                     id: "nmea-timing",
                     label: "NMEA timing",
                     value: timingSentence.summary
+                )
+            )
+        }
+        if !mixedMessages.isEmpty {
+            rows.append(
+                ReceiverStreamFact(
+                    id: "checksum-health",
+                    label: "Checksum health",
+                    value: checksumHealthDetail
+                )
+            )
+        }
+        if !rtcmMessages.isEmpty {
+            rows.append(
+                ReceiverStreamFact(
+                    id: "rtcm3-corrections",
+                    label: "RTCM3 corrections",
+                    value: rtcmDetail
                 )
             )
         }
@@ -6597,7 +6717,13 @@ private struct OperationsView: View {
         guard !messages.isEmpty else {
             return "No mixed receiver stream messages decoded from latest UART capture or read."
         }
-        return messages.map { message in
+        let header = [
+            "Receiver stream summary",
+            "Protocols: \(ReceiverStreamDecoder.protocolSummary(messages: messages))",
+            "Checksums: \(ReceiverStreamDecoder.checksumSummary(messages: messages))",
+            "RTCM3: \(ReceiverStreamDecoder.rtcmSummary(messages: messages))",
+        ]
+        let rows = messages.map { message in
             [
                 "\(message.offsetText) \(message.protocolName) \(message.name)",
                 "Bytes: \(message.byteCount)",
@@ -6605,7 +6731,8 @@ private struct OperationsView: View {
                 "Summary: \(message.summary)",
                 "Detail: \(message.detail)",
             ].joined(separator: "\n")
-        }.joined(separator: "\n\n")
+        }
+        return (header + rows).joined(separator: "\n\n")
     }
 
     private var receiverSatelliteSignals: [ReceiverSatelliteSignal] {
