@@ -22,7 +22,7 @@ The current implementation provides:
 - Bracketed card/system cross timestamps
 - Version-gated clock and TOD status reads
 - Capability and field-validity reporting for absent or gated registers
-- A versioned, size-checked user-client ABI v5
+- A versioned, size-checked user-client ABI v6
 - SMA connector query and guarded route setting through DriverKit, including
   Linux-compatible fixed-route handling for FPGA images without writable SMA
   routing GPIO
@@ -33,6 +33,8 @@ The current implementation provides:
   still unavailable
 - Safe I2C diagnostics through DriverKit: AXI IIC status, zero-byte address
   probes, bounded reads, and guarded mux query/set
+- Environmental sensor query for LM75B board temperature sensors, SHT3x
+  humidity/temperature, and ICP-10100 raw pressure/temperature with CRC checks
 - A native SwiftUI Control Center with:
   - driver activation, update, and removal
   - live card discovery and explicit multi-card selection
@@ -44,7 +46,7 @@ The current implementation provides:
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
   `sma-set`, `led`, `led-set`, `led-sma-auto`, `led-gnss-auto`, `led-auto`,
-  `i2c-status`, `i2c-scan`, `i2c-read`, and `i2c-mux`
+  `i2c-status`, `i2c-scan`, `i2c-read`, `i2c-mux`, and `sensors`
 
 The common PHC block is available on every matched profile. ART uses its own
 fixed layout and has no standard TOD block, so the driver never reads one.
@@ -58,12 +60,13 @@ Current upstream Linux defines the classic Meta/Celestica map and the fixed ART
 and ADVA maps. The shifted revision-02 map comes from this repository's
 LitePCIe gateware and Windows/Linux support; it is not currently in upstream
 Linux. The Meta/Facebook classic profile is hardware-validated on an Intel Mac
-Pro, including ABI v5 status, SMA fixed-route readback, SMA/GNSS LED policy
-application, and I2C diagnostics. Every other profile is covered by host-side
-layout and safety tests but still requires physical-card validation before a
-production release. Celestica cards programmed with the generic Meta PCI
-identity continue to receive safe common-PHC support, but board-specific R4006
-identification will require EEPROM decoding on top of the new I2C read path.
+Pro, including ABI v6 status, SMA fixed-route readback, SMA/GNSS LED policy
+application, I2C diagnostics, and LM75B/SHT3x/ICP-10100 environmental sensor
+telemetry. Every other profile is covered by host-side layout and safety tests
+but still requires physical-card validation before a production release.
+Celestica cards programmed with the generic Meta PCI identity continue to
+receive safe common-PHC support, and their environmental sensor population is
+auto-probed by mux branch rather than relying only on PCI identity.
 
 ## Project layout
 
@@ -200,7 +203,7 @@ the new driver build.
    Hardware pages show the selected card.
 8. Run `timecardctl.app/Contents/MacOS/timecardctl status`, followed by the
    same executable with `get`, `sma`, `led`, `led-auto`, `i2c-status`,
-   `i2c-scan`, `i2c-read`, and `i2c-mux`.
+   `i2c-scan`, `i2c-read`, `i2c-mux`, and `sensors`.
 9. Compare the reported card time, core versions, and available status fields
    with the Linux reference setup.
 
@@ -219,6 +222,9 @@ and it does not yet apply a UTC/TAI correction.
 - I2C support intentionally exposes diagnostics, probes, bounded reads, and mux
   control only. General writes remain gated until the Control Center has device
   profiles, paging rules, and write-safety warnings.
+- Sensor support currently reports LM75B, SHT3x, and ICP-10100 telemetry.
+  BME/BMP280, INA219 rail telemetry, and BNO055/BNO08x IMU decoding remain
+  planned on top of the same mux-aware sensor ABI.
 - SMA routing is implemented for the classic, shifted LitePCIe, ART, and ADVA
   register maps. FPGA images with absent or fixed route GPIO report fixed
   direction and fixed function, and writable changes are rejected.

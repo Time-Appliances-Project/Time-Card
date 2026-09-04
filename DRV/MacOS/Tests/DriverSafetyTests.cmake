@@ -84,6 +84,7 @@ foreach(required_cli_sma IN ITEMS
         "command_i2c_scan("
         "command_i2c_read("
         "command_i2c_mux("
+        "command_sensors("
         "\"sma\""
         "\"sma-set\""
         "\"led\""
@@ -94,7 +95,8 @@ foreach(required_cli_sma IN ITEMS
         "\"i2c-status\""
         "\"i2c-scan\""
         "\"i2c-read\""
-        "\"i2c-mux\"")
+        "\"i2c-mux\""
+        "\"sensors\"")
     string(FIND "${cli}" "${required_cli_sma}" cli_sma_offset)
     if(cli_sma_offset EQUAL -1)
         message(FATAL_ERROR

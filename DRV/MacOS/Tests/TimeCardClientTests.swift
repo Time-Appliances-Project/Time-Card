@@ -7,7 +7,7 @@ enum TimeCardClientTests {
     static func main() {
         precondition(
             TimeCardClient.localABILayoutIsValid,
-            "Swift structures must preserve the DriverKit ABI v5 layout"
+            "Swift structures must preserve the DriverKit ABI v6 layout"
         )
 
         let snapshot = TimeCardDeviceSnapshot(

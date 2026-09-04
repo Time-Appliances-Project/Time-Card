@@ -211,7 +211,7 @@ TimeCardFacebookRegisterMap(bool useMSIX, uint32_t boardProfile)
         kTimeCardCapabilityReadClock | kTimeCardCapabilitySetClock |
             kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD |
             kTimeCardCapabilitySMA | kTimeCardCapabilityLED |
-            kTimeCardCapabilityI2C,
+            kTimeCardCapabilityI2C | kTimeCardCapabilitySensors,
         0, 0, 0, {0, 0, 0, 0}, 0, 0, 0, 0, 0
     };
 
@@ -300,7 +300,7 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
             kTimeCardCapabilitySetClock |
             kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD |
             kTimeCardCapabilitySMA | kTimeCardCapabilityLED |
-            kTimeCardCapabilityI2C;
+            kTimeCardCapabilityI2C | kTimeCardCapabilitySensors;
         map.clockOffset = 0x01000000u;
         map.todOffset = 0x01050000u;
         map.smaMap1Offset = 0x00140000u;

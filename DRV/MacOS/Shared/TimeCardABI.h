@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define TIMECARD_ABI_VERSION 5u
+#define TIMECARD_ABI_VERSION 6u
 #define TIMECARD_DRIVER_VERSION 0x00000002u
 #define TIMECARD_SERVICE_CLASS "TimeCardDriver"
 #define TIMECARD_DRIVER_BUNDLE_ID "org.opentimeserver.timecard.macos.driver"
@@ -28,6 +28,7 @@ enum TimeCardExternalMethod {
     kTimeCardMethodI2CRead = 10,
     kTimeCardMethodI2CMuxQuery = 11,
     kTimeCardMethodI2CMuxSet = 12,
+    kTimeCardMethodSensorQuery = 13,
     kTimeCardMethodCount
 };
 
@@ -58,7 +59,8 @@ enum TimeCardCapability {
     kTimeCardCapabilityTOD = 1u << 3,
     kTimeCardCapabilitySMA = 1u << 4,
     kTimeCardCapabilityLED = 1u << 5,
-    kTimeCardCapabilityI2C = 1u << 6
+    kTimeCardCapabilityI2C = 1u << 6,
+    kTimeCardCapabilitySensors = 1u << 7
 };
 
 enum TimeCardSMADirection {
@@ -262,6 +264,70 @@ typedef struct TimeCardI2CMuxControl {
     uint32_t reserved[3];
 } TimeCardI2CMuxControl;
 
+#define TIMECARD_SENSOR_MAX_READINGS 16u
+
+enum TimeCardSensorType {
+    kTimeCardSensorTypeUnknown = 0,
+    kTimeCardSensorTypeLM75B = 1,
+    kTimeCardSensorTypeSHT3x = 2,
+    kTimeCardSensorTypeICP10100 = 3,
+    kTimeCardSensorTypeBME280 = 4,
+    kTimeCardSensorTypeINA219 = 5,
+    kTimeCardSensorTypeBNO08x = 6,
+    kTimeCardSensorTypeBNO055 = 7
+};
+
+enum TimeCardSensorFlag {
+    kTimeCardSensorFlagPresent = 1u << 0,
+    kTimeCardSensorFlagValid = 1u << 1,
+    kTimeCardSensorFlagConfigured = 1u << 2,
+    kTimeCardSensorFlagConversionReady = 1u << 3,
+    kTimeCardSensorFlagOverflow = 1u << 4,
+    kTimeCardSensorFlagHumidity = 1u << 6,
+    kTimeCardSensorFlagTemperature = 1u << 7,
+    kTimeCardSensorFlagCRCValid = 1u << 9,
+    kTimeCardSensorFlagPressure = 1u << 10
+};
+
+enum TimeCardSensorCapability {
+    kTimeCardSensorCapabilityBME280 = 1u << 0,
+    kTimeCardSensorCapabilityINA219 = 1u << 1,
+    kTimeCardSensorCapabilityBNO055 = 1u << 2,
+    kTimeCardSensorCapabilityBNO08x = 1u << 3,
+    kTimeCardSensorCapabilityLM75B = 1u << 4,
+    kTimeCardSensorCapabilitySHT3x = 1u << 5,
+    kTimeCardSensorCapabilityICP10100 = 1u << 6
+};
+
+typedef struct TimeCardSensorReading {
+    uint32_t size;
+    uint32_t type;
+    uint32_t flags;
+    uint32_t muxChannelMask;
+    uint32_t address;
+    int32_t temperatureMilliCelsius;
+    uint32_t humidityMilliPercent;
+    uint32_t pressureRaw;
+    uint32_t raw0;
+    uint32_t raw1;
+    uint32_t raw2;
+    uint32_t reserved;
+} TimeCardSensorReading;
+
+typedef struct TimeCardSensorTelemetry {
+    uint32_t size;
+    uint32_t flags;
+    uint32_t boardProfile;
+    uint32_t capabilities;
+    uint32_t muxChannelMask;
+    uint32_t restoredMuxChannelMask;
+    uint32_t controllerStatus;
+    uint32_t interruptStatus;
+    uint32_t readingCount;
+    uint32_t reserved[7];
+    TimeCardSensorReading readings[TIMECARD_SENSOR_MAX_READINGS];
+} TimeCardSensorTelemetry;
+
 #ifdef __cplusplus
 }
 
@@ -283,6 +349,10 @@ static_assert(sizeof(TimeCardI2CTransfer) == 276,
               "TimeCardI2CTransfer ABI changed");
 static_assert(sizeof(TimeCardI2CMuxControl) == 32,
               "TimeCardI2CMuxControl ABI changed");
+static_assert(sizeof(TimeCardSensorReading) == 48,
+              "TimeCardSensorReading ABI changed");
+static_assert(sizeof(TimeCardSensorTelemetry) == 832,
+              "TimeCardSensorTelemetry ABI changed");
 #endif
 
 #endif /* TIMECARD_ABI_H */

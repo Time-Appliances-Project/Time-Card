@@ -103,6 +103,7 @@ int main()
     assert((facebookMSI.capabilities & kTimeCardCapabilityLED) != 0);
     assert(TimeCardRegisterMapHasI2C(&facebookMSI));
     assert((facebookMSI.capabilities & kTimeCardCapabilityI2C) != 0);
+    assert((facebookMSI.capabilities & kTimeCardCapabilitySensors) != 0);
     assert(facebookMSI.requiredBarSize >=
            facebookMSI.i2cOffset + kTimeCardI2CRegisterLength);
     assert(facebookMSI.requiredBarSize <
@@ -163,6 +164,7 @@ int main()
     assert((art.capabilities & kTimeCardCapabilityTOD) == 0);
     assert((art.capabilities & kTimeCardCapabilityLED) == 0);
     assert((art.capabilities & kTimeCardCapabilityI2C) == 0);
+    assert((art.capabilities & kTimeCardCapabilitySensors) == 0);
     assert(art.uartOffsets[0] == 0x00161000u);
     assert(art.uartOffsets[1] == 0);
     assert(art.uartOffsets[2] == 0x00190000u);
@@ -184,6 +186,7 @@ int main()
     assert((adva.capabilities & kTimeCardCapabilityLED) != 0);
     assert(TimeCardRegisterMapHasI2C(&adva));
     assert((adva.capabilities & kTimeCardCapabilityI2C) != 0);
+    assert((adva.capabilities & kTimeCardCapabilitySensors) != 0);
     assert(adva.uartOffsets[1] == 0);
     assert(adva.uartOffsets[2] == 0x00181000u);
     AssertExactBarBoundary(adva);

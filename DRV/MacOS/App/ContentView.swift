@@ -493,7 +493,7 @@ private enum MacWorkspace: String {
         case .sma: "SMA route get/set ABI"
         case .timing: "Generator, counter, and event ABI"
         case .fpga: "Versioned FPGA-core register ABI"
-        case .sensors: "I2C/sensor/IMU ABI"
+        case .sensors: "Environmental sensor ABI and IMU expansion"
         case .i2c: "I2C diagnostics, mux, and LED ABI"
         case .flash: "SPI-flash query/program/readback ABI"
         }
@@ -564,8 +564,10 @@ private enum MacWorkspace: String {
             ]
         case .sensors:
             return [
-                ("BME/BMP and INA rails", "Needs I2C transaction ABI"),
-                ("R4006 LM75B/SHT3x/ICP-10100", "Needs board-profile sensor map"),
+                ("LM75B board temperatures", "Available through DriverKit ABI v6 and CLI"),
+                ("SHT3x humidity and temperature", "Available through DriverKit ABI v6 and CLI"),
+                ("ICP-10100 pressure sensor", "Available with raw pressure and temperature"),
+                ("BME/BMP and INA rails", "Transport ready, decoder pending"),
                 ("BNO055/BNO08x IMU", "Needs sensor transport and decoding"),
                 ("Vibration charts", "Needs live IMU samples"),
             ]

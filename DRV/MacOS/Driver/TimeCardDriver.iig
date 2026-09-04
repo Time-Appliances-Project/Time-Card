@@ -37,6 +37,7 @@ public:
     kern_return_t QueryI2CMux(TimeCardI2CMuxControl *control) LOCALONLY;
     kern_return_t SetI2CMux(const TimeCardI2CMuxControl *request,
                             TimeCardI2CMuxControl *response) LOCALONLY;
+    kern_return_t QuerySensors(TimeCardSensorTelemetry *telemetry) LOCALONLY;
 };
 
 #endif /* TIMECARD_DRIVER_IIG */

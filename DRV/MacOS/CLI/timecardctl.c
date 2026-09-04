@@ -33,7 +33,8 @@ print_usage(FILE *stream)
             "       timecardctl i2c-scan\n"
             "       timecardctl i2c-read address [subaddress [length "
             "[subaddress-length]]]\n"
-            "       timecardctl i2c-mux [channel-mask]\n");
+            "       timecardctl i2c-mux [channel-mask]\n"
+            "       timecardctl sensors\n");
 }
 
 static io_connect_t
@@ -202,7 +203,7 @@ command_status(io_connect_t connection)
     }
     printf("Register layout:  %s\n",
            TimeCardRegisterLayoutName(info.layout));
-    printf("Capabilities:     %s%s%s%s%s%s%s\n",
+    printf("Capabilities:     %s%s%s%s%s%s%s%s\n",
            (info.capabilities & kTimeCardCapabilityReadClock) != 0 ?
                "clock-read" : "no-clock-read",
            (info.capabilities & kTimeCardCapabilitySetClock) != 0 ?
@@ -216,7 +217,9 @@ command_status(io_connect_t connection)
            (info.capabilities & kTimeCardCapabilityLED) != 0 ?
                ", LEDs" : "",
            (info.capabilities & kTimeCardCapabilityI2C) != 0 ?
-               ", I2C" : "");
+               ", I2C" : "",
+           (info.capabilities & kTimeCardCapabilitySensors) != 0 ?
+               ", sensors" : "");
     printf("Clock offset:     0x%" PRIx64 "\n", info.clockOffset);
     if ((info.validFields & kTimeCardInfoValidClockVersion) != 0)
         printf("Clock version:    0x%08x\n", info.clockVersion);
@@ -779,6 +782,99 @@ command_i2c_mux(io_connect_t connection, int argc, char **argv)
     return 0;
 }
 
+static const char *
+sensor_type_name(uint32_t type)
+{
+    switch (type) {
+    case kTimeCardSensorTypeLM75B:
+        return "LM75B";
+    case kTimeCardSensorTypeSHT3x:
+        return "SHT3x";
+    case kTimeCardSensorTypeICP10100:
+        return "ICP-10100";
+    case kTimeCardSensorTypeBME280:
+        return "BME280/BMP280";
+    case kTimeCardSensorTypeINA219:
+        return "INA219";
+    case kTimeCardSensorTypeBNO08x:
+        return "BNO08x";
+    case kTimeCardSensorTypeBNO055:
+        return "BNO055";
+    default:
+        return "unknown";
+    }
+}
+
+static void
+print_sensor_presence(const TimeCardSensorReading *reading)
+{
+    printf("%-18s mux 0x%02x addr 0x%02x: %s%s%s%s\n",
+           sensor_type_name(reading->type), reading->muxChannelMask,
+           reading->address,
+           (reading->flags & kTimeCardSensorFlagPresent) != 0 ?
+               "present" : "not present",
+           (reading->flags & kTimeCardSensorFlagValid) != 0 ?
+               ", valid" : "",
+           (reading->flags & kTimeCardSensorFlagConfigured) != 0 ?
+               ", configured" : "",
+           (reading->flags & kTimeCardSensorFlagCRCValid) != 0 ?
+               ", CRC OK" : "");
+}
+
+static int
+command_sensors(io_connect_t connection, int argc, char **argv)
+{
+    (void)argv;
+    if (argc != 2)
+        return 2;
+    TimeCardSensorTelemetry telemetry = {.size = sizeof(telemetry)};
+    if (call_output(connection, kTimeCardMethodSensorQuery, &telemetry,
+                    sizeof(telemetry)))
+        return 1;
+
+    printf("Sensor branch:     %s (prior mux 0x%02x, restored 0x%02x)\n",
+           (telemetry.flags & kTimeCardSensorFlagPresent) != 0 ?
+               "available" : "unavailable",
+           telemetry.muxChannelMask, telemetry.restoredMuxChannelMask);
+    printf("Controller/events: 0x%02x / 0x%08x\n",
+           telemetry.controllerStatus, telemetry.interruptStatus);
+    printf("Board profile:     %s\n",
+           TimeCardBoardProfileName(telemetry.boardProfile));
+    printf("Capabilities:      %s%s%s\n",
+           (telemetry.capabilities & kTimeCardSensorCapabilityLM75B) != 0 ?
+               "LM75B" : "none",
+           (telemetry.capabilities & kTimeCardSensorCapabilitySHT3x) != 0 ?
+               ", SHT3x" : "",
+           (telemetry.capabilities & kTimeCardSensorCapabilityICP10100) != 0 ?
+               ", ICP-10100" : "");
+
+    unsigned validCount = 0;
+    for (uint32_t i = 0; i < telemetry.readingCount &&
+         i < TIMECARD_SENSOR_MAX_READINGS; i++) {
+        const TimeCardSensorReading *reading = &telemetry.readings[i];
+        print_sensor_presence(reading);
+        if ((reading->flags & kTimeCardSensorFlagTemperature) != 0) {
+            printf("  temperature:     %.3f C\n",
+                   reading->temperatureMilliCelsius / 1000.0);
+        }
+        if ((reading->flags & kTimeCardSensorFlagHumidity) != 0) {
+            printf("  humidity:        %.3f %%RH\n",
+                   reading->humidityMilliPercent / 1000.0);
+        }
+        if ((reading->flags & kTimeCardSensorFlagPressure) != 0) {
+            printf("  pressure raw:    0x%06x\n", reading->pressureRaw);
+        }
+        if ((reading->flags & kTimeCardSensorFlagValid) != 0)
+            validCount++;
+    }
+    if (validCount == 0) {
+        fprintf(stderr, "timecardctl: no valid sensor samples were returned\n");
+        return 1;
+    }
+    printf("%u valid sensor block(s).\n", validCount);
+    return 0;
+}
+
 static int
 command_get(io_connect_t connection)
 {
@@ -861,6 +957,8 @@ main(int argc, char **argv)
         status = command_i2c_read(connection, argc, argv);
     else if (strcmp(argv[1], "i2c-mux") == 0)
         status = command_i2c_mux(connection, argc, argv);
+    else if (strcmp(argv[1], "sensors") == 0)
+        status = command_sensors(connection, argc, argv);
     else {
         print_usage(stderr);
         status = 2;
