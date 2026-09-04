@@ -806,9 +806,38 @@ sensor_type_name(uint32_t type)
 }
 
 static void
+print_sensor_capabilities(uint32_t capabilities)
+{
+    const struct {
+        uint32_t flag;
+        const char *name;
+    } names[] = {
+        {kTimeCardSensorCapabilityBME280, "BME280/BMP280"},
+        {kTimeCardSensorCapabilityINA219, "INA219"},
+        {kTimeCardSensorCapabilityBNO055, "BNO055"},
+        {kTimeCardSensorCapabilityBNO08x, "BNO08x"},
+        {kTimeCardSensorCapabilityLM75B, "LM75B"},
+        {kTimeCardSensorCapabilitySHT3x, "SHT3x"},
+        {kTimeCardSensorCapabilityICP10100, "ICP-10100"},
+    };
+    const char *separator = "";
+
+    if (capabilities == 0) {
+        printf("none");
+        return;
+    }
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if ((capabilities & names[i].flag) == 0)
+            continue;
+        printf("%s%s", separator, names[i].name);
+        separator = ", ";
+    }
+}
+
+static void
 print_sensor_presence(const TimeCardSensorReading *reading)
 {
-    printf("%-18s mux 0x%02x addr 0x%02x: %s%s%s%s\n",
+    printf("%-18s mux 0x%02x addr 0x%02x: %s%s%s%s%s%s\n",
            sensor_type_name(reading->type), reading->muxChannelMask,
            reading->address,
            (reading->flags & kTimeCardSensorFlagPresent) != 0 ?
@@ -818,7 +847,39 @@ print_sensor_presence(const TimeCardSensorReading *reading)
            (reading->flags & kTimeCardSensorFlagConfigured) != 0 ?
                ", configured" : "",
            (reading->flags & kTimeCardSensorFlagCRCValid) != 0 ?
-               ", CRC OK" : "");
+               ", CRC OK" : "",
+           (reading->flags & kTimeCardSensorFlagCalibrated) != 0 ?
+               ", calibrated" : "",
+           (reading->flags & kTimeCardSensorFlagIMU) != 0 ?
+               ", IMU" : "");
+}
+
+static bool
+icp10100_pressure_pascals(uint32_t rawPressure, uint32_t rawTemperature,
+                          const int32_t otp[4], double *pressurePascals)
+{
+    const double t = (double)rawTemperature - 32768.0;
+    const double quadratic = t * t / 16777216.0;
+    const double s1 = 3.5 * 1048576.0 + otp[0] * quadratic;
+    const double s2 = 2048.0 * otp[3] + otp[1] * quadratic;
+    const double s3 = 11.5 * 1048576.0 + otp[2] * quadratic;
+    const double denominator = s3 * (45000.0 - 80000.0) +
+        s1 * (80000.0 - 105000.0) + s2 * (105000.0 - 45000.0);
+    if (denominator > -0.000001 && denominator < 0.000001)
+        return false;
+    const double c = (s1 * s2 * (45000.0 - 80000.0) +
+        s2 * s3 * (80000.0 - 105000.0) +
+        s3 * s1 * (105000.0 - 45000.0)) / denominator;
+    if (s1 - s2 > -0.000001 && s1 - s2 < 0.000001)
+        return false;
+    const double a = (45000.0 * s1 - 80000.0 * s2 - 35000.0 * c) /
+        (s1 - s2);
+    const double b = (45000.0 - a) * (s1 + c);
+    const double pressure = a + b / (c + rawPressure);
+    if (!(pressure >= 10000.0 && pressure <= 130000.0))
+        return false;
+    *pressurePascals = pressure;
+    return true;
 }
 
 static int
@@ -840,13 +901,9 @@ command_sensors(io_connect_t connection, int argc, char **argv)
            telemetry.controllerStatus, telemetry.interruptStatus);
     printf("Board profile:     %s\n",
            TimeCardBoardProfileName(telemetry.boardProfile));
-    printf("Capabilities:      %s%s%s\n",
-           (telemetry.capabilities & kTimeCardSensorCapabilityLM75B) != 0 ?
-               "LM75B" : "none",
-           (telemetry.capabilities & kTimeCardSensorCapabilitySHT3x) != 0 ?
-               ", SHT3x" : "",
-           (telemetry.capabilities & kTimeCardSensorCapabilityICP10100) != 0 ?
-               ", ICP-10100" : "");
+    printf("Capabilities:      ");
+    print_sensor_capabilities(telemetry.capabilities);
+    printf("\n");
 
     unsigned validCount = 0;
     for (uint32_t i = 0; i < telemetry.readingCount &&
@@ -862,7 +919,16 @@ command_sensors(io_connect_t connection, int argc, char **argv)
                    reading->humidityMilliPercent / 1000.0);
         }
         if ((reading->flags & kTimeCardSensorFlagPressure) != 0) {
-            printf("  pressure raw:    0x%06x\n", reading->pressureRaw);
+            double pressurePascals = 0.0;
+            if ((reading->flags & kTimeCardSensorFlagCalibrated) != 0 &&
+                icp10100_pressure_pascals(
+                    reading->pressureRaw, reading->raw1,
+                    telemetry.icp10100Otp, &pressurePascals)) {
+                printf("  pressure:        %.3f hPa\n",
+                       pressurePascals / 100.0);
+            } else {
+                printf("  pressure raw:    0x%06x\n", reading->pressureRaw);
+            }
         }
         if ((reading->flags & kTimeCardSensorFlagValid) != 0)
             validCount++;

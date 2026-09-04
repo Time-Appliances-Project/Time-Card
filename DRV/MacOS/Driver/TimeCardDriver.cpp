@@ -957,15 +957,27 @@ enum {
     kTimeCardSensorSHT3xAddress = 0x44u,
     kTimeCardSensorICP10100Address = 0x63u,
     kTimeCardSensorBNO08xAddress = 0x4au,
+    kTimeCardSensorBNO08xAddressAlt = 0x4bu,
+    kTimeCardSensorBNO055Address1 = 0x28u,
+    kTimeCardSensorBNO055Address2 = 0x29u,
     kTimeCardSHT3xStatusCommandHi = 0xf3u,
     kTimeCardSHT3xStatusCommandLo = 0x2du,
     kTimeCardSHT3xMeasureCommandHi = 0x24u,
     kTimeCardSHT3xMeasureCommandLo = 0x00u,
+    kTimeCardBNO055ChipIDRegister = 0x00u,
+    kTimeCardBNO055ChipID = 0xa0u,
     kTimeCardICP10100ProductID = 0x08u,
     kTimeCardICP10100ReadIDHi = 0xefu,
     kTimeCardICP10100ReadIDLo = 0xc8u,
     kTimeCardICP10100MeasureHi = 0x50u,
     kTimeCardICP10100MeasureLo = 0x59u,
+    kTimeCardICP10100SetPointer0 = 0xc5u,
+    kTimeCardICP10100SetPointer1 = 0x95u,
+    kTimeCardICP10100SetPointer2 = 0x00u,
+    kTimeCardICP10100SetPointer3 = 0x66u,
+    kTimeCardICP10100SetPointer4 = 0x9cu,
+    kTimeCardICP10100IncrementPointer0 = 0xc7u,
+    kTimeCardICP10100IncrementPointer1 = 0xf7u,
 
     kIS32FL3207DeviceControl = 0x00u,
     kIS32FL3207PWMBase = 0x01u,
@@ -1724,9 +1736,53 @@ TimeCardSHT3xReadLocked(IOPCIDevice *device, uint8_t memoryIndex,
 }
 
 static bool
+TimeCardICP10100ReadOtpLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                              const TimeCardRegisterMap *map,
+                              int32_t otp[4],
+                              uint32_t *controllerStatus,
+                              uint32_t *interruptStatus)
+{
+    const uint8_t setPointerCommand[5] = {
+        kTimeCardICP10100SetPointer0, kTimeCardICP10100SetPointer1,
+        kTimeCardICP10100SetPointer2, kTimeCardICP10100SetPointer3,
+        kTimeCardICP10100SetPointer4
+    };
+    const uint8_t incrementPointerCommand[2] = {
+        kTimeCardICP10100IncrementPointer0,
+        kTimeCardICP10100IncrementPointer1
+    };
+
+    kern_return_t result = TimeCardI2CWriteLocked(
+        device, memoryIndex, map, kTimeCardSensorICP10100Address,
+        setPointerCommand, sizeof(setPointerCommand), controllerStatus,
+        interruptStatus);
+    if (result != kIOReturnSuccess)
+        return false;
+
+    for (uint32_t i = 0; i < 4u; ++i) {
+        uint8_t frame[3] = {};
+        result = TimeCardI2CWriteLocked(
+            device, memoryIndex, map, kTimeCardSensorICP10100Address,
+            incrementPointerCommand, sizeof(incrementPointerCommand),
+            controllerStatus, interruptStatus);
+        if (result != kIOReturnSuccess)
+            return false;
+        result = TimeCardI2CReadLocked(
+            device, memoryIndex, map, kTimeCardSensorICP10100Address, 0u, 0u,
+            frame, sizeof(frame), controllerStatus, interruptStatus);
+        if (result != kIOReturnSuccess ||
+            !TimeCardSensorFrameCrcValid(frame))
+            return false;
+        otp[i] = TimeCardSensorReadBESigned16(frame);
+    }
+    return true;
+}
+
+static bool
 TimeCardICP10100ReadLocked(IOPCIDevice *device, uint8_t memoryIndex,
                            const TimeCardRegisterMap *map,
                            TimeCardSensorReading *reading,
+                           int32_t otp[4],
                            uint32_t *controllerStatus,
                            uint32_t *interruptStatus)
 {
@@ -1755,6 +1811,11 @@ TimeCardICP10100ReadLocked(IOPCIDevice *device, uint8_t memoryIndex,
     reading->raw2 = productID;
     if (productID != kTimeCardICP10100ProductID)
         return false;
+    if (TimeCardICP10100ReadOtpLocked(
+            device, memoryIndex, map, otp, controllerStatus,
+            interruptStatus)) {
+        reading->flags |= kTimeCardSensorFlagCalibrated;
+    }
 
     result = TimeCardI2CWriteLocked(
         device, memoryIndex, map, reading->address, measureCommand,
@@ -1784,6 +1845,87 @@ TimeCardICP10100ReadLocked(IOPCIDevice *device, uint8_t memoryIndex,
     return true;
 }
 
+static bool
+TimeCardBNO08xProbeLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                          const TimeCardRegisterMap *map,
+                          TimeCardSensorReading *reading,
+                          uint32_t *controllerStatus,
+                          uint32_t *interruptStatus)
+{
+    const uint32_t addresses[] = {
+        kTimeCardSensorBNO08xAddress,
+        kTimeCardSensorBNO08xAddressAlt
+    };
+    reading->flags = kTimeCardSensorFlagIMU;
+    for (uint32_t i = 0; i < sizeof(addresses) / sizeof(addresses[0]); ++i) {
+        reading->address = addresses[i];
+        const kern_return_t result = TimeCardI2CProbeLocked(
+            device, memoryIndex, map, addresses[i], controllerStatus,
+            interruptStatus);
+        reading->raw0 = (uint32_t)result;
+        reading->raw1 = *controllerStatus;
+        reading->raw2 = *interruptStatus;
+        if (result == kIOReturnSuccess) {
+            reading->flags |= kTimeCardSensorFlagPresent;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool
+TimeCardBNO055ProbeLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                          const TimeCardRegisterMap *map,
+                          TimeCardSensorReading *reading,
+                          uint32_t *controllerStatus,
+                          uint32_t *interruptStatus)
+{
+    const uint32_t addresses[] = {
+        kTimeCardSensorBNO055Address1,
+        kTimeCardSensorBNO055Address2
+    };
+    reading->flags = kTimeCardSensorFlagIMU;
+    for (uint32_t i = 0; i < sizeof(addresses) / sizeof(addresses[0]); ++i) {
+        uint8_t chipID = 0;
+        reading->address = addresses[i];
+        const kern_return_t result = TimeCardI2CReadLocked(
+            device, memoryIndex, map, addresses[i], 1u,
+            kTimeCardBNO055ChipIDRegister, &chipID, sizeof(chipID),
+            controllerStatus, interruptStatus);
+        reading->raw0 = chipID;
+        reading->raw1 = *controllerStatus;
+        reading->raw2 = *interruptStatus;
+        if (result != kIOReturnSuccess)
+            continue;
+        reading->flags |= kTimeCardSensorFlagPresent;
+        if (chipID == kTimeCardBNO055ChipID) {
+            reading->flags |= kTimeCardSensorFlagValid |
+                kTimeCardSensorFlagConversionReady;
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+static uint32_t
+TimeCardSensorCapabilitiesForBoard(uint32_t boardProfile)
+{
+    switch (boardProfile) {
+    case kTimeCardBoardFacebook:
+    case kTimeCardBoardCelestica:
+    case kTimeCardBoardADVA:
+    case kTimeCardBoardADVAX1:
+        return kTimeCardSensorCapabilityLM75B |
+            kTimeCardSensorCapabilitySHT3x |
+            kTimeCardSensorCapabilityICP10100 |
+            kTimeCardSensorCapabilityBNO055 |
+            kTimeCardSensorCapabilityBNO08x;
+    default:
+        return 0;
+    }
+}
+
 kern_return_t
 TimeCardDriver::QuerySensors(TimeCardSensorTelemetry *telemetry)
 {
@@ -1797,8 +1939,8 @@ TimeCardDriver::QuerySensors(TimeCardSensorTelemetry *telemetry)
     TimeCardSensorTelemetry local = {};
     local.size = sizeof(local);
     local.boardProfile = ivars->registers.boardProfile;
-    local.capabilities = kTimeCardSensorCapabilityLM75B |
-        kTimeCardSensorCapabilitySHT3x | kTimeCardSensorCapabilityICP10100;
+    local.capabilities =
+        TimeCardSensorCapabilitiesForBoard(ivars->registers.boardProfile);
 
     IOLockLock(ivars->registerLock);
     uint8_t savedMux = 0;
@@ -1816,7 +1958,8 @@ TimeCardDriver::QuerySensors(TimeCardSensorTelemetry *telemetry)
     local.flags = kTimeCardSensorFlagPresent;
     local.muxChannelMask = savedMux;
 
-    if (TimeCardSensorSelectBranchLocked(
+    if ((local.capabilities & kTimeCardSensorCapabilityLM75B) != 0 &&
+        TimeCardSensorSelectBranchLocked(
             ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
             1u, &controllerStatus, &interruptStatus)) {
         const uint32_t lm75Addresses[] = {
@@ -1834,7 +1977,8 @@ TimeCardDriver::QuerySensors(TimeCardSensorTelemetry *telemetry)
         }
     }
 
-    if (TimeCardSensorSelectBranchLocked(
+    if ((local.capabilities & kTimeCardSensorCapabilitySHT3x) != 0 &&
+        TimeCardSensorSelectBranchLocked(
             ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
             2u, &controllerStatus, &interruptStatus)) {
         TimeCardSensorReading *reading = TimeCardSensorAppend(
@@ -1846,7 +1990,8 @@ TimeCardDriver::QuerySensors(TimeCardSensorTelemetry *telemetry)
                 reading, &controllerStatus, &interruptStatus);
     }
 
-    if (TimeCardSensorSelectBranchLocked(
+    if ((local.capabilities & kTimeCardSensorCapabilityICP10100) != 0 &&
+        TimeCardSensorSelectBranchLocked(
             ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
             4u, &controllerStatus, &interruptStatus)) {
         TimeCardSensorReading *reading = TimeCardSensorAppend(
@@ -1854,6 +1999,33 @@ TimeCardDriver::QuerySensors(TimeCardSensorTelemetry *telemetry)
             kTimeCardSensorICP10100Address);
         if (reading != nullptr)
             (void)TimeCardICP10100ReadLocked(
+                ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+	                reading, local.icp10100Otp, &controllerStatus,
+	                &interruptStatus);
+    }
+
+    if ((local.capabilities & kTimeCardSensorCapabilityBNO08x) != 0 &&
+        TimeCardSensorSelectBranchLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+            8u, &controllerStatus, &interruptStatus)) {
+        TimeCardSensorReading *reading = TimeCardSensorAppend(
+            &local, kTimeCardSensorTypeBNO08x, 8u,
+            kTimeCardSensorBNO08xAddress);
+        if (reading != nullptr)
+            (void)TimeCardBNO08xProbeLocked(
+                ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+                reading, &controllerStatus, &interruptStatus);
+    }
+
+    if ((local.capabilities & kTimeCardSensorCapabilityBNO055) != 0 &&
+        TimeCardSensorSelectBranchLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+            2u, &controllerStatus, &interruptStatus)) {
+        TimeCardSensorReading *reading = TimeCardSensorAppend(
+            &local, kTimeCardSensorTypeBNO055, 2u,
+            kTimeCardSensorBNO055Address2);
+        if (reading != nullptr)
+            (void)TimeCardBNO055ProbeLocked(
                 ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
                 reading, &controllerStatus, &interruptStatus);
     }

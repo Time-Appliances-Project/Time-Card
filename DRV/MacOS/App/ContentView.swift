@@ -76,7 +76,7 @@ struct ContentView: View {
                 case .fpga:
                     CapabilityWorkspaceView(workspace: .fpga)
                 case .sensors:
-                    CapabilityWorkspaceView(workspace: .sensors)
+                    SensorDashboardView()
                 case .i2c:
                     CapabilityWorkspaceView(workspace: .i2c)
                 case .telemetry:
@@ -238,8 +238,9 @@ private struct OverviewView: View {
                             )
                             WorkspaceTile(
                                 "SMA",
-                                "Gated",
-                                "Route fabric ABI next",
+                                snapshot.capabilityNames.contains("SMA")
+                                    ? "Live" : "Gated",
+                                "Route fabric readback and guarded writes",
                                 "cable.connector",
                                 .orange
                             )
@@ -252,8 +253,9 @@ private struct OverviewView: View {
                             )
                             WorkspaceTile(
                                 "Sensors",
-                                "Gated",
-                                "I2C and IMU backend next",
+                                snapshot.capabilityNames.contains("Sensors")
+                                    ? "Live" : "Gated",
+                                "Environmental telemetry and IMU gap tracking",
                                 "gyroscope",
                                 .pink
                             )
@@ -564,12 +566,12 @@ private enum MacWorkspace: String {
             ]
         case .sensors:
             return [
-                ("LM75B board temperatures", "Available through DriverKit ABI v6 and CLI"),
-                ("SHT3x humidity and temperature", "Available through DriverKit ABI v6 and CLI"),
-                ("ICP-10100 pressure sensor", "Available with raw pressure and temperature"),
-                ("BME/BMP and INA rails", "Transport ready, decoder pending"),
-                ("BNO055/BNO08x IMU", "Needs sensor transport and decoding"),
-                ("Vibration charts", "Needs live IMU samples"),
+                ("LM75B board temperatures", "Live through DriverKit ABI v7 and CLI"),
+                ("SHT3x humidity and temperature", "Live through DriverKit ABI v7 and CLI"),
+                ("ICP-10100 pressure sensor", "Live with OTP compensated pressure"),
+                ("BME/BMP and INA rails", "Profile-aware, decoder pending"),
+                ("BNO055/BNO08x IMU", "Probe path live, fusion decoder pending"),
+                ("Vibration charts", "Needs live IMU fused-motion samples"),
             ]
         case .i2c:
             return [
@@ -680,7 +682,7 @@ private struct CapabilityWorkspaceView: View {
     private var liveStatus: String {
         switch monitor.state {
         case .connected:
-            "Backend gated"
+            workspace == .sensors ? "Live" : "Backend gated"
         case .discovering:
             "Discovering"
         case .noService:
@@ -694,7 +696,7 @@ private struct CapabilityWorkspaceView: View {
 
     private var statusColor: Color {
         switch monitor.state {
-        case .connected: .orange
+        case .connected: workspace == .sensors ? .green : .orange
         case .discovering: .blue
         case .noService, .accessUnavailable: .orange
         case .failed: .red
@@ -706,7 +708,529 @@ private struct CapabilityWorkspaceView: View {
             return monitor.snapshot?.capabilityNames.contains("ToD") == true
                 ? "Live" : "Unavailable"
         }
+        if workspace == .sensors {
+            switch name {
+            case "LM75B board temperatures",
+                 "SHT3x humidity and temperature",
+                 "ICP-10100 pressure sensor":
+                return monitor.snapshot?.capabilityNames.contains("Sensors") == true
+                    ? "Live" : "Unavailable"
+            case "BNO055/BNO08x IMU":
+                return monitor.snapshot?.capabilityNames.contains("Sensors") == true
+                    ? "Partial" : "Unavailable"
+            default:
+                return "Backend pending"
+            }
+        }
         return "Backend pending"
+    }
+}
+
+private struct SensorDashboardView: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ControlCenterHeader()
+                sensorHeader
+
+                if !sensorCapabilityAvailable {
+                    ControlCenterPanel(
+                        title: "Sensors not advertised",
+                        subtitle: "Board profile does not expose the sensor fabric"
+                    ) {
+                        Text(
+                            "This Time Card profile did not advertise the Sensors "
+                                + "capability through the active DriverKit ABI. The "
+                                + "Control Center keeps this as unavailable instead "
+                                + "of showing fabricated zero readings."
+                        )
+                        .foregroundStyle(.secondary)
+                    }
+                } else if let telemetry = monitor.sensorTelemetry {
+                    SensorMetricGrid(telemetry: telemetry)
+                    SensorBoardTemperatureView(telemetry: telemetry)
+                    SensorTemperatureHistoryChart()
+                    SensorInventoryView(telemetry: telemetry)
+                    SensorIMUView(telemetry: telemetry)
+                } else {
+                    ControlCenterPanel(
+                        title: "Waiting for sensor sample",
+                        subtitle: "Automatic refresh is running"
+                    ) {
+                        ContentUnavailableView(
+                            "No sensor sample yet",
+                            systemImage: "gyroscope",
+                            description: Text(
+                                monitor.sensorMessage.isEmpty
+                                    ? "Waiting for DriverKit sensor telemetry."
+                                    : monitor.sensorMessage
+                            )
+                        )
+                        .frame(height: 170)
+                    }
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    private var sensorHeader: some View {
+        ControlCenterPanel(
+            title: "Sensors and IMU",
+            subtitle: "Live DriverKit ABI v7 environmental telemetry"
+        ) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "gyroscope")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundStyle(.pink)
+                    .frame(width: 58, height: 58)
+                    .background(.pink.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(
+                        "The macOS Control Center now reads the Celestica "
+                            + "fixed-channel environmental stack, carries "
+                            + "ICP-10100 factory OTP calibration, and tracks "
+                            + "BNO08x/BNO055 IMU bring-up without treating "
+                            + "missing devices as plausible data."
+                    )
+                    .foregroundStyle(.secondary)
+
+                    HStack(spacing: 8) {
+                        StatusPill(
+                            sensorCapabilityAvailable
+                                ? "ABI v7 sensors" : "Sensors unavailable",
+                            sensorCapabilityAvailable ? .green : .secondary
+                        )
+                        StatusPill(sensorCountText, sensorCountColor)
+                        if let telemetry = monitor.sensorTelemetry {
+                            StatusPill(
+                                telemetry.muxWasRestored
+                                    ? "Mux restored" : "Mux changed",
+                                telemetry.muxWasRestored ? .blue : .orange
+                            )
+                        }
+                    }
+                }
+
+                Spacer()
+
+                Button("Refresh") {
+                    monitor.refresh()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            if !monitor.sensorMessage.isEmpty {
+                Divider()
+                Text(monitor.sensorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private var sensorCapabilityAvailable: Bool {
+        monitor.snapshot?.capabilityNames.contains("Sensors") == true
+    }
+
+    private var sensorCountText: String {
+        guard let telemetry = monitor.sensorTelemetry else {
+            return sensorCapabilityAvailable ? "Sampling" : "No sensor ABI"
+        }
+        return "\(telemetry.validReadings.count) live block(s)"
+    }
+
+    private var sensorCountColor: Color {
+        guard let telemetry = monitor.sensorTelemetry else {
+            return sensorCapabilityAvailable ? .orange : .secondary
+        }
+        return telemetry.validReadings.isEmpty ? .orange : .green
+    }
+}
+
+private struct SensorMetricGrid: View {
+    let telemetry: TimeCardSensorSnapshot
+
+    var body: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 210), spacing: 14)],
+            spacing: 14
+        ) {
+            MetricCard(
+                title: "Ambient temperature",
+                value: TimeCardFormatting.temperature(primaryTemperature?.value),
+                detail: primaryTemperature?.source ?? "Waiting for SHT3x or ICP-10100",
+                systemImage: "thermometer.medium",
+                accent: .pink
+            )
+            MetricCard(
+                title: "Relative humidity",
+                value: TimeCardFormatting.humidity(humidity),
+                detail: telemetry.humidityReading.map(SensorUIFormatting.route)
+                    ?? "SHT3x not sampled",
+                systemImage: "humidity",
+                accent: .cyan
+            )
+            MetricCard(
+                title: "Pressure",
+                value: pressureValue,
+                detail: pressureDetail,
+                systemImage: "barometer",
+                accent: .indigo
+            )
+            MetricCard(
+                title: "Dew point",
+                value: TimeCardFormatting.temperature(telemetry.dewPointCelsius),
+                detail: telemetry.dewPointCelsius == nil
+                    ? "Requires SHT3x humidity" : "Calculated from SHT3x sample",
+                systemImage: "drop.degreesign",
+                accent: .mint
+            )
+        }
+    }
+
+    private var primaryTemperature: (value: Double, source: String)? {
+        if let reading = telemetry.humidityReading,
+           reading.isValid,
+           let temperature = reading.temperatureCelsius {
+            return (temperature, "\(reading.kind.label) " + SensorUIFormatting.route(reading))
+        }
+        if let reading = telemetry.pressureReading,
+           reading.isValid,
+           let temperature = reading.temperatureCelsius {
+            return (temperature, "\(reading.kind.label) " + SensorUIFormatting.route(reading))
+        }
+        return nil
+    }
+
+    private var humidity: Double? {
+        guard let reading = telemetry.humidityReading, reading.isValid else {
+            return nil
+        }
+        return reading.humidityPercent
+    }
+
+    private var pressureValue: String {
+        if let pressure = telemetry.pressurePascals {
+            return TimeCardFormatting.hPa(pressure)
+        }
+        if let reading = telemetry.pressureReading, reading.hasPressure {
+            return TimeCardFormatting.raw24(reading.pressureRaw)
+        }
+        return "Unavailable"
+    }
+
+    private var pressureDetail: String {
+        guard let reading = telemetry.pressureReading else {
+            return "ICP-10100 not sampled"
+        }
+        if telemetry.pressurePascals != nil {
+            return "\(reading.kind.label) compensated from OTP"
+        }
+        if reading.isCalibrated {
+            return "OTP read, compensation rejected range"
+        }
+        return reading.isPresent ? "Raw ICP-10100 sample" : "ICP-10100 no ACK"
+    }
+}
+
+private struct SensorBoardTemperatureView: View {
+    let telemetry: TimeCardSensorSnapshot
+
+    var body: some View {
+        ControlCenterPanel(
+            title: "Board temperature zones",
+            subtitle: "LM75B devices on the Celestica sensor mux branch"
+        ) {
+            if telemetry.boardTemperatures.isEmpty {
+                ContentUnavailableView(
+                    "No LM75B readings",
+                    systemImage: "thermometer.low",
+                    description: Text("This profile has no LM75B zone sample.")
+                )
+                .frame(height: 150)
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 180), spacing: 12)],
+                    spacing: 12
+                ) {
+                    ForEach(
+                        Array(telemetry.boardTemperatures.enumerated()),
+                        id: \.element.id
+                    ) { item in
+                        MetricCard(
+                            title: "Zone \(item.offset + 1)",
+                            value: item.element.isValid
+                                ? TimeCardFormatting.temperature(
+                                    item.element.temperatureCelsius
+                                )
+                                : "No ACK",
+                            detail: SensorUIFormatting.route(item.element),
+                            systemImage: "thermometer",
+                            accent: item.element.isValid ? .orange : .secondary
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct SensorTemperatureHistoryChart: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+
+    var body: some View {
+        ControlCenterPanel(
+            title: "Temperature history",
+            subtitle: "Rolling live readings from valid sensor blocks"
+        ) {
+            if monitor.sensorHistory.isEmpty {
+                ContentUnavailableView(
+                    "No temperature history yet",
+                    systemImage: "chart.xyaxis.line",
+                    description: Text("A valid temperature sample will start this chart.")
+                )
+                .frame(height: 180)
+            } else {
+                Chart(monitor.sensorHistory) { point in
+                    LineMark(
+                        x: .value("Time", point.timestamp),
+                        y: .value("Temperature", point.value)
+                    )
+                    .foregroundStyle(by: .value("Sensor", point.series))
+                    .interpolationMethod(.catmullRom)
+                }
+                .chartXAxis(.hidden)
+                .chartYAxisLabel("°C")
+                .frame(height: 210)
+            }
+        }
+    }
+}
+
+private struct SensorInventoryView: View {
+    let telemetry: TimeCardSensorSnapshot
+
+    var body: some View {
+        ControlCenterPanel(
+            title: "Sensor inventory",
+            subtitle: "Raw ABI rows, mux restore state, and CRC/calibration flags"
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                InfoRow(
+                    label: "Sensor fabric",
+                    value: telemetry.isPresent ? "Available" : "Unavailable",
+                    valueColor: telemetry.isPresent ? .green : .orange
+                )
+                InfoRow(
+                    label: "Mux route",
+                    value: String(
+                        format: "prior 0x%02x, restored 0x%02x",
+                        telemetry.muxChannelMask,
+                        telemetry.restoredMuxChannelMask
+                    ),
+                    valueColor: telemetry.muxWasRestored ? .primary : .orange
+                )
+                InfoRow(
+                    label: "Controller/events",
+                    value: String(
+                        format: "0x%02x / 0x%08x",
+                        telemetry.controllerStatus,
+                        telemetry.interruptStatus
+                    )
+                )
+                InfoRow(
+                    label: "Sensor capabilities",
+                    value: telemetry.capabilityNames.isEmpty
+                        ? "None"
+                        : telemetry.capabilityNames.joined(separator: ", ")
+                )
+                InfoRow(
+                    label: "ICP-10100 OTP",
+                    value: SensorUIFormatting.otp(telemetry.icp10100Otp)
+                )
+
+                Divider()
+
+                if telemetry.readings.isEmpty {
+                    ContentUnavailableView(
+                        "No sensor rows returned",
+                        systemImage: "list.bullet.rectangle",
+                        description: Text("The driver returned an empty sensor inventory.")
+                    )
+                    .frame(height: 150)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(telemetry.readings) { reading in
+                            SensorInventoryRow(reading: reading)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct SensorInventoryRow: View {
+    let reading: TimeCardSensorReading
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(reading.kind.label)
+                        .font(.body.weight(.semibold))
+                    Text(SensorUIFormatting.route(reading))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 16)
+
+                Text(SensorUIFormatting.rawSummary(reading))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(SensorUIFormatting.badges(reading)) { badge in
+                    StatusPill(badge.label, badge.color)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+private struct SensorIMUView: View {
+    let telemetry: TimeCardSensorSnapshot
+
+    var body: some View {
+        ControlCenterPanel(
+            title: "IMU workspace",
+            subtitle: "BNO055/BNO08x detection and fused-motion gap tracking"
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                if imuReadings.isEmpty {
+                    FeatureRow(
+                        name: "BNO055/BNO08x probe",
+                        state: "Waiting",
+                        note: "The active profile did not return an IMU probe row."
+                    )
+                } else {
+                    ForEach(imuReadings) { reading in
+                        FeatureRow(
+                            name: reading.kind.label,
+                            state: imuState(reading),
+                            note: imuDetail(reading)
+                        )
+                    }
+                }
+
+                Divider()
+
+                Text(
+                    "Full Windows parity still needs the SH-2/BNO055 stream "
+                        + "decoder, quaternion orientation, calibration levels, "
+                        + "and the 3D cube. This page now exposes the live "
+                        + "presence path so that the next decoder slice has a "
+                        + "real macOS telemetry row to attach to."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var imuReadings: [TimeCardSensorReading] {
+        telemetry.readings.filter {
+            $0.isIMU || $0.kind == .bno08x || $0.kind == .bno055
+        }
+    }
+
+    private func imuState(_ reading: TimeCardSensorReading) -> String {
+        if reading.isValid { return "Live" }
+        if reading.isPresent { return "Partial" }
+        return "Unavailable"
+    }
+
+    private func imuDetail(_ reading: TimeCardSensorReading) -> String {
+        if reading.isValid {
+            return "\(SensorUIFormatting.route(reading)) responded with a valid identity."
+        }
+        if reading.isPresent {
+            return "\(SensorUIFormatting.route(reading)) ACKed. Decoder bring-up is next."
+        }
+        return "\(SensorUIFormatting.route(reading)) did not ACK on this sample."
+    }
+}
+
+private struct SensorStatusBadge: Identifiable {
+    let label: String
+    let color: Color
+    var id: String { label }
+}
+
+private enum SensorUIFormatting {
+    static func route(_ reading: TimeCardSensorReading) -> String {
+        String(
+            format: "mux 0x%02x addr 0x%02x",
+            reading.muxChannelMask,
+            reading.address
+        )
+    }
+
+    static func otp(_ values: [Int32]) -> String {
+        guard values.count >= 4, values.contains(where: { $0 != 0 }) else {
+            return "Unavailable"
+        }
+        return values.prefix(4)
+            .map { String($0) }
+            .joined(separator: ", ")
+    }
+
+    static func rawSummary(_ reading: TimeCardSensorReading) -> String {
+        [
+            String(format: "flags 0x%08x", reading.flags),
+            String(format: "raw0 0x%08x", reading.raw0),
+            String(format: "raw1 0x%08x", reading.raw1),
+            String(format: "raw2 0x%08x", reading.raw2),
+        ].joined(separator: "  ")
+    }
+
+    static func badges(_ reading: TimeCardSensorReading) -> [SensorStatusBadge] {
+        var badges: [SensorStatusBadge] = [
+            SensorStatusBadge(
+                label: reading.isPresent ? "Present" : "No ACK",
+                color: reading.isPresent ? .green : .secondary
+            ),
+            SensorStatusBadge(
+                label: reading.isValid ? "Valid" : "No decoded sample",
+                color: reading.isValid ? .green : .orange
+            ),
+        ]
+        if reading.isConfigured {
+            badges.append(SensorStatusBadge(label: "Configured", color: .blue))
+        }
+        if reading.hasValidCRC {
+            badges.append(SensorStatusBadge(label: "CRC OK", color: .cyan))
+        }
+        if reading.isCalibrated {
+            badges.append(SensorStatusBadge(label: "Calibrated", color: .mint))
+        }
+        if reading.isIMU {
+            badges.append(SensorStatusBadge(label: "IMU", color: .pink))
+        }
+        if reading.isOverflowed {
+            badges.append(SensorStatusBadge(label: "Overflow", color: .red))
+        }
+        return badges
     }
 }
 
@@ -932,8 +1456,8 @@ private struct TelemetryStudioView: View {
                     )
                     FeatureRow(
                         name: "GNSS, temperature, vibration charts",
-                        state: "Backend pending",
-                        note: "Requires GNSS, sensor, and IMU ABI expansion."
+                        state: monitor.sensorHistory.isEmpty ? "Partial" : "Live",
+                        note: "Temperature chart is live; GNSS and vibration need stream decoders."
                     )
                     FeatureRow(
                         name: "CSV and JSON export",
@@ -1010,7 +1534,7 @@ private struct OperationsView: View {
         guard let snapshot = monitor.snapshot else {
             return "Time Card diagnostics: no snapshot available. State: \(monitor.state)"
         }
-        return [
+        var lines = [
             "Time Card macOS diagnostics",
             "Board: \(snapshot.boardName)",
             "PCI: \(snapshot.pciIdentity) revision \(String(format: "0x%02x", snapshot.pciRevision & 0xff))",
@@ -1023,7 +1547,21 @@ private struct OperationsView: View {
             "Clock source: \(TimeCardFormatting.clockSource(snapshot))",
             "Sampling window: \(TimeCardFormatting.duration(snapshot.sampleWindowNanoseconds))",
             "Last update: \(TimeCardFormatting.date(monitor.lastUpdated))",
-        ].joined(separator: "\n")
+        ]
+        if let sensors = monitor.sensorTelemetry {
+            lines.append("Sensor blocks: \(sensors.validReadings.count)/\(sensors.readings.count) valid")
+            lines.append(
+                "Sensor capabilities: " +
+                    (sensors.capabilityNames.isEmpty
+                        ? "None"
+                        : sensors.capabilityNames.joined(separator: ", "))
+            )
+            if let pressure = sensors.pressurePascals {
+                lines.append("ICP-10100 pressure: \(TimeCardFormatting.hPa(pressure))")
+            }
+            lines.append("ICP-10100 OTP: \(SensorUIFormatting.otp(sensors.icp10100Otp))")
+        }
+        return lines.joined(separator: "\n")
     }
 }
 
@@ -1054,9 +1592,24 @@ private struct SubsystemMapView: View {
                             "Version and status when fitted"
                         )
                         SubsystemCard("GNSS", "Gated", "Needs UART/UBX ABI")
-                        SubsystemCard("SMA", "Gated", "Needs route ABI")
-                        SubsystemCard("I2C", "Gated", "Needs transaction ABI")
-                        SubsystemCard("Sensors", "Gated", "Needs sensor ABI")
+                        SubsystemCard(
+                            "SMA",
+                            monitor.snapshot?.capabilityNames.contains("SMA") == true
+                                ? "Live" : "Gated",
+                            "Route query and guarded route updates"
+                        )
+                        SubsystemCard(
+                            "I2C",
+                            monitor.snapshot?.capabilityNames.contains("I2C") == true
+                                ? "Live" : "Gated",
+                            "Controller status, scan, reads, mux, and LED policy"
+                        )
+                        SubsystemCard(
+                            "Sensors",
+                            monitor.snapshot?.capabilityNames.contains("Sensors") == true
+                                ? "Live" : "Gated",
+                            "Environmental telemetry with IMU expansion next"
+                        )
                         SubsystemCard("FPGA flash", "Gated", "Needs flash ABI")
                     }
                 }
@@ -1510,7 +2063,7 @@ private struct FeatureRow: View {
         switch state.lowercased() {
         case "live", "pass":
             "checkmark.circle.fill"
-        case "waiting", "check":
+        case "waiting", "check", "partial":
             "clock.badge.questionmark"
         case "gated", "unavailable":
             "lock.circle"
@@ -1523,7 +2076,7 @@ private struct FeatureRow: View {
         switch state.lowercased() {
         case "live", "pass":
             .green
-        case "waiting", "check":
+        case "waiting", "check", "partial":
             .orange
         case "gated", "unavailable":
             .secondary
@@ -1848,5 +2401,23 @@ private enum TimeCardFormatting {
         formatter.countStyle = .memory
         let byteCount = value > UInt64(Int64.max) ? Int64.max : Int64(value)
         return "\(formatter.string(fromByteCount: byteCount)) (\(hex(value)))"
+    }
+
+    static func temperature(_ value: Double?) -> String {
+        guard let value else { return "Unavailable" }
+        return String(format: "%.1f °C", value)
+    }
+
+    static func humidity(_ value: Double?) -> String {
+        guard let value else { return "Unavailable" }
+        return String(format: "%.1f %%RH", value)
+    }
+
+    static func hPa(_ pressurePascals: Double) -> String {
+        String(format: "%.3f hPa", pressurePascals / 100.0)
+    }
+
+    static func raw24(_ value: UInt32) -> String {
+        String(format: "0x%06x", value & 0x00ff_ffff)
     }
 }

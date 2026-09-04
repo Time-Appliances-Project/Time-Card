@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define TIMECARD_ABI_VERSION 6u
+#define TIMECARD_ABI_VERSION 7u
 #define TIMECARD_DRIVER_VERSION 0x00000002u
 #define TIMECARD_SERVICE_CLASS "TimeCardDriver"
 #define TIMECARD_DRIVER_BUNDLE_ID "org.opentimeserver.timecard.macos.driver"
@@ -286,7 +286,9 @@ enum TimeCardSensorFlag {
     kTimeCardSensorFlagHumidity = 1u << 6,
     kTimeCardSensorFlagTemperature = 1u << 7,
     kTimeCardSensorFlagCRCValid = 1u << 9,
-    kTimeCardSensorFlagPressure = 1u << 10
+    kTimeCardSensorFlagPressure = 1u << 10,
+    kTimeCardSensorFlagCalibrated = 1u << 11,
+    kTimeCardSensorFlagIMU = 1u << 12
 };
 
 enum TimeCardSensorCapability {
@@ -324,7 +326,8 @@ typedef struct TimeCardSensorTelemetry {
     uint32_t controllerStatus;
     uint32_t interruptStatus;
     uint32_t readingCount;
-    uint32_t reserved[7];
+    int32_t icp10100Otp[4];
+    uint32_t reserved[3];
     TimeCardSensorReading readings[TIMECARD_SENSOR_MAX_READINGS];
 } TimeCardSensorTelemetry;
 

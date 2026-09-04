@@ -17,11 +17,20 @@ struct SamplingWindowPoint: Identifiable, Equatable, Sendable {
     let nanoseconds: Double
 }
 
+struct SensorHistoryPoint: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let timestamp: Date
+    let series: String
+    let value: Double
+}
+
 private enum TimeCardRefreshOutcome: Sendable {
     case success(
         services: [TimeCardServiceDescriptor],
         selected: TimeCardServiceDescriptor,
-        snapshot: TimeCardDeviceSnapshot
+        snapshot: TimeCardDeviceSnapshot,
+        sensors: TimeCardSensorSnapshot?,
+        sensorError: String?
     )
     case failure(
         services: [TimeCardServiceDescriptor],
@@ -45,6 +54,9 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var commandMessage = ""
     @Published private(set) var smaRoutes: [TimeCardSMARoute] = []
     @Published private(set) var smaMessage = ""
+    @Published private(set) var sensorTelemetry: TimeCardSensorSnapshot?
+    @Published private(set) var sensorMessage = ""
+    @Published private(set) var sensorHistory: [SensorHistoryPoint] = []
 
     private var refreshTimer: Timer?
     private var nextAutomaticAttempt = Date.distantPast
@@ -74,6 +86,8 @@ final class TimeCardMonitor: ObservableObject {
         snapshot = nil
         samplingWindowHistory.removeAll(keepingCapacity: true)
         smaRoutes.removeAll(keepingCapacity: true)
+        sensorTelemetry = nil
+        sensorHistory.removeAll(keepingCapacity: true)
         refresh()
     }
 
@@ -243,10 +257,23 @@ final class TimeCardMonitor: ObservableObject {
                         let snapshot = try TimeCardClient.readSnapshot(
                             for: descriptor
                         )
+                        var sensors: TimeCardSensorSnapshot?
+                        var sensorError: String?
+                        if snapshot.capabilityNames.contains("Sensors") {
+                            do {
+                                sensors = try TimeCardClient.querySensors(
+                                    for: descriptor
+                                )
+                            } catch {
+                                sensorError = error.localizedDescription
+                            }
+                        }
                         return .success(
                             services: discovered,
                             selected: descriptor,
-                            snapshot: snapshot
+                            snapshot: snapshot,
+                            sensors: sensors,
+                            sensorError: sensorError
                         )
                     } catch let error as TimeCardClientError {
                         return .failure(
@@ -286,7 +313,10 @@ final class TimeCardMonitor: ObservableObject {
 
     private func apply(_ outcome: TimeCardRefreshOutcome) {
         switch outcome {
-        case .success(let discovered, let selected, let current):
+        case .success(
+            let discovered, let selected, let current, let sensors,
+            let sensorError
+        ):
             services = discovered
             updateSelectedService(selected)
             snapshot = current
@@ -295,6 +325,20 @@ final class TimeCardMonitor: ObservableObject {
             recoverySuggestion = ""
             lastUpdated = Date()
             appendSamplingWindow(current.sampleWindowNanoseconds)
+            sensorTelemetry = sensors
+            if let sensors {
+                sensorMessage = sensors.validReadings.isEmpty
+                    ? "Sensor branch responded, but no valid samples were returned."
+                    : "\(sensors.validReadings.count) live sensor block(s)."
+                appendSensorHistory(sensors)
+            } else if let sensorError {
+                sensorMessage = "Sensor refresh failed: \(sensorError)"
+            } else if current.capabilityNames.contains("Sensors") {
+                sensorMessage = "Sensor branch is advertised but has not sampled yet."
+            } else {
+                sensorMessage = "Sensor branch is not advertised by this profile."
+                sensorHistory.removeAll(keepingCapacity: true)
+            }
             if current.capabilityNames.contains("SMA") && smaRoutes.isEmpty {
                 refreshSMA()
             }
@@ -304,6 +348,7 @@ final class TimeCardMonitor: ObservableObject {
             services = discovered
             updateSelectedService(selected)
             snapshot = nil
+            sensorTelemetry = nil
             errorMessage = error.localizedDescription
             recoverySuggestion = error.recoverySuggestion ?? ""
             switch error {
@@ -322,6 +367,7 @@ final class TimeCardMonitor: ObservableObject {
 
         case .unexpected(let message):
             snapshot = nil
+            sensorTelemetry = nil
             state = .failed
             errorMessage = message
             recoverySuggestion = ""
@@ -336,6 +382,7 @@ final class TimeCardMonitor: ObservableObject {
         if selectedServiceID != newServiceID {
             selectedServiceID = newServiceID
             samplingWindowHistory.removeAll(keepingCapacity: true)
+            sensorHistory.removeAll(keepingCapacity: true)
         }
     }
 
@@ -357,6 +404,29 @@ final class TimeCardMonitor: ObservableObject {
         if samplingWindowHistory.count > historyCapacity {
             samplingWindowHistory.removeFirst(
                 samplingWindowHistory.count - historyCapacity
+            )
+        }
+    }
+
+    private func appendSensorHistory(_ telemetry: TimeCardSensorSnapshot) {
+        let timestamp = Date()
+        for reading in telemetry.readings where reading.isValid {
+            guard let temperature = reading.temperatureCelsius else {
+                continue
+            }
+            let series = "\(reading.kind.label) 0x" +
+                String(format: "%02x", reading.address)
+            sensorHistory.append(
+                SensorHistoryPoint(
+                    timestamp: timestamp,
+                    series: series,
+                    value: temperature
+                )
+            )
+        }
+        if sensorHistory.count > historyCapacity * 5 {
+            sensorHistory.removeFirst(
+                sensorHistory.count - historyCapacity * 5
             )
         }
     }

@@ -198,6 +198,166 @@ enum TimeCardSMACatalog {
     }
 }
 
+enum TimeCardSensorKind: UInt32, Sendable {
+    case unknown = 0
+    case lm75b = 1
+    case sht3x = 2
+    case icp10100 = 3
+    case bme280 = 4
+    case ina219 = 5
+    case bno08x = 6
+    case bno055 = 7
+
+    var label: String {
+        switch self {
+        case .unknown: "Unknown"
+        case .lm75b: "LM75B"
+        case .sht3x: "SHT3x"
+        case .icp10100: "ICP-10100"
+        case .bme280: "BME280/BMP280"
+        case .ina219: "INA219"
+        case .bno08x: "BNO08x"
+        case .bno055: "BNO055"
+        }
+    }
+}
+
+struct TimeCardSensorReading: Identifiable, Equatable, Sendable {
+    let kind: TimeCardSensorKind
+    let flags: UInt32
+    let muxChannelMask: UInt32
+    let address: UInt32
+    let temperatureMilliCelsius: Int32
+    let humidityMilliPercent: UInt32
+    let pressureRaw: UInt32
+    let raw0: UInt32
+    let raw1: UInt32
+    let raw2: UInt32
+
+    var id: String {
+        "\(kind.rawValue)-\(muxChannelMask)-\(address)"
+    }
+
+    var isPresent: Bool { hasFlag(1 << 0) }
+    var isValid: Bool { hasFlag(1 << 1) }
+    var isConfigured: Bool { hasFlag(1 << 2) }
+    var isConversionReady: Bool { hasFlag(1 << 3) }
+    var isOverflowed: Bool { hasFlag(1 << 4) }
+    var hasHumidity: Bool { hasFlag(1 << 6) }
+    var hasTemperature: Bool { hasFlag(1 << 7) }
+    var hasValidCRC: Bool { hasFlag(1 << 9) }
+    var hasPressure: Bool { hasFlag(1 << 10) }
+    var isCalibrated: Bool { hasFlag(1 << 11) }
+    var isIMU: Bool { hasFlag(1 << 12) }
+
+    var temperatureCelsius: Double? {
+        hasTemperature ? Double(temperatureMilliCelsius) / 1000.0 : nil
+    }
+
+    var humidityPercent: Double? {
+        hasHumidity ? Double(humidityMilliPercent) / 1000.0 : nil
+    }
+
+    var productID: UInt32? {
+        kind == .icp10100 ? raw2 : nil
+    }
+
+    func compensatedPressurePascals(calibration: [Int32]) -> Double? {
+        guard kind == .icp10100, isValid, isCalibrated,
+              hasPressure, calibration.count >= 4 else {
+            return nil
+        }
+
+        let t = Double(raw1) - 32768.0
+        let quadratic = t * t / 16777216.0
+        let s1 = 3.5 * 1048576.0 + Double(calibration[0]) * quadratic
+        let s2 = 2048.0 * Double(calibration[3]) +
+            Double(calibration[1]) * quadratic
+        let s3 = 11.5 * 1048576.0 + Double(calibration[2]) * quadratic
+        let denominator = s3 * (45000.0 - 80000.0) +
+            s1 * (80000.0 - 105000.0) + s2 * (105000.0 - 45000.0)
+        guard abs(denominator) >= 0.000001,
+              abs(s1 - s2) >= 0.000001 else {
+            return nil
+        }
+
+        let c = (
+            s1 * s2 * (45000.0 - 80000.0) +
+            s2 * s3 * (80000.0 - 105000.0) +
+            s3 * s1 * (105000.0 - 45000.0)
+        ) / denominator
+        let a = (
+            45000.0 * s1 - 80000.0 * s2 - 35000.0 * c
+        ) / (s1 - s2)
+        let b = (45000.0 - a) * (s1 + c)
+        let pressure = a + b / (c + Double(pressureRaw))
+        return pressure.isFinite && pressure >= 10000.0 && pressure <= 130000.0
+            ? pressure : nil
+    }
+
+    private func hasFlag(_ flag: UInt32) -> Bool {
+        (flags & flag) != 0
+    }
+}
+
+struct TimeCardSensorSnapshot: Equatable, Sendable {
+    let flags: UInt32
+    let boardProfile: UInt32
+    let capabilities: UInt32
+    let muxChannelMask: UInt32
+    let restoredMuxChannelMask: UInt32
+    let controllerStatus: UInt32
+    let interruptStatus: UInt32
+    let icp10100Otp: [Int32]
+    let readings: [TimeCardSensorReading]
+
+    var isPresent: Bool { hasFlag(1 << 0) }
+    var isValid: Bool { hasFlag(1 << 1) }
+    var muxWasRestored: Bool { muxChannelMask == restoredMuxChannelMask }
+    var validReadings: [TimeCardSensorReading] {
+        readings.filter(\.isValid)
+    }
+    var boardTemperatures: [TimeCardSensorReading] {
+        readings.filter { $0.kind == .lm75b }
+    }
+    var humidityReading: TimeCardSensorReading? {
+        readings.first { $0.kind == .sht3x }
+    }
+    var pressureReading: TimeCardSensorReading? {
+        readings.first { $0.kind == .icp10100 }
+    }
+    var pressurePascals: Double? {
+        pressureReading?.compensatedPressurePascals(calibration: icp10100Otp)
+    }
+    var dewPointCelsius: Double? {
+        guard let reading = humidityReading,
+              let temperature = reading.temperatureCelsius,
+              let humidity = reading.humidityPercent,
+              humidity > 0.0 else {
+            return nil
+        }
+        let gamma = log(humidity / 100.0) +
+            17.62 * temperature / (243.12 + temperature)
+        return 243.12 * gamma / (17.62 - gamma)
+    }
+
+    var capabilityNames: [String] {
+        var names: [String] = []
+        if (capabilities & (1 << 0)) != 0 { names.append("BME280/BMP280") }
+        if (capabilities & (1 << 1)) != 0 { names.append("INA219") }
+        if (capabilities & (1 << 2)) != 0 { names.append("BNO055") }
+        if (capabilities & (1 << 3)) != 0 { names.append("BNO08x") }
+        if (capabilities & (1 << 4)) != 0 { names.append("LM75B") }
+        if (capabilities & (1 << 5)) != 0 { names.append("SHT3x") }
+        if (capabilities & (1 << 6)) != 0 { names.append("ICP-10100") }
+        return names
+    }
+
+    private func hasFlag(_ flag: UInt32) -> Bool {
+        (flags & flag) != 0
+    }
+}
+
 enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
     case matchingDictionary
     case discoveryFailed(Int32)
@@ -262,7 +422,7 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
 enum TimeCardClient {
     private static let serviceClass = "IOUserService"
     private static let userClassValue = "TimeCardDriver"
-    private static let supportedABIVersion: UInt32 = 6
+    private static let supportedABIVersion: UInt32 = 7
 
     static var localABILayoutIsValid: Bool {
         MemoryLayout<TimeCardTimeRaw>.size == 16
@@ -312,6 +472,32 @@ enum TimeCardClient {
             && MemoryLayout<TimeCardSMARaw>.offset(of: \.inputMap) == 20
             && MemoryLayout<TimeCardSMARaw>.offset(of: \.outputMap) == 24
             && MemoryLayout<TimeCardSMARaw>.offset(of: \.reserved) == 28
+            && MemoryLayout<TimeCardSensorReadingRaw>.size == 48
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.size) == 0
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.type) == 4
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.flags) == 8
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.muxChannelMask) == 12
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.address) == 16
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.temperatureMilliCelsius) == 20
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.humidityMilliPercent) == 24
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.pressureRaw) == 28
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.raw0) == 32
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.raw1) == 36
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.raw2) == 40
+            && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.reserved) == 44
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.size == 832
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.size) == 0
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.flags) == 4
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.boardProfile) == 8
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.capabilities) == 12
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.muxChannelMask) == 16
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.restoredMuxChannelMask) == 20
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.controllerStatus) == 24
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.interruptStatus) == 28
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.readingCount) == 32
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.icp10100Otp0) == 36
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.reserved0) == 52
+            && MemoryLayout<TimeCardSensorTelemetryRaw>.offset(of: \.reading0) == 64
     }
 
     static func discoverServices() throws -> [TimeCardServiceDescriptor] {
@@ -494,6 +680,18 @@ enum TimeCardClient {
         return raw.route
     }
 
+    static func querySensors(
+        for descriptor: TimeCardServiceDescriptor
+    ) throws -> TimeCardSensorSnapshot {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var raw = TimeCardSensorTelemetryRaw()
+        raw.size = UInt32(MemoryLayout<TimeCardSensorTelemetryRaw>.size)
+        try callOutput(connection: connection, selector: 13, output: &raw)
+        return raw.snapshot
+    }
+
     private static func openConnection(
         for descriptor: TimeCardServiceDescriptor
     ) throws -> io_connect_t {
@@ -658,6 +856,94 @@ private struct TimeCardSMARaw {
             flags: flags,
             inputMap: inputMap,
             outputMap: outputMap
+        )
+    }
+}
+
+private struct TimeCardSensorReadingRaw {
+    var size: UInt32 = 0
+    var type: UInt32 = 0
+    var flags: UInt32 = 0
+    var muxChannelMask: UInt32 = 0
+    var address: UInt32 = 0
+    var temperatureMilliCelsius: Int32 = 0
+    var humidityMilliPercent: UInt32 = 0
+    var pressureRaw: UInt32 = 0
+    var raw0: UInt32 = 0
+    var raw1: UInt32 = 0
+    var raw2: UInt32 = 0
+    var reserved: UInt32 = 0
+
+    var reading: TimeCardSensorReading {
+        TimeCardSensorReading(
+            kind: TimeCardSensorKind(rawValue: type) ?? .unknown,
+            flags: flags,
+            muxChannelMask: muxChannelMask,
+            address: address,
+            temperatureMilliCelsius: temperatureMilliCelsius,
+            humidityMilliPercent: humidityMilliPercent,
+            pressureRaw: pressureRaw,
+            raw0: raw0,
+            raw1: raw1,
+            raw2: raw2
+        )
+    }
+}
+
+private struct TimeCardSensorTelemetryRaw {
+    var size: UInt32 = 0
+    var flags: UInt32 = 0
+    var boardProfile: UInt32 = 0
+    var capabilities: UInt32 = 0
+    var muxChannelMask: UInt32 = 0
+    var restoredMuxChannelMask: UInt32 = 0
+    var controllerStatus: UInt32 = 0
+    var interruptStatus: UInt32 = 0
+    var readingCount: UInt32 = 0
+    var icp10100Otp0: Int32 = 0
+    var icp10100Otp1: Int32 = 0
+    var icp10100Otp2: Int32 = 0
+    var icp10100Otp3: Int32 = 0
+    var reserved0: UInt32 = 0
+    var reserved1: UInt32 = 0
+    var reserved2: UInt32 = 0
+    var reading0 = TimeCardSensorReadingRaw()
+    var reading1 = TimeCardSensorReadingRaw()
+    var reading2 = TimeCardSensorReadingRaw()
+    var reading3 = TimeCardSensorReadingRaw()
+    var reading4 = TimeCardSensorReadingRaw()
+    var reading5 = TimeCardSensorReadingRaw()
+    var reading6 = TimeCardSensorReadingRaw()
+    var reading7 = TimeCardSensorReadingRaw()
+    var reading8 = TimeCardSensorReadingRaw()
+    var reading9 = TimeCardSensorReadingRaw()
+    var reading10 = TimeCardSensorReadingRaw()
+    var reading11 = TimeCardSensorReadingRaw()
+    var reading12 = TimeCardSensorReadingRaw()
+    var reading13 = TimeCardSensorReadingRaw()
+    var reading14 = TimeCardSensorReadingRaw()
+    var reading15 = TimeCardSensorReadingRaw()
+
+    var snapshot: TimeCardSensorSnapshot {
+        let rawReadings = [
+            reading0, reading1, reading2, reading3,
+            reading4, reading5, reading6, reading7,
+            reading8, reading9, reading10, reading11,
+            reading12, reading13, reading14, reading15,
+        ]
+        let cappedCount = min(Int(readingCount), rawReadings.count)
+        return TimeCardSensorSnapshot(
+            flags: flags,
+            boardProfile: boardProfile,
+            capabilities: capabilities,
+            muxChannelMask: muxChannelMask,
+            restoredMuxChannelMask: restoredMuxChannelMask,
+            controllerStatus: controllerStatus,
+            interruptStatus: interruptStatus,
+            icp10100Otp: [
+                icp10100Otp0, icp10100Otp1, icp10100Otp2, icp10100Otp3,
+            ],
+            readings: rawReadings.prefix(cappedCount).map(\.reading)
         )
     }
 }

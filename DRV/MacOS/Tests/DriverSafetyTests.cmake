@@ -85,6 +85,8 @@ foreach(required_cli_sma IN ITEMS
         "command_i2c_read("
         "command_i2c_mux("
         "command_sensors("
+        "icp10100_pressure_pascals("
+        "print_sensor_capabilities("
         "\"sma\""
         "\"sma-set\""
         "\"led\""
@@ -131,7 +133,10 @@ foreach(required_control_center_sma IN ITEMS
         "setSMARoute"
         "TimeCardSMARoute"
         "selector: 4"
-        "selector: 5")
+        "selector: 5"
+        "querySensors"
+        "TimeCardSensorSnapshot"
+        "selector: 13")
     string(FIND "${control_center}" "${required_control_center_sma}" control_sma_offset)
     if(control_sma_offset EQUAL -1)
         message(FATAL_ERROR
