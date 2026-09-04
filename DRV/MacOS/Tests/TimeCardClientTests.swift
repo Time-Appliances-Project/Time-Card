@@ -7,7 +7,7 @@ enum TimeCardClientTests {
     static func main() {
         precondition(
             TimeCardClient.localABILayoutIsValid,
-            "Swift structures must preserve the DriverKit ABI v7 layout"
+            "Swift structures must preserve the DriverKit ABI v8 layout"
         )
 
         let utcStatus: UInt32 = (1 << 8) | (1 << 16) | 18
@@ -15,7 +15,7 @@ enum TimeCardClientTests {
         let satellites: UInt32 = (1 << 16) | (12 << 8) | 15
         let snapshot = TimeCardDeviceSnapshot(
             service: TimeCardServiceDescriptor(id: 0x1234),
-            abiVersion: 7,
+            abiVersion: 8,
             driverVersion: 2,
             vendorID: 0x1d9b,
             deviceID: 0x0400,
@@ -26,7 +26,7 @@ enum TimeCardClientTests {
             barSize: 0x0200_0000,
             clockOffset: 0x0100_0000,
             todOffset: 0x0105_0000,
-            capabilities: 0xf,
+            capabilities: 0x10f,
             validFields: 0x1ff,
             clockVersion: 0x0102_0000,
             clockStatus: 1,
@@ -65,7 +65,9 @@ enum TimeCardClientTests {
         precondition(snapshot.satelliteDataValid == true)
         precondition(snapshot.capabilityNames == [
             "Clock read", "Clock set", "Cross timestamp", "ToD",
+            "UART",
         ])
+        precondition(snapshot.supportsUART)
 
         let i2c = TimeCardI2CStatusSnapshot(
             flags: (1 << 0) | (1 << 1) | (1 << 3) | (1 << 4),
@@ -105,6 +107,28 @@ enum TimeCardClientTests {
         precondition(transfer.dataHex == "12 34 41 00")
         precondition(transfer.asciiText == ".4A.")
         precondition(transfer.hexDumpLines == ["0000: 12 34 41 00"])
+
+        let uartObservation = TimeCardUARTObservation(
+            port: .gnss,
+            timeoutMilliseconds: 100,
+            flags: 3,
+            lineStatus: 1
+        )
+        precondition(uartObservation.isPresent)
+        precondition(uartObservation.hasActivity)
+        precondition(uartObservation.lineStatusText == "0x01")
+        precondition(uartObservation.summary == "GNSS: activity, LSR 0x01")
+
+        let uartRead = TimeCardUARTReadResult(
+            port: .nmea,
+            timeoutMilliseconds: 100,
+            lineStatus: 1,
+            data: Array("$GPGGA*00\r\n".utf8)
+        )
+        precondition(uartRead.port.label == "NMEA")
+        precondition(uartRead.byteCount == 11)
+        precondition(uartRead.lineStatusText == "0x01")
+        precondition(uartRead.dataHex.hasPrefix("24 47 50"))
 
         let mux = TimeCardI2CMuxSnapshot(
             isPresent: true,

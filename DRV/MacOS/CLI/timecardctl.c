@@ -14,6 +14,9 @@
 #include "TimeCardABI.h"
 #include "TimeCardRegisters.h"
 
+#define TIMECARD_MIN_COMPATIBLE_ABI_VERSION 7u
+#define TIMECARD_UART_ABI_VERSION 8u
+
 static void
 print_usage(FILE *stream)
 {
@@ -34,7 +37,10 @@ print_usage(FILE *stream)
             "       timecardctl i2c-read address [subaddress [length "
             "[subaddress-length]]]\n"
             "       timecardctl i2c-mux [channel-mask]\n"
-            "       timecardctl sensors\n");
+            "       timecardctl sensors\n"
+            "       timecardctl uart-observe port [timeout-ms]\n"
+            "       timecardctl uart-config port baud\n"
+            "       timecardctl uart-read port [max-bytes [timeout-ms]]\n");
 }
 
 static io_connect_t
@@ -159,6 +165,44 @@ call_inout_result(io_connect_t connection, uint32_t selector, void *input,
     return result;
 }
 
+static int
+report_unsupported_abi(uint32_t abiVersion, uint32_t minimumVersion,
+                       const char *feature)
+{
+    if (abiVersion < minimumVersion) {
+        fprintf(stderr,
+                "timecardctl: %s requires driver ABI %u or newer; active "
+                "ABI is %u\n",
+                feature, minimumVersion, abiVersion);
+    } else {
+        fprintf(stderr,
+                "timecardctl: unsupported driver ABI %u; this build "
+                "supports ABI %u through %u\n",
+                abiVersion, minimumVersion, TIMECARD_ABI_VERSION);
+    }
+    return 1;
+}
+
+static bool
+driver_abi_supported(uint32_t abiVersion, uint32_t minimumVersion)
+{
+    return abiVersion >= minimumVersion &&
+        abiVersion <= TIMECARD_ABI_VERSION;
+}
+
+static int
+require_driver_abi(io_connect_t connection, uint32_t minimumVersion,
+                   const char *feature)
+{
+    TimeCardInfo info = {0};
+    if (call_output(connection, kTimeCardMethodGetInfo, &info, sizeof(info)))
+        return 1;
+    if (!driver_abi_supported(info.abiVersion, minimumVersion))
+        return report_unsupported_abi(
+            info.abiVersion, minimumVersion, feature);
+    return 0;
+}
+
 static void
 print_card_time(const TimeCardTime *cardTime)
 {
@@ -201,11 +245,10 @@ command_status(io_connect_t connection)
 
     if (call_output(connection, kTimeCardMethodGetInfo, &info, sizeof(info)))
         return 1;
-    if (info.abiVersion != TIMECARD_ABI_VERSION) {
-        fprintf(stderr, "timecardctl: unsupported driver ABI %u\n",
-                info.abiVersion);
-        return 1;
-    }
+    if (!driver_abi_supported(
+            info.abiVersion, TIMECARD_MIN_COMPATIBLE_ABI_VERSION))
+        return report_unsupported_abi(
+            info.abiVersion, TIMECARD_MIN_COMPATIBLE_ABI_VERSION, "status");
 
     printf("PCI device:       %04x:%04x\n", info.vendorID, info.deviceID);
     printf("PCI revision:     %02x\n", info.pciRevision & 0xffu);
@@ -222,7 +265,7 @@ command_status(io_connect_t connection)
     }
     printf("Register layout:  %s\n",
            TimeCardRegisterLayoutName(info.layout));
-    printf("Capabilities:     %s%s%s%s%s%s%s%s\n",
+    printf("Capabilities:     %s%s%s%s%s%s%s%s%s\n",
            (info.capabilities & kTimeCardCapabilityReadClock) != 0 ?
                "clock-read" : "no-clock-read",
            (info.capabilities & kTimeCardCapabilitySetClock) != 0 ?
@@ -238,7 +281,9 @@ command_status(io_connect_t connection)
            (info.capabilities & kTimeCardCapabilityI2C) != 0 ?
                ", I2C" : "",
            (info.capabilities & kTimeCardCapabilitySensors) != 0 ?
-               ", sensors" : "");
+               ", sensors" : "",
+           (info.capabilities & kTimeCardCapabilityUART) != 0 ?
+               ", UART" : "");
     printf("Clock offset:     0x%" PRIx64 "\n", info.clockOffset);
     if ((info.validFields & kTimeCardInfoValidClockVersion) != 0)
         printf("Clock version:    0x%08x\n", info.clockVersion);
@@ -343,6 +388,143 @@ parse_ulong(const char *text, const char *name)
         exit(2);
     }
     return value;
+}
+
+static const char *
+uart_port_name(uint32_t port)
+{
+    switch (port) {
+    case TIMECARD_UART_GNSS:
+        return "GNSS";
+    case TIMECARD_UART_GNSS2:
+        return "GNSS2";
+    case TIMECARD_UART_MAC:
+        return "MAC/atomic";
+    case TIMECARD_UART_NMEA:
+        return "NMEA";
+    default:
+        return "unknown";
+    }
+}
+
+static uint32_t
+parse_uart_port(const char *text)
+{
+    unsigned long port = parse_ulong(text, "UART port");
+    if (port >= TIMECARD_UART_COUNT) {
+        fprintf(stderr, "timecardctl: UART port must be 0 through %u\n",
+                TIMECARD_UART_COUNT - 1u);
+        exit(2);
+    }
+    return (uint32_t)port;
+}
+
+static void
+print_uart_observation(const TimeCardUARTObserve *observe)
+{
+    printf("UART %u (%s):    %s, %s, LSR 0x%02x, timeout %u ms\n",
+           observe->port, uart_port_name(observe->port),
+           (observe->flags & kTimeCardUARTObserveFlagPresent) != 0 ?
+               "present" : "not-present",
+           (observe->flags & kTimeCardUARTObserveFlagActivity) != 0 ?
+               "activity" : "idle",
+           observe->lineStatus & 0xffu, observe->timeoutMilliseconds);
+}
+
+static int
+command_uart_observe(io_connect_t connection, int argc, char **argv)
+{
+    if (argc < 3 || argc > 4)
+        return 2;
+    if (require_driver_abi(connection, TIMECARD_UART_ABI_VERSION,
+                           "UART access"))
+        return 1;
+    TimeCardUARTObserve observe = {
+        .size = sizeof(observe),
+        .port = parse_uart_port(argv[2]),
+        .timeoutMilliseconds = argc == 4 ?
+            (uint32_t)parse_ulong(argv[3], "UART timeout") : 100u,
+    };
+    if (call_inout(connection, kTimeCardMethodUARTObserve,
+                   &observe, sizeof(observe), &observe, sizeof(observe)))
+        return 1;
+    print_uart_observation(&observe);
+    return 0;
+}
+
+static int
+command_uart_config(io_connect_t connection, int argc, char **argv)
+{
+    if (argc != 4)
+        return 2;
+    if (require_driver_abi(connection, TIMECARD_UART_ABI_VERSION,
+                           "UART access"))
+        return 1;
+    TimeCardUARTConfig config = {
+        .port = parse_uart_port(argv[2]),
+        .baud = (uint32_t)parse_ulong(argv[3], "UART baud"),
+    };
+    kern_return_t result = IOConnectCallStructMethod(
+        connection, kTimeCardMethodUARTConfigure,
+        &config, sizeof(config), NULL, NULL);
+    if (result != KERN_SUCCESS) {
+        fprintf(stderr, "timecardctl: UART configure failed: 0x%08x\n",
+                result);
+        return 1;
+    }
+    printf("UART %u (%s):    configured for %u baud, 8N1\n",
+           config.port, uart_port_name(config.port), config.baud);
+    return 0;
+}
+
+static void
+print_uart_transfer(const TimeCardUARTTransfer *transfer)
+{
+    printf("UART %u (%s):    read %u byte%s, LSR 0x%02x, timeout %u ms\n",
+           transfer->port, uart_port_name(transfer->port), transfer->length,
+           transfer->length == 1 ? "" : "s",
+           transfer->lineStatus & 0xffu, transfer->timeoutMilliseconds);
+    for (uint32_t i = 0; i < transfer->length; i += 16u) {
+        const uint32_t lineLength =
+            transfer->length - i > 16u ? 16u : transfer->length - i;
+        printf("%04x:", i);
+        for (uint32_t j = 0; j < lineLength; ++j)
+            printf(" %02x", transfer->data[i + j]);
+        for (uint32_t j = lineLength; j < 16u; ++j)
+            printf("   ");
+        printf("  ");
+        for (uint32_t j = 0; j < lineLength; ++j) {
+            const uint8_t byte = transfer->data[i + j];
+            putchar(byte >= 0x20u && byte <= 0x7eu ? byte : '.');
+        }
+        putchar('\n');
+    }
+}
+
+static int
+command_uart_read(io_connect_t connection, int argc, char **argv)
+{
+    if (argc < 3 || argc > 5)
+        return 2;
+    if (require_driver_abi(connection, TIMECARD_UART_ABI_VERSION,
+                           "UART access"))
+        return 1;
+    TimeCardUARTReadRequest request = {
+        .port = parse_uart_port(argv[2]),
+        .maximumBytes = argc >= 4 ?
+            (uint32_t)parse_ulong(argv[3], "UART read length") : 128u,
+        .timeoutMilliseconds = argc >= 5 ?
+            (uint32_t)parse_ulong(argv[4], "UART timeout") : 100u,
+    };
+    if (request.maximumBytes == 0 ||
+        request.maximumBytes > TIMECARD_UART_MAX_TRANSFER)
+        return 2;
+    TimeCardUARTTransfer transfer = {0};
+    if (call_inout(connection, kTimeCardMethodUARTRead,
+                   &request, sizeof(request), &transfer, sizeof(transfer)))
+        return 1;
+    print_uart_transfer(&transfer);
+    return 0;
 }
 
 static int
@@ -646,11 +828,11 @@ command_led_gnss_auto(io_connect_t connection, int argc, char **argv)
         return 2;
     if (call_output(connection, kTimeCardMethodGetInfo, &info, sizeof(info)))
         return 1;
-    if (info.abiVersion != TIMECARD_ABI_VERSION) {
-        fprintf(stderr, "timecardctl: unsupported driver ABI %u\n",
-                info.abiVersion);
-        return 1;
-    }
+    if (!driver_abi_supported(
+            info.abiVersion, TIMECARD_MIN_COMPATIBLE_ABI_VERSION))
+        return report_unsupported_abi(
+            info.abiVersion, TIMECARD_MIN_COMPATIBLE_ABI_VERSION,
+            "GNSS LED policy");
 
     gnss1_led_color(&info, &led, &state);
     char prefix1[64];
@@ -1112,6 +1294,12 @@ main(int argc, char **argv)
         status = command_i2c_mux(connection, argc, argv);
     else if (strcmp(argv[1], "sensors") == 0)
         status = command_sensors(connection, argc, argv);
+    else if (strcmp(argv[1], "uart-observe") == 0)
+        status = command_uart_observe(connection, argc, argv);
+    else if (strcmp(argv[1], "uart-config") == 0)
+        status = command_uart_config(connection, argc, argv);
+    else if (strcmp(argv[1], "uart-read") == 0)
+        status = command_uart_read(connection, argc, argv);
     else {
         print_usage(stderr);
         status = 2;

@@ -139,6 +139,8 @@ private enum TimeCardSelfTestOutcome: Sendable {
         i2cMux: TimeCardI2CMuxSnapshot?,
         ledStates: [TimeCardLEDState],
         i2cError: String?,
+        uartObservation: TimeCardUARTObservation?,
+        uartError: String?,
         report: TimeCardSelfTestReport
     )
     case failure(report: TimeCardSelfTestReport, message: String)
@@ -197,6 +199,10 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var serialMessage = ""
     @Published private(set) var serialCapture: TimeCardSerialCapture?
     @Published private(set) var serialCaptureInProgress = false
+    @Published private(set) var uartObservation: TimeCardUARTObservation?
+    @Published private(set) var uartReadResult: TimeCardUARTReadResult?
+    @Published private(set) var uartOperationInProgress = false
+    @Published private(set) var uartMessage = ""
     @Published private(set) var sessionLog: [TimeCardSessionLogEntry] = []
 
     private var refreshTimer: Timer?
@@ -246,6 +252,9 @@ final class TimeCardMonitor: ObservableObject {
         i2cScanResults.removeAll(keepingCapacity: true)
         i2cTransfer = nil
         i2cOperationMessage = ""
+        uartObservation = nil
+        uartReadResult = nil
+        uartMessage = ""
         selfTestReport = nil
         selfTestMessage = ""
         appendSessionLog(
@@ -329,6 +338,181 @@ final class TimeCardMonitor: ObservableObject {
                     severity: .error,
                     category: "UART",
                     message: self.serialMessage
+                )
+            }
+        }
+    }
+
+    func configureUART(port: TimeCardUARTPort, baudRate: UInt32) {
+        guard !uartOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            uartMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.supportsUART == true else {
+            uartMessage = "Hardware UART is not advertised by this driver."
+            return
+        }
+
+        uartOperationInProgress = true
+        uartMessage = "Configuring \(port.label) for \(baudRate) baud..."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: uartMessage
+        )
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    try TimeCardClient.configureUART(
+                        for: descriptor,
+                        port: port,
+                        baudRate: baudRate
+                    )
+                    return Result<Void, Error>.success(())
+                } catch {
+                    return Result<Void, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.uartOperationInProgress = false
+            switch result {
+            case .success:
+                self.uartMessage = "\(port.label) configured for \(baudRate) baud, 8N1."
+                self.appendSessionLog(
+                    severity: .success,
+                    category: "UART",
+                    message: self.uartMessage
+                )
+            case .failure(let error):
+                self.uartMessage =
+                    "\(port.label) configure failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "UART",
+                    message: self.uartMessage
+                )
+            }
+        }
+    }
+
+    func observeUART(port: TimeCardUARTPort) {
+        guard !uartOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            uartMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.supportsUART == true else {
+            uartMessage = "Hardware UART is not advertised by this driver."
+            return
+        }
+
+        uartOperationInProgress = true
+        uartMessage = "Observing \(port.label) UART activity..."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: uartMessage
+        )
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<TimeCardUARTObservation, Error>.success(
+                        try TimeCardClient.observeUART(
+                            for: descriptor,
+                            port: port,
+                            timeoutMilliseconds: 250
+                        )
+                    )
+                } catch {
+                    return Result<TimeCardUARTObservation, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.uartOperationInProgress = false
+            switch result {
+            case .success(let observation):
+                self.uartObservation = observation
+                self.uartMessage = observation.summary
+                self.appendSessionLog(
+                    severity: observation.hasActivity ? .success : .warning,
+                    category: "UART",
+                    message: self.uartMessage
+                )
+            case .failure(let error):
+                self.uartMessage =
+                    "\(port.label) observe failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "UART",
+                    message: self.uartMessage
+                )
+            }
+        }
+    }
+
+    func readUART(
+        port: TimeCardUARTPort,
+        maximumBytes: UInt32 = 256,
+        timeoutMilliseconds: UInt32 = 500
+    ) {
+        guard !uartOperationInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            uartMessage = "No Time Card is selected."
+            return
+        }
+        guard snapshot?.supportsUART == true else {
+            uartMessage = "Hardware UART is not advertised by this driver."
+            return
+        }
+
+        uartOperationInProgress = true
+        uartMessage = "Reading \(port.label) UART bytes..."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: uartMessage
+        )
+
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return Result<TimeCardUARTReadResult, Error>.success(
+                        try TimeCardClient.readUART(
+                            for: descriptor,
+                            port: port,
+                            maximumBytes: maximumBytes,
+                            timeoutMilliseconds: timeoutMilliseconds
+                        )
+                    )
+                } catch {
+                    return Result<TimeCardUARTReadResult, Error>.failure(error)
+                }
+            }.value
+
+            guard let self else { return }
+            self.uartOperationInProgress = false
+            switch result {
+            case .success(let transfer):
+                self.uartReadResult = transfer
+                self.uartMessage =
+                    "\(port.label) returned \(transfer.byteCount) byte(s), LSR \(transfer.lineStatusText)."
+                self.appendSessionLog(
+                    severity: transfer.byteCount == 0 ? .warning : .success,
+                    category: "UART",
+                    message: self.uartMessage
+                )
+            case .failure(let error):
+                self.uartMessage =
+                    "\(port.label) read failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "UART",
+                    message: self.uartMessage
                 )
             }
         }
@@ -777,6 +961,8 @@ final class TimeCardMonitor: ObservableObject {
                     var i2cMux: TimeCardI2CMuxSnapshot?
                     var ledStates: [TimeCardLEDState] = []
                     var i2cErrors: [String] = []
+                    var uartObservation: TimeCardUARTObservation?
+                    var uartError: String?
 
                     if currentSnapshot.capabilityNames.contains("SMA") {
                         do {
@@ -821,6 +1007,18 @@ final class TimeCardMonitor: ObservableObject {
                         }
                     }
 
+                    if currentSnapshot.supportsUART {
+                        do {
+                            uartObservation = try TimeCardClient.observeUART(
+                                for: descriptor,
+                                port: .gnss,
+                                timeoutMilliseconds: 100
+                            )
+                        } catch {
+                            uartError = error.localizedDescription
+                        }
+                    }
+
                     let i2cError = i2cErrors.isEmpty
                         ? nil : i2cErrors.joined(separator: "; ")
                     let report = TimeCardMonitor.buildSelfTestReport(
@@ -832,7 +1030,9 @@ final class TimeCardMonitor: ObservableObject {
                         i2cStatus: i2cStatus,
                         i2cMux: i2cMux,
                         ledStates: ledStates,
-                        i2cError: i2cError
+                        i2cError: i2cError,
+                        uartObservation: uartObservation,
+                        uartError: uartError
                     )
                     return .success(
                         snapshot: currentSnapshot,
@@ -844,6 +1044,8 @@ final class TimeCardMonitor: ObservableObject {
                         i2cMux: i2cMux,
                         ledStates: ledStates,
                         i2cError: i2cError,
+                        uartObservation: uartObservation,
+                        uartError: uartError,
                         report: report
                     )
                 } catch {
@@ -977,7 +1179,8 @@ final class TimeCardMonitor: ObservableObject {
         case .success(
             let currentSnapshot, let sensors, let sensorError, let routes,
             let smaError, let currentI2CStatus, let currentI2CMux,
-            let currentLEDStates, let i2cError, let report
+            let currentLEDStates, let i2cError, let currentUARTObservation,
+            let uartError, let report
         ):
             snapshot = currentSnapshot
             state = .connected
@@ -1026,6 +1229,19 @@ final class TimeCardMonitor: ObservableObject {
                 i2cMessage = "I2C or LED capability is advertised but returned no sample."
             } else {
                 i2cMessage = "I2C and LED control are not advertised by this profile."
+            }
+            uartObservation = currentUARTObservation
+            if let currentUARTObservation {
+                uartMessage = "UART self-test: \(currentUARTObservation.summary)."
+            } else if let uartError {
+                uartMessage = "UART self-test failed: \(uartError)"
+            } else if currentSnapshot.supportsUART {
+                uartMessage = "Hardware UART is advertised but no observation was returned."
+            } else {
+                uartReadResult = nil
+                uartMessage = currentSnapshot.abiVersion >= 8
+                    ? "Hardware UART is not advertised by this profile."
+                    : "Hardware UART requires DriverKit ABI v8."
             }
             selfTestReport = report
             selfTestMessage = "Self-test complete: \(report.summary)."
@@ -1189,7 +1405,9 @@ final class TimeCardMonitor: ObservableObject {
         i2cStatus: TimeCardI2CStatusSnapshot?,
         i2cMux: TimeCardI2CMuxSnapshot?,
         ledStates: [TimeCardLEDState],
-        i2cError: String?
+        i2cError: String?,
+        uartObservation: TimeCardUARTObservation?,
+        uartError: String?
     ) -> TimeCardSelfTestReport {
         var items: [TimeCardSelfTestItem] = [
             TimeCardSelfTestItem(
@@ -1405,6 +1623,44 @@ final class TimeCardMonitor: ObservableObject {
                     "LED controller",
                     severity: .gated,
                     detail: "LED control is not advertised by this profile."
+                )
+            )
+        }
+
+        if snapshot.supportsUART {
+            if let uartError {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "Hardware UART stream",
+                        severity: .fail,
+                        detail: uartError
+                    )
+                )
+            } else if let uartObservation {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "Hardware UART stream",
+                        severity: uartObservation.isPresent ? .pass : .warning,
+                        detail: "\(uartObservation.summary), non-draining observe path."
+                    )
+                )
+            } else {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "Hardware UART stream",
+                        severity: .warning,
+                        detail: "UART is advertised but the observe check returned no sample."
+                    )
+                )
+            }
+        } else {
+            items.append(
+                TimeCardSelfTestItem(
+                    "Hardware UART stream",
+                    severity: .gated,
+                    detail: snapshot.abiVersion >= 8
+                        ? "UART is not advertised by this board profile."
+                        : "DriverKit ABI v8 is required for hardware UART access."
                 )
             )
         }
@@ -1670,6 +1926,15 @@ final class TimeCardMonitor: ObservableObject {
             i2cStatus = currentI2CStatus
             i2cMux = currentI2CMux
             ledStates = currentLEDStates
+            if current.supportsUART && uartMessage.isEmpty {
+                uartMessage = "Hardware UART stream ABI is available."
+            } else if !current.supportsUART {
+                uartObservation = nil
+                uartReadResult = nil
+                uartMessage = current.abiVersion >= 8
+                    ? "Hardware UART is not advertised by this profile."
+                    : "Hardware UART requires DriverKit ABI v8."
+            }
             var i2cMessages: [String] = []
             if let currentI2CStatus {
                 let devices = currentI2CStatus.knownDeviceNames.isEmpty
@@ -1722,6 +1987,9 @@ final class TimeCardMonitor: ObservableObject {
             ledStates.removeAll(keepingCapacity: true)
             i2cScanResults.removeAll(keepingCapacity: true)
             i2cTransfer = nil
+            uartObservation = nil
+            uartReadResult = nil
+            uartMessage = ""
             errorMessage = error.localizedDescription
             recoverySuggestion = error.recoverySuggestion ?? ""
             switch error {
@@ -1747,6 +2015,9 @@ final class TimeCardMonitor: ObservableObject {
             ledStates.removeAll(keepingCapacity: true)
             i2cScanResults.removeAll(keepingCapacity: true)
             i2cTransfer = nil
+            uartObservation = nil
+            uartReadResult = nil
+            uartMessage = ""
             state = .failed
             errorMessage = message
             recoverySuggestion = ""
@@ -1765,6 +2036,9 @@ final class TimeCardMonitor: ObservableObject {
             sensorHistory.removeAll(keepingCapacity: true)
             i2cScanResults.removeAll(keepingCapacity: true)
             i2cTransfer = nil
+            uartObservation = nil
+            uartReadResult = nil
+            uartMessage = ""
         }
     }
 

@@ -171,7 +171,12 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
         if (capabilities & (1 << 5)) != 0 { names.append("LEDs") }
         if (capabilities & (1 << 6)) != 0 { names.append("I2C") }
         if (capabilities & (1 << 7)) != 0 { names.append("Sensors") }
+        if (capabilities & (1 << 8)) != 0 { names.append("UART") }
         return names
+    }
+
+    var supportsUART: Bool {
+        abiVersion >= 8 && (capabilities & (1 << 8)) != 0
     }
 
     func hasValidField(_ field: UInt64) -> Bool {
@@ -314,6 +319,125 @@ struct TimeCardSerialCapture: Equatable, Sendable {
 
     var lines: [String] {
         text.split(whereSeparator: \.isNewline).map(String.init)
+    }
+}
+
+enum TimeCardUARTPort: UInt32, CaseIterable, Identifiable, Sendable {
+    case gnss = 0
+    case gnss2 = 1
+    case mac = 2
+    case nmea = 3
+
+    var id: UInt32 { rawValue }
+
+    var label: String {
+        switch self {
+        case .gnss: "GNSS"
+        case .gnss2: "GNSS 2"
+        case .mac: "MAC or atomic"
+        case .nmea: "NMEA"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .gnss: "Primary receiver UART"
+        case .gnss2: "Secondary receiver UART when fitted"
+        case .mac: "MAC or atomic-clock UART"
+        case .nmea: "NMEA output UART"
+        }
+    }
+}
+
+struct TimeCardUARTObservation: Equatable, Sendable {
+    let port: TimeCardUARTPort
+    let timeoutMilliseconds: UInt32
+    let flags: UInt32
+    let lineStatus: UInt32
+
+    var isPresent: Bool { (flags & (1 << 0)) != 0 }
+    var hasActivity: Bool { (flags & (1 << 1)) != 0 }
+    var lineStatusText: String {
+        String(format: "0x%02x", lineStatus & 0xff)
+    }
+    var summary: String {
+        "\(port.label): \(hasActivity ? "activity" : "idle"), LSR \(lineStatusText)"
+    }
+}
+
+struct TimeCardUARTReadResult: Equatable, Sendable {
+    let port: TimeCardUARTPort
+    let timeoutMilliseconds: UInt32
+    let lineStatus: UInt32
+    let data: [UInt8]
+
+    init(
+        port: TimeCardUARTPort,
+        timeoutMilliseconds: UInt32,
+        lineStatus: UInt32,
+        data: [UInt8]
+    ) {
+        self.port = port
+        self.timeoutMilliseconds = timeoutMilliseconds
+        self.lineStatus = lineStatus
+        self.data = data
+    }
+
+    init(rawBytes: [UInt8]) {
+        let rawPort = TimeCardUARTTransferRawLayout.readUInt32(
+            rawBytes,
+            at: TimeCardUARTTransferRawLayout.portOffset
+        )
+        let reportedLength = TimeCardUARTTransferRawLayout.readUInt32(
+            rawBytes,
+            at: TimeCardUARTTransferRawLayout.lengthOffset
+        )
+        let available = max(
+            0,
+            rawBytes.count - TimeCardUARTTransferRawLayout.dataOffset
+        )
+        let dataLength = min(Int(reportedLength), available, 256)
+        let dataStart = TimeCardUARTTransferRawLayout.dataOffset
+        let dataEnd = dataStart + dataLength
+        self.init(
+            port: TimeCardUARTPort(rawValue: rawPort) ?? .gnss,
+            timeoutMilliseconds: TimeCardUARTTransferRawLayout.readUInt32(
+                rawBytes,
+                at: TimeCardUARTTransferRawLayout.timeoutOffset
+            ),
+            lineStatus: TimeCardUARTTransferRawLayout.readUInt32(
+                rawBytes,
+                at: TimeCardUARTTransferRawLayout.lineStatusOffset
+            ),
+            data: Array(rawBytes[dataStart..<dataEnd])
+        )
+    }
+
+    var byteCount: Int {
+        data.count
+    }
+
+    var lineStatusText: String {
+        String(format: "0x%02x", lineStatus & 0xff)
+    }
+
+    var text: String {
+        String(decoding: data, as: UTF8.self)
+    }
+
+    var dataHex: String {
+        data.map { String(format: "%02x", $0) }.joined(separator: " ")
+    }
+
+    var hexDumpLines: [String] {
+        guard !data.isEmpty else { return [] }
+        return stride(from: 0, to: data.count, by: 16).map { offset in
+            let chunk = data[offset..<min(offset + 16, data.count)]
+            let hex = chunk
+                .map { String(format: "%02x", $0) }
+                .joined(separator: " ")
+            return String(format: "%04x: %@", offset, hex)
+        }
     }
 }
 
@@ -665,6 +789,7 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
     case incompatibleABI(UInt32)
     case invalidTimestamp
     case invalidI2CRequest(String)
+    case invalidUARTRequest(String)
     case serialUnsupportedBaud(UInt32)
     case serialOpenFailed(path: String, errnoCode: Int32)
     case serialConfigureFailed(path: String, operation: String, errnoCode: Int32)
@@ -692,6 +817,8 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
         case .invalidTimestamp:
             "The driver returned an invalid cross timestamp."
         case .invalidI2CRequest(let reason):
+            reason
+        case .invalidUARTRequest(let reason):
             reason
         case .serialUnsupportedBaud(let baud):
             "Unsupported serial baud rate \(baud)."
@@ -733,7 +860,8 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
 enum TimeCardClient {
     private static let serviceClass = "IOUserService"
     private static let userClassValue = "TimeCardDriver"
-    private static let supportedABIVersion: UInt32 = 7
+    private static let minimumSupportedABIVersion: UInt32 = 7
+    private static let supportedABIVersion: UInt32 = 8
 
     static var localABILayoutIsValid: Bool {
         MemoryLayout<TimeCardTimeRaw>.size == 16
@@ -829,6 +957,23 @@ enum TimeCardClient {
             && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.controllerStatus) == 12
             && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.interruptStatus) == 16
             && MemoryLayout<TimeCardI2CMuxRaw>.offset(of: \.reserved0) == 20
+            && MemoryLayout<TimeCardUARTConfigRaw>.size == 8
+            && MemoryLayout<TimeCardUARTConfigRaw>.offset(of: \.port) == 0
+            && MemoryLayout<TimeCardUARTConfigRaw>.offset(of: \.baud) == 4
+            && MemoryLayout<TimeCardUARTReadRequestRaw>.size == 16
+            && MemoryLayout<TimeCardUARTReadRequestRaw>.offset(of: \.port) == 0
+            && MemoryLayout<TimeCardUARTReadRequestRaw>.offset(of: \.maximumBytes) == 4
+            && MemoryLayout<TimeCardUARTReadRequestRaw>.offset(of: \.timeoutMilliseconds) == 8
+            && MemoryLayout<TimeCardUARTReadRequestRaw>.offset(of: \.reserved) == 12
+            && TimeCardUARTTransferRawLayout.size == 272
+            && TimeCardUARTTransferRawLayout.dataOffset == 16
+            && MemoryLayout<TimeCardUARTObserveRaw>.size == 32
+            && MemoryLayout<TimeCardUARTObserveRaw>.offset(of: \.size) == 0
+            && MemoryLayout<TimeCardUARTObserveRaw>.offset(of: \.port) == 4
+            && MemoryLayout<TimeCardUARTObserveRaw>.offset(of: \.timeoutMilliseconds) == 8
+            && MemoryLayout<TimeCardUARTObserveRaw>.offset(of: \.flags) == 12
+            && MemoryLayout<TimeCardUARTObserveRaw>.offset(of: \.lineStatus) == 16
+            && MemoryLayout<TimeCardUARTObserveRaw>.offset(of: \.reserved0) == 20
             && MemoryLayout<TimeCardSensorReadingRaw>.size == 48
             && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.size) == 0
             && MemoryLayout<TimeCardSensorReadingRaw>.offset(of: \.type) == 4
@@ -1074,7 +1219,8 @@ enum TimeCardClient {
         try callOutput(
             connection: connection, selector: 0, output: &info
         )
-        guard info.abiVersion == supportedABIVersion else {
+        guard info.abiVersion >= minimumSupportedABIVersion &&
+              info.abiVersion <= supportedABIVersion else {
             throw TimeCardClientError.incompatibleABI(info.abiVersion)
         }
 
@@ -1387,10 +1533,83 @@ enum TimeCardClient {
         return raw.snapshot
     }
 
+    static func observeUART(
+        for descriptor: TimeCardServiceDescriptor,
+        port: TimeCardUARTPort,
+        timeoutMilliseconds: UInt32
+    ) throws -> TimeCardUARTObservation {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var raw = TimeCardUARTObserveRaw(
+            size: UInt32(MemoryLayout<TimeCardUARTObserveRaw>.size),
+            port: port.rawValue,
+            timeoutMilliseconds: min(timeoutMilliseconds, 5_000)
+        )
+        try callInOut(connection: connection, selector: 14, value: &raw)
+        return raw.observation
+    }
+
+    static func configureUART(
+        for descriptor: TimeCardServiceDescriptor,
+        port: TimeCardUARTPort,
+        baudRate: UInt32
+    ) throws {
+        try validateUARTBaudRate(baudRate)
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var raw = TimeCardUARTConfigRaw(
+            port: port.rawValue,
+            baud: baudRate
+        )
+        try callInput(connection: connection, selector: 15, input: &raw)
+    }
+
+    static func readUART(
+        for descriptor: TimeCardServiceDescriptor,
+        port: TimeCardUARTPort,
+        maximumBytes: UInt32,
+        timeoutMilliseconds: UInt32
+    ) throws -> TimeCardUARTReadResult {
+        guard maximumBytes > 0 && maximumBytes <= 256 else {
+            throw TimeCardClientError.invalidUARTRequest(
+                "UART read length must be between 1 and 256 bytes."
+            )
+        }
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+
+        var request = TimeCardUARTReadRequestRaw(
+            port: port.rawValue,
+            maximumBytes: maximumBytes,
+            timeoutMilliseconds: min(timeoutMilliseconds, 5_000)
+        )
+        var output = [UInt8](
+            repeating: 0,
+            count: TimeCardUARTTransferRawLayout.size
+        )
+        try callInOutBytes(
+            connection: connection,
+            selector: 16,
+            input: &request,
+            output: &output
+        )
+        return TimeCardUARTReadResult(rawBytes: output)
+    }
+
     private static func validateI2CAddress(_ address: UInt32) throws {
         guard address >= 0x08 && address <= 0x77 else {
             throw TimeCardClientError.invalidI2CRequest(
                 "I2C address must be a 7-bit address from 0x08 through 0x77."
+            )
+        }
+    }
+
+    private static func validateUARTBaudRate(_ baudRate: UInt32) throws {
+        guard baudRate > 0 && baudRate <= 3_000_000 else {
+            throw TimeCardClientError.invalidUARTRequest(
+                "UART baud rate must be between 1 and 3000000."
             )
         }
     }
@@ -1747,6 +1966,55 @@ private struct TimeCardI2CMuxRaw {
             channelMask: channelMask,
             controllerStatus: controllerStatus,
             interruptStatus: interruptStatus
+        )
+    }
+}
+
+private struct TimeCardUARTConfigRaw {
+    var port: UInt32 = 0
+    var baud: UInt32 = 0
+}
+
+private struct TimeCardUARTReadRequestRaw {
+    var port: UInt32 = 0
+    var maximumBytes: UInt32 = 0
+    var timeoutMilliseconds: UInt32 = 0
+    var reserved: UInt32 = 0
+}
+
+private enum TimeCardUARTTransferRawLayout {
+    static let size = 272
+    static let portOffset = 0
+    static let lengthOffset = 4
+    static let timeoutOffset = 8
+    static let lineStatusOffset = 12
+    static let dataOffset = 16
+
+    static func readUInt32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
+        guard bytes.count >= offset + 4 else { return 0 }
+        return UInt32(bytes[offset]) |
+            (UInt32(bytes[offset + 1]) << 8) |
+            (UInt32(bytes[offset + 2]) << 16) |
+            (UInt32(bytes[offset + 3]) << 24)
+    }
+}
+
+private struct TimeCardUARTObserveRaw {
+    var size: UInt32 = 0
+    var port: UInt32 = 0
+    var timeoutMilliseconds: UInt32 = 0
+    var flags: UInt32 = 0
+    var lineStatus: UInt32 = 0
+    var reserved0: UInt32 = 0
+    var reserved1: UInt32 = 0
+    var reserved2: UInt32 = 0
+
+    var observation: TimeCardUARTObservation {
+        TimeCardUARTObservation(
+            port: TimeCardUARTPort(rawValue: port) ?? .gnss,
+            timeoutMilliseconds: timeoutMilliseconds,
+            flags: flags,
+            lineStatus: lineStatus
         )
     }
 }

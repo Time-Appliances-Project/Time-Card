@@ -668,6 +668,8 @@ private struct UARTWorkspaceView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
     @State private var selectedSerialPortID = ""
     @State private var serialBaudRate: UInt32 = 115_200
+    @State private var selectedUARTPort: TimeCardUARTPort = .gnss
+    @State private var hardwareUARTBaudRate: UInt32 = 115_200
     @State private var nmeaText = ""
     @State private var nmeaMessage = ""
     @State private var ubxInputText = ""
@@ -693,18 +695,12 @@ private struct UARTWorkspaceView: View {
                             .background(.teal.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
 
                         VStack(alignment: .leading, spacing: 10) {
-                            Text(
-                                "The macOS Control Center now enumerates native "
-                                    + "serial devices through IOKit. The Time Card "
-                                    + "UART stream itself still needs a guarded "
-                                    + "DriverKit stream ABI before UBX/NMEA capture "
-                                    + "can attach directly to the card."
-                            )
+                            Text(uartHeaderText)
                             .foregroundStyle(.secondary)
 
                             HStack(spacing: 8) {
                                 StatusPill(serialState, serialColor)
-                                StatusPill("Driver stream gated", .secondary)
+                                StatusPill(uartState, uartColor)
                             }
                         }
 
@@ -738,8 +734,8 @@ private struct UARTWorkspaceView: View {
                         )
                         FeatureRow(
                             name: "Time Card UART streams",
-                            state: "Gated",
-                            note: "Needs a DriverKit stream read/write ABI for the FPGA UART endpoints."
+                            state: uartState,
+                            note: "Uses DriverKit ABI v8 to observe, configure, and read bounded FPGA UART samples."
                         )
                         FeatureRow(
                             name: "NMEA capture and export",
@@ -749,8 +745,143 @@ private struct UARTWorkspaceView: View {
                         FeatureRow(
                             name: "u-blox UBX receiver traffic",
                             state: ubxCaptureState,
-                            note: "Decodes captured or pasted UBX frames; guarded receiver requests still need the DriverKit stream ABI."
+                            note: "Decodes captured, pasted, or direct hardware UART UBX frames."
                         )
+                    }
+                }
+
+                ControlCenterPanel(
+                    title: "Time Card hardware UART",
+                    subtitle: "Direct bounded reads from the FPGA 16550 UART blocks"
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .bottom, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Port")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Picker("", selection: $selectedUARTPort) {
+                                    ForEach(TimeCardUARTPort.allCases) { port in
+                                        Text(port.label).tag(port)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 170)
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Baud")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Picker("", selection: $hardwareUARTBaudRate) {
+                                    ForEach(serialBaudRates, id: \.self) { baud in
+                                        Text("\(baud)").tag(baud)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 120)
+                            }
+
+                            Button("Configure") {
+                                monitor.configureUART(
+                                    port: selectedUARTPort,
+                                    baudRate: hardwareUARTBaudRate
+                                )
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!hardwareUARTAvailable || monitor.uartOperationInProgress)
+
+                            Button("Observe") {
+                                monitor.observeUART(port: selectedUARTPort)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!hardwareUARTAvailable || monitor.uartOperationInProgress)
+
+                            Button("Read Hardware") {
+                                monitor.readUART(port: selectedUARTPort)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!hardwareUARTAvailable || monitor.uartOperationInProgress)
+
+                            if monitor.uartOperationInProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+
+                            Spacer()
+                        }
+
+                        Text(selectedUARTPort.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        if !hardwareUARTAvailable {
+                            Text(
+                                "Install and activate the ABI v8 driver to enable "
+                                    + "direct FPGA UART access on supported variants."
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+
+                        if !monitor.uartMessage.isEmpty {
+                            Text(monitor.uartMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
+                        if let observation = monitor.uartObservation {
+                            HStack(spacing: 8) {
+                                StatusPill(
+                                    observation.isPresent ? "Present" : "Not present",
+                                    observation.isPresent ? .green : .secondary
+                                )
+                                StatusPill(
+                                    observation.hasActivity ? "Activity" : "Idle",
+                                    observation.hasActivity ? .green : .orange
+                                )
+                                StatusPill("LSR \(observation.lineStatusText)", .teal)
+                            }
+                        }
+
+                        if let transfer = monitor.uartReadResult {
+                            HStack(spacing: 8) {
+                                StatusPill(
+                                    transfer.byteCount == 0
+                                        ? "No bytes" : "\(transfer.byteCount) bytes",
+                                    transfer.byteCount == 0 ? .orange : .green
+                                )
+                                StatusPill("LSR \(transfer.lineStatusText)", .teal)
+
+                                Spacer()
+
+                                Button("Load as NMEA") {
+                                    nmeaText = transfer.text
+                                    nmeaMessage = "Loaded hardware UART bytes."
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(transfer.data.isEmpty)
+
+                                Button("Load as UBX") {
+                                    ubxInputText = transfer.dataHex
+                                    ubxMessage = "Loaded hardware UART bytes."
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(transfer.data.isEmpty)
+                            }
+
+                            Text(uartReadPreviewText(transfer))
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    Color.secondary.opacity(0.07),
+                                    in: RoundedRectangle(cornerRadius: 10)
+                                )
+                        }
                     }
                 }
 
@@ -1062,15 +1193,42 @@ private struct UARTWorkspaceView: View {
         }
     }
 
+    private var hardwareUARTAvailable: Bool {
+        monitor.snapshot?.supportsUART == true
+    }
+
+    private var uartState: String {
+        if monitor.uartOperationInProgress {
+            return "Waiting"
+        }
+        if hardwareUARTAvailable {
+            return monitor.uartReadResult?.byteCount ?? 0 > 0
+                ? "Live" : "Available"
+        }
+        return "Gated"
+    }
+
+    private var uartColor: Color {
+        switch uartState {
+        case "Live", "Available": .green
+        case "Waiting": .orange
+        default: .secondary
+        }
+    }
+
     private var nmeaCaptureState: String {
-        if monitor.serialCapture?.byteCount ?? 0 > 0 {
+        if monitor.serialCapture?.byteCount ?? 0 > 0 ||
+            monitor.uartReadResult?.byteCount ?? 0 > 0 {
             return "Live"
         }
         return decodedNMEASentences.isEmpty ? "Partial" : "Live"
     }
 
     private var ubxCaptureState: String {
-        decodedUBXFrames.isEmpty ? "Partial" : "Live"
+        if monitor.uartReadResult?.byteCount ?? 0 > 0 {
+            return "Live"
+        }
+        return decodedUBXFrames.isEmpty ? "Partial" : "Live"
     }
 
     private var selectedSerialPortPath: String? {
@@ -1099,6 +1257,35 @@ private struct UARTWorkspaceView: View {
             return capture.text
         }
         return String(capture.text.prefix(limit)) + "\n[preview truncated]"
+    }
+
+    private var uartHeaderText: String {
+        "The macOS Control Center now enumerates native serial devices through "
+            + "IOKit and can read the Time Card FPGA UART streams through "
+            + "DriverKit ABI v8 when the active driver advertises UART capability."
+    }
+
+    private func uartReadPreviewText(
+        _ transfer: TimeCardUARTReadResult
+    ) -> String {
+        guard !transfer.data.isEmpty else {
+            return "No bytes arrived during the hardware UART read window."
+        }
+        let scalars = Array(transfer.text.unicodeScalars)
+        let printable = scalars.filter { scalar in
+            (scalar.value >= 0x20 && scalar.value <= 0x7e) ||
+                scalar.value == 0x0a ||
+                scalar.value == 0x0d ||
+                scalar.value == 0x09
+        }.count
+        if !scalars.isEmpty && printable * 4 >= scalars.count * 3 {
+            let limit = 1800
+            if transfer.text.count <= limit {
+                return transfer.text
+            }
+            return String(transfer.text.prefix(limit)) + "\n[preview truncated]"
+        }
+        return transfer.hexDumpLines.prefix(32).joined(separator: "\n")
     }
 
     private var decodedNMEASentences: [NMEASentence] {
@@ -4156,7 +4343,7 @@ private struct OperationsView: View {
 
                         Text(
                             supportBundleMessage.isEmpty
-                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, sampling history, SMA, sensors, I2C, LEDs, and the session log."
+                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, hardware UART, sampling history, SMA, sensors, I2C, LEDs, and the session log."
                                 : supportBundleMessage
                         )
                         .font(.caption)
@@ -4259,6 +4446,14 @@ private struct OperationsView: View {
             }
             lines.append("LED states: \(ledText.joined(separator: ", "))")
         }
+        if let observation = monitor.uartObservation {
+            lines.append("UART observe: \(observation.summary)")
+        }
+        if let read = monitor.uartReadResult {
+            lines.append(
+                "UART read: \(read.port.label), \(read.byteCount) byte(s), LSR \(read.lineStatusText)"
+            )
+        }
         return lines.joined(separator: "\n")
     }
 
@@ -4320,6 +4515,7 @@ private struct OperationsView: View {
         try writeSupportText(selfTestText, named: "self-test.txt", into: stagingURL)
         try writeSupportText(serialPortsCSVText, named: "serial-ports.csv", into: stagingURL)
         try writeSupportText(serialCaptureText, named: "serial-capture.txt", into: stagingURL)
+        try writeSupportText(hardwareUARTText, named: "hardware-uart.txt", into: stagingURL)
         try writeSupportText(samplingHistoryCSVText, named: "sampling-history.csv", into: stagingURL)
         try writeSupportText(smaRoutesCSVText, named: "sma-routes.csv", into: stagingURL)
         try writeSupportText(sensorCSVText, named: "sensors.csv", into: stagingURL)
@@ -4360,6 +4556,7 @@ private struct OperationsView: View {
             "self-test.txt",
             "serial-ports.csv",
             "serial-capture.txt",
+            "hardware-uart.txt",
             "sampling-history.csv",
             "sma-routes.csv",
             "sensors.csv",
@@ -4493,6 +4690,33 @@ private struct OperationsView: View {
                 ? "No bytes arrived during the preview window."
                 : capture.text,
         ].joined(separator: "\n")
+    }
+
+    private var hardwareUARTText: String {
+        var lines: [String] = []
+        if let observation = monitor.uartObservation {
+            lines.append("Observation")
+            lines.append("Port: \(observation.port.label)")
+            lines.append("Present: \(observation.isPresent)")
+            lines.append("Activity: \(observation.hasActivity)")
+            lines.append("Line status: \(observation.lineStatusText)")
+            lines.append("Timeout: \(observation.timeoutMilliseconds) ms")
+        } else {
+            lines.append("No hardware UART observation recorded.")
+        }
+        lines.append("")
+        if let read = monitor.uartReadResult {
+            lines.append("Read")
+            lines.append("Port: \(read.port.label)")
+            lines.append("Bytes: \(read.byteCount)")
+            lines.append("Line status: \(read.lineStatusText)")
+            lines.append("Timeout: \(read.timeoutMilliseconds) ms")
+            lines.append("")
+            lines.append(read.data.isEmpty ? "No bytes arrived." : read.dataHex)
+        } else {
+            lines.append("No hardware UART read recorded.")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private var samplingHistoryCSVText: String {

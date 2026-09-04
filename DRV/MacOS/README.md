@@ -22,7 +22,7 @@ The current implementation provides:
 - Bracketed card/system cross timestamps
 - Version-gated clock and TOD status reads
 - Capability and field-validity reporting for absent or gated registers
-- A versioned, size-checked user-client ABI v7
+- A versioned, size-checked user-client ABI v8
 - SMA connector query and guarded route setting through DriverKit, including
   Linux-compatible fixed-route handling for FPGA images without writable SMA
   routing GPIO
@@ -38,6 +38,9 @@ The current implementation provides:
 - Environmental sensor query for LM75B board temperature sensors, SHT3x
   humidity/temperature, ICP-10100 pressure/temperature with CRC and OTP
   compensation, plus BNO08x SHTP-header and BNO055 identity probes
+- Bounded 16550 UART observe, baud-rate configure, and read operations for
+  GNSS, GNSS2, MAC/atomic-clock, and NMEA ports on profiles that expose the
+  UART register bank
 - A native SwiftUI Control Center with:
   - driver activation, update, and removal
   - live card discovery and explicit multi-card selection
@@ -49,12 +52,16 @@ The current implementation provides:
   - live Sensors and IMU workspace with environmental metric cards, board
     temperature zones, pressure compensation, temperature history, raw sensor
     inventory, and IMU bring-up status
+  - a Time Card hardware UART workspace for port selection, baud-rate
+    configuration, non-draining line-status observation, bounded reads, and
+    handoff into the NMEA and UBX decoder labs
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
   `sma-set`, `led`, `led-set`, `led-sma-auto`, `led-gnss-auto`, `led-auto`,
-  `i2c-status`, `i2c-scan`, `i2c-read`, `i2c-mux`, and `sensors`, including
-  BNO08x SHTP-header and BNO055 chip-ID probe detail
+  `i2c-status`, `i2c-scan`, `i2c-read`, `i2c-mux`, `sensors`,
+  `uart-observe`, `uart-config`, and `uart-read`, including BNO08x
+  SHTP-header and BNO055 chip-ID probe detail
 
 The common PHC block is available on every matched profile. ART uses its own
 fixed layout and has no standard TOD block, so the driver never reads one.
@@ -68,11 +75,12 @@ Current upstream Linux defines the classic Meta/Celestica map and the fixed ART
 and ADVA maps. The shifted revision-02 map comes from this repository's
 LitePCIe gateware and Windows/Linux support; it is not currently in upstream
 Linux. The Meta/Facebook classic profile is hardware-validated on an Intel Mac
-Pro, including ABI v7 status, SMA fixed-route readback, SMA/GNSS LED policy
-application, I2C diagnostics, optional ToD GNSS/UTC summary telemetry, and
+Pro, including ABI v8 status, SMA fixed-route readback, SMA/GNSS LED policy
+application, I2C diagnostics, optional ToD GNSS/UTC summary telemetry,
 LM75B/SHT3x/ICP-10100 environmental sensor telemetry with compensated
-ICP-10100 pressure. BNO08x SHTP-header probing is wired for the Celestica mux
-route and reported separately from decoded fused motion.
+ICP-10100 pressure, and bounded UART observe/configure/read smoke checks on all
+four Time Card UART ports. BNO08x SHTP-header probing is wired for the Celestica
+mux route and reported separately from decoded fused motion.
 Every other profile is covered by host-side layout and safety tests but still
 requires physical-card validation before a production release.
 Celestica cards programmed with the generic Meta PCI identity continue to
@@ -166,7 +174,11 @@ the entitlement.
 The development DriverKit PCI profile authorizes Apple's wildcard
 `IOPCIPrimaryMatch` value. Use that value only in development signing
 entitlements. `Driver/Info.plist` remains restricted to the supported Time
-Card PCI identifiers at runtime.
+Card PCI identifiers at runtime. When manually signing development builds,
+extract the entitlement dictionary from the provisioning profile and sign the
+DEXT with that profile-derived plist. A minimal hand-written DriverKit
+entitlement file can pass `codesign` but still fail DriverKit's authenticated
+open path when macOS stages the system extension.
 
 A distribution DriverKit profile must authorize every PCI primary match that
 will ship. Keep the entitlement and runtime personality synchronized with this
@@ -214,7 +226,8 @@ the new driver build.
    Hardware pages show the selected card.
 8. Run `timecardctl.app/Contents/MacOS/timecardctl status`, followed by the
    same executable with `get`, `sma`, `led`, `led-auto`, `i2c-status`,
-   `i2c-scan`, `i2c-read`, `i2c-mux`, and `sensors`.
+   `i2c-scan`, `i2c-read`, `i2c-mux`, `sensors`, `uart-observe`,
+   `uart-config`, and `uart-read`.
 9. Compare the reported card time, core versions, and available status fields
    with the Linux reference setup.
 
@@ -227,9 +240,9 @@ and it does not yet apply a UTC/TAI correction.
 
 - Cross timestamps currently bracket the MMIO clock read with macOS realtime
   samples. PCIe PTM support is not implemented.
-- UARTs, PPS interrupts, external timestamp inputs beyond SMA route readback,
-  arbitrary raw I2C writes, SPI flash, frequency counters, and signal generators
-  are not implemented.
+- UART interrupt-backed streaming, UART writes, PPS interrupts, external
+  timestamp inputs beyond SMA route readback, arbitrary raw I2C writes, SPI
+  flash, frequency counters, and signal generators are not implemented.
 - I2C support intentionally exposes diagnostics, probes, bounded reads, and mux
   control only. General writes remain gated until the Control Center has device
   profiles, paging rules, and write-safety warnings.
@@ -248,8 +261,9 @@ and it does not yet apply a UTC/TAI correction.
   and GNSS2 reports status unknown unless a future second-receiver source is
   added.
 - Optional UTC, leap, GNSS, and satellite registers are guarded by BAR span and
-  validity bits. Receiver stream decoding and guarded u-blox configuration still
-  require a future UART ABI.
+  validity bits. Receiver stream preview is available through bounded UART
+  reads when the FPGA exposes 16550 ports, while interrupt-backed continuous
+  streaming and guarded u-blox configuration remain planned.
 - The Control Center labels card time as raw and does not calculate a card to
   macOS offset until the driver exposes a trusted UTC-to-TAI contract.
 - The driver does not create a Linux-style `/dev/ptpN` device.

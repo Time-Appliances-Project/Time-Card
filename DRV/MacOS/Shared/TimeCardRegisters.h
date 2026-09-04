@@ -44,6 +44,7 @@ enum {
 };
 
 enum {
+    kTimeCardUARTRegisterLength = 0x20u,
     kTimeCardI2CRegisterLength = 0x00010000u,
     kTimeCardLEDAddressMin = 0x34u,
     kTimeCardLEDAddressMax = 0x37u,
@@ -211,7 +212,8 @@ TimeCardFacebookRegisterMap(bool useMSIX, uint32_t boardProfile)
         kTimeCardCapabilityReadClock | kTimeCardCapabilitySetClock |
             kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD |
             kTimeCardCapabilitySMA | kTimeCardCapabilityLED |
-            kTimeCardCapabilityI2C | kTimeCardCapabilitySensors,
+            kTimeCardCapabilityI2C | kTimeCardCapabilitySensors |
+            kTimeCardCapabilityUART,
         0, 0, 0, {0, 0, 0, 0}, 0, 0, 0, 0, 0
     };
 
@@ -242,6 +244,9 @@ TimeCardFacebookRegisterMap(bool useMSIX, uint32_t boardProfile)
     TimeCardRequireRange(&map, map.smaMap1Offset, kTimeCardSMARegisterLength);
     TimeCardRequireRange(&map, map.smaMap2Offset, kTimeCardSMARegisterLength);
     TimeCardRequireRange(&map, map.i2cOffset, kTimeCardI2CRegisterLength);
+    for (uint32_t port = 0; port < TIMECARD_UART_COUNT; ++port)
+        TimeCardRequireRange(
+            &map, map.uartOffsets[port], kTimeCardUARTRegisterLength);
 
     return map;
 }
@@ -280,7 +285,8 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
         map.capabilities = kTimeCardCapabilityReadClock |
             kTimeCardCapabilitySetClock |
             kTimeCardCapabilityCrossTimestamp |
-            kTimeCardCapabilitySMA;
+            kTimeCardCapabilitySMA |
+            kTimeCardCapabilityUART;
         map.clockOffset = 0x01000000u;
         map.artSMAOffset = 0x003c0000u;
         map.uartOffsets[0] = 0x00161000u;
@@ -289,6 +295,9 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
             &map, map.clockOffset, kTimeCardClockAdjustSeconds + 4u);
         TimeCardRequireRange(
             &map, map.artSMAOffset, TIMECARD_SMA_COUNT * sizeof(uint32_t));
+        for (uint32_t port = 0; port < TIMECARD_UART_COUNT; ++port)
+            TimeCardRequireRange(
+                &map, map.uartOffsets[port], kTimeCardUARTRegisterLength);
         return map;
     }
 
@@ -300,7 +309,8 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
             kTimeCardCapabilitySetClock |
             kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD |
             kTimeCardCapabilitySMA | kTimeCardCapabilityLED |
-            kTimeCardCapabilityI2C | kTimeCardCapabilitySensors;
+            kTimeCardCapabilityI2C | kTimeCardCapabilitySensors |
+            kTimeCardCapabilityUART;
         map.clockOffset = 0x01000000u;
         map.todOffset = 0x01050000u;
         map.smaMap1Offset = 0x00140000u;
@@ -314,6 +324,9 @@ TimeCardRegisterMapForDevice(uint16_t vendorID, uint16_t deviceID,
         TimeCardRequireRange(
             &map, map.smaMap2Offset, kTimeCardSMARegisterLength);
         TimeCardRequireRange(&map, map.i2cOffset, kTimeCardI2CRegisterLength);
+        for (uint32_t port = 0; port < TIMECARD_UART_COUNT; ++port)
+            TimeCardRequireRange(
+                &map, map.uartOffsets[port], kTimeCardUARTRegisterLength);
     }
     return map;
 }
@@ -351,6 +364,25 @@ static inline bool
 TimeCardRegisterMapHasI2C(const TimeCardRegisterMap *map)
 {
     return map != NULL && map->i2cOffset != 0;
+}
+
+static inline bool
+TimeCardRegisterMapHasUARTPort(const TimeCardRegisterMap *map, uint32_t port)
+{
+    return map != NULL && port < TIMECARD_UART_COUNT &&
+        map->uartOffsets[port] != 0;
+}
+
+static inline bool
+TimeCardRegisterMapHasUART(const TimeCardRegisterMap *map)
+{
+    if (map == NULL)
+        return false;
+    for (uint32_t port = 0; port < TIMECARD_UART_COUNT; ++port) {
+        if (TimeCardRegisterMapHasUARTPort(map, port))
+            return true;
+    }
+    return false;
 }
 
 #endif /* TIMECARD_REGISTERS_H */

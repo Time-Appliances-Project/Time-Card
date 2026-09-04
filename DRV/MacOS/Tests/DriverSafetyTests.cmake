@@ -90,6 +90,9 @@ foreach(required_cli_sma IN ITEMS
         "command_i2c_read("
         "command_i2c_mux("
         "command_sensors("
+        "command_uart_observe("
+        "command_uart_config("
+        "command_uart_read("
         "gnss_fix_name("
         "icp10100_pressure_pascals("
         "print_sensor_capabilities("
@@ -111,7 +114,10 @@ foreach(required_cli_sma IN ITEMS
         "\"i2c-scan\""
         "\"i2c-read\""
         "\"i2c-mux\""
-        "\"sensors\"")
+        "\"sensors\""
+        "\"uart-observe\""
+        "\"uart-config\""
+        "\"uart-read\"")
     string(FIND "${cli}" "${required_cli_sma}" cli_sma_offset)
     if(cli_sma_offset EQUAL -1)
         message(FATAL_ERROR
@@ -249,6 +255,9 @@ foreach(required_control_center_view IN ITEMS
         "parseFrames"
         "Session log and support bundle"
         "Save Support ZIP"
+        "Time Card hardware UART"
+        "Read Hardware"
+        "hardware-uart.txt"
         "Copy Session Log"
         "supportBundleManifestText"
         "writeSupportBundle")
@@ -271,6 +280,40 @@ foreach(required_sensor_driver IN ITEMS
     if(sensor_driver_offset EQUAL -1)
         message(FATAL_ERROR
             "Driver must preserve the macOS sensor and IMU probe helpers")
+    endif()
+endforeach()
+
+foreach(required_uart_driver IN ITEMS
+        "TimeCardDriverHasUARTPort"
+        "ObserveUART"
+        "ConfigureUART"
+        "ReadUART"
+        "UARTObserveAction"
+        "UARTConfigureAction"
+        "UARTReadAction")
+    string(FIND "${driver}" "${required_uart_driver}" uart_driver_offset)
+    if(uart_driver_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Driver must expose guarded macOS UART stream access")
+    endif()
+endforeach()
+
+set(abi_source "${TIMECARD_SOURCE_DIR}/Shared/TimeCardABI.h")
+file(READ "${abi_source}" abi)
+foreach(required_uart_abi IN ITEMS
+        "TIMECARD_ABI_VERSION 8u"
+        "kTimeCardCapabilityUART"
+        "TimeCardUARTObserve"
+        "TimeCardUARTConfig"
+        "TimeCardUARTReadRequest"
+        "TimeCardUARTTransfer"
+        "kTimeCardMethodUARTObserve"
+        "kTimeCardMethodUARTConfigure"
+        "kTimeCardMethodUARTRead")
+    string(FIND "${abi}" "${required_uart_abi}" uart_abi_offset)
+    if(uart_abi_offset EQUAL -1)
+        message(FATAL_ERROR
+            "Shared ABI must expose guarded macOS UART stream access")
     endif()
 endforeach()
 

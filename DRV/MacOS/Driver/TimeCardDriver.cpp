@@ -117,6 +117,71 @@ ReadRegister32Raw(IOPCIDevice *device, uint8_t memoryIndex, uint64_t offset)
     return value;
 }
 
+enum {
+    kTimeCardUARTRegisterRBR = 0u,
+    kTimeCardUARTRegisterTHR = 0u,
+    kTimeCardUARTRegisterDLL = 0u,
+    kTimeCardUARTRegisterIER = 1u,
+    kTimeCardUARTRegisterDLM = 1u,
+    kTimeCardUARTRegisterFCR = 2u,
+    kTimeCardUARTRegisterLCR = 3u,
+    kTimeCardUARTRegisterMCR = 4u,
+    kTimeCardUARTRegisterLSR = 5u,
+
+    kTimeCardUARTLCRDLAB = 0x80u,
+    kTimeCardUARTLCR8N1 = 0x03u,
+    kTimeCardUARTFCRInit = 0x07u,
+    kTimeCardUARTMCRInit = 0x03u,
+    kTimeCardUARTLSRDataReady = 0x01u,
+
+    kTimeCardUARTClockHz = 50000000u,
+    kTimeCardUARTMaxTimeoutMilliseconds = 5000u,
+    kTimeCardUARTPollDelayMicroseconds = 1000u,
+};
+
+static uint32_t
+TimeCardUARTClampTimeout(uint32_t milliseconds)
+{
+    return milliseconds > kTimeCardUARTMaxTimeoutMilliseconds ?
+        kTimeCardUARTMaxTimeoutMilliseconds : milliseconds;
+}
+
+static uint64_t
+TimeCardUARTRegisterOffset(const TimeCardRegisterMap *map, uint32_t port,
+                           uint32_t uartRegister)
+{
+    return map->uartOffsets[port] + (uint64_t)uartRegister * 4u;
+}
+
+static bool
+TimeCardDriverHasUARTPort(const TimeCardDriver_IVars *ivars, uint32_t port)
+{
+    return ivars != nullptr &&
+        (ivars->registers.capabilities & kTimeCardCapabilityUART) != 0 &&
+        TimeCardRegisterMapHasUARTPort(&ivars->registers, port) &&
+        TimeCardRangeFits(ivars->barSize, ivars->registers.uartOffsets[port],
+                          kTimeCardUARTRegisterLength);
+}
+
+static uint8_t
+TimeCardUARTReadRegister(const TimeCardDriver_IVars *ivars, uint32_t port,
+                         uint32_t uartRegister)
+{
+    return ReadRegister8Raw(
+        ivars->pciDevice, ivars->memoryIndex,
+        TimeCardUARTRegisterOffset(&ivars->registers, port, uartRegister));
+}
+
+static void
+TimeCardUARTWriteRegister(const TimeCardDriver_IVars *ivars, uint32_t port,
+                          uint32_t uartRegister, uint8_t value)
+{
+    WriteRegister8(
+        ivars->pciDevice, ivars->memoryIndex,
+        TimeCardUARTRegisterOffset(&ivars->registers, port, uartRegister),
+        value);
+}
+
 kern_return_t
 IMPL(TimeCardDriver, Start)
 {
@@ -516,6 +581,140 @@ TimeCardDriver::GetInfo(TimeCardInfo *info)
         }
     }
     IOLockUnlock(ivars->registerLock);
+    return kIOReturnSuccess;
+}
+
+kern_return_t
+TimeCardDriver::ObserveUART(const TimeCardUARTObserve *request,
+                            TimeCardUARTObserve *response)
+{
+    if (request == nullptr || response == nullptr)
+        return kIOReturnBadArgument;
+    if (!ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (request->size < sizeof(*request) ||
+        request->port >= TIMECARD_UART_COUNT)
+        return kIOReturnBadArgument;
+    if (!TimeCardDriverHasUARTPort(ivars, request->port))
+        return kIOReturnUnsupported;
+
+    *response = {};
+    response->size = sizeof(*response);
+    response->port = request->port;
+    response->timeoutMilliseconds =
+        TimeCardUARTClampTimeout(request->timeoutMilliseconds);
+    response->flags = kTimeCardUARTObserveFlagPresent;
+
+    uint32_t remainingPolls =
+        response->timeoutMilliseconds == 0 ?
+            1u : response->timeoutMilliseconds;
+    while (remainingPolls != 0) {
+        IOLockLock(ivars->registerLock);
+        const uint8_t lsr = TimeCardUARTReadRegister(
+            ivars, request->port, kTimeCardUARTRegisterLSR);
+        IOLockUnlock(ivars->registerLock);
+
+        response->lineStatus |= lsr;
+        if ((lsr & kTimeCardUARTLSRDataReady) != 0) {
+            response->flags |= kTimeCardUARTObserveFlagActivity;
+            break;
+        }
+        --remainingPolls;
+        if (remainingPolls != 0)
+            IODelay(kTimeCardUARTPollDelayMicroseconds);
+    }
+    return kIOReturnSuccess;
+}
+
+kern_return_t
+TimeCardDriver::ConfigureUART(const TimeCardUARTConfig *config)
+{
+    if (config == nullptr)
+        return kIOReturnBadArgument;
+    if (!ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (config->port >= TIMECARD_UART_COUNT || config->baud == 0u)
+        return kIOReturnBadArgument;
+    if (!TimeCardDriverHasUARTPort(ivars, config->port))
+        return kIOReturnUnsupported;
+
+    const uint64_t divisor =
+        ((uint64_t)kTimeCardUARTClockHz + (uint64_t)config->baud * 8u) /
+        ((uint64_t)config->baud * 16u);
+    if (divisor == 0 || divisor > UINT16_MAX)
+        return kIOReturnBadArgument;
+
+    IOLockLock(ivars->registerLock);
+    TimeCardUARTWriteRegister(
+        ivars, config->port, kTimeCardUARTRegisterIER, 0u);
+    TimeCardUARTWriteRegister(
+        ivars, config->port, kTimeCardUARTRegisterLCR,
+        kTimeCardUARTLCRDLAB);
+    TimeCardUARTWriteRegister(
+        ivars, config->port, kTimeCardUARTRegisterDLL,
+        (uint8_t)(divisor & 0xffu));
+    TimeCardUARTWriteRegister(
+        ivars, config->port, kTimeCardUARTRegisterDLM,
+        (uint8_t)((divisor >> 8) & 0xffu));
+    TimeCardUARTWriteRegister(
+        ivars, config->port, kTimeCardUARTRegisterLCR,
+        kTimeCardUARTLCR8N1);
+    TimeCardUARTWriteRegister(
+        ivars, config->port, kTimeCardUARTRegisterFCR,
+        kTimeCardUARTFCRInit);
+    TimeCardUARTWriteRegister(
+        ivars, config->port, kTimeCardUARTRegisterMCR,
+        kTimeCardUARTMCRInit);
+    IOLockUnlock(ivars->registerLock);
+    return kIOReturnSuccess;
+}
+
+kern_return_t
+TimeCardDriver::ReadUART(const TimeCardUARTReadRequest *request,
+                         TimeCardUARTTransfer *response)
+{
+    if (request == nullptr || response == nullptr)
+        return kIOReturnBadArgument;
+    if (!ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (request->port >= TIMECARD_UART_COUNT ||
+        request->maximumBytes == 0u || request->reserved != 0u)
+        return kIOReturnBadArgument;
+    if (!TimeCardDriverHasUARTPort(ivars, request->port))
+        return kIOReturnUnsupported;
+
+    const uint32_t maximum =
+        request->maximumBytes > TIMECARD_UART_MAX_TRANSFER ?
+            TIMECARD_UART_MAX_TRANSFER : request->maximumBytes;
+    *response = {};
+    response->port = request->port;
+    response->timeoutMilliseconds =
+        TimeCardUARTClampTimeout(request->timeoutMilliseconds);
+
+    uint32_t remainingPolls =
+        response->timeoutMilliseconds == 0 ?
+            1u : response->timeoutMilliseconds;
+    while (remainingPolls != 0 && response->length < maximum) {
+        IOLockLock(ivars->registerLock);
+        uint8_t lsr = TimeCardUARTReadRegister(
+            ivars, request->port, kTimeCardUARTRegisterLSR);
+        response->lineStatus |= lsr;
+        while ((lsr & kTimeCardUARTLSRDataReady) != 0 &&
+               response->length < maximum) {
+            response->data[response->length++] = TimeCardUARTReadRegister(
+                ivars, request->port, kTimeCardUARTRegisterRBR);
+            lsr = TimeCardUARTReadRegister(
+                ivars, request->port, kTimeCardUARTRegisterLSR);
+            response->lineStatus |= lsr;
+        }
+        IOLockUnlock(ivars->registerLock);
+
+        if (response->length != 0)
+            break;
+        --remainingPolls;
+        if (remainingPolls != 0)
+            IODelay(kTimeCardUARTPollDelayMicroseconds);
+    }
     return kIOReturnSuccess;
 }
 
@@ -2887,6 +3086,58 @@ SensorQueryAction(OSObject *, void *reference,
     return result;
 }
 
+static kern_return_t
+UARTObserveAction(OSObject *, void *reference,
+                  IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardUARTObserve *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardUARTObserve response = {};
+    const kern_return_t result = driver->ObserveUART(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+UARTConfigureAction(OSObject *, void *reference,
+                    IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *config = static_cast<const TimeCardUARTConfig *>(
+        arguments->structureInput->getBytesNoCopy());
+    return driver->ConfigureUART(config);
+}
+
+static kern_return_t
+UARTReadAction(OSObject *, void *reference,
+               IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardUARTReadRequest *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardUARTTransfer response = {};
+    const kern_return_t result = driver->ReadUART(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
 static const IOUserClientMethodDispatch kTimeCardDispatch[
     kTimeCardMethodCount] = {
     {GetInfoAction, false, 0, 0, 0, sizeof(TimeCardInfo)},
@@ -2911,6 +3162,11 @@ static const IOUserClientMethodDispatch kTimeCardDispatch[
     {I2CMuxSetAction, false, 0, sizeof(TimeCardI2CMuxControl), 0,
      sizeof(TimeCardI2CMuxControl)},
     {SensorQueryAction, false, 0, 0, 0, sizeof(TimeCardSensorTelemetry)},
+    {UARTObserveAction, false, 0, sizeof(TimeCardUARTObserve), 0,
+     sizeof(TimeCardUARTObserve)},
+    {UARTConfigureAction, false, 0, sizeof(TimeCardUARTConfig), 0, 0},
+    {UARTReadAction, false, 0, sizeof(TimeCardUARTReadRequest), 0,
+     sizeof(TimeCardUARTTransfer)},
 };
 
 kern_return_t

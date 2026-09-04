@@ -42,6 +42,15 @@ AssertDriverAccessesFit(const TimeCardRegisterMap &map)
         assert(TimeCardRangeFits(map.requiredBarSize,
                                  map.i2cOffset, kTimeCardI2CRegisterLength));
     }
+    if (TimeCardRegisterMapHasUART(&map)) {
+        for (uint32_t port = 0; port < TIMECARD_UART_COUNT; ++port) {
+            if (TimeCardRegisterMapHasUARTPort(&map, port)) {
+                assert(TimeCardRangeFits(
+                    map.requiredBarSize, map.uartOffsets[port],
+                    kTimeCardUARTRegisterLength));
+            }
+        }
+    }
 }
 
 int main()
@@ -104,6 +113,12 @@ int main()
     assert(TimeCardRegisterMapHasI2C(&facebookMSI));
     assert((facebookMSI.capabilities & kTimeCardCapabilityI2C) != 0);
     assert((facebookMSI.capabilities & kTimeCardCapabilitySensors) != 0);
+    assert((facebookMSI.capabilities & kTimeCardCapabilityUART) != 0);
+    assert(TimeCardRegisterMapHasUART(&facebookMSI));
+    assert(TimeCardRegisterMapHasUARTPort(&facebookMSI, TIMECARD_UART_GNSS));
+    assert(TimeCardRegisterMapHasUARTPort(&facebookMSI, TIMECARD_UART_GNSS2));
+    assert(TimeCardRegisterMapHasUARTPort(&facebookMSI, TIMECARD_UART_MAC));
+    assert(TimeCardRegisterMapHasUARTPort(&facebookMSI, TIMECARD_UART_NMEA));
     assert(facebookMSI.requiredBarSize >=
            facebookMSI.i2cOffset + kTimeCardI2CRegisterLength);
     assert(facebookMSI.requiredBarSize <
@@ -117,6 +132,7 @@ int main()
     assert(facebookMSIX.clockOffset == 0x03000000u);
     assert(facebookMSIX.todOffset == 0x03050000u);
     assert(facebookMSIX.uartOffsets[3] == 0x02191000u);
+    assert((facebookMSIX.capabilities & kTimeCardCapabilityUART) != 0);
     AssertExactBarBoundary(facebookMSIX);
     AssertDriverAccessesFit(facebookMSIX);
 
@@ -165,9 +181,14 @@ int main()
     assert((art.capabilities & kTimeCardCapabilityLED) == 0);
     assert((art.capabilities & kTimeCardCapabilityI2C) == 0);
     assert((art.capabilities & kTimeCardCapabilitySensors) == 0);
+    assert((art.capabilities & kTimeCardCapabilityUART) != 0);
     assert(art.uartOffsets[0] == 0x00161000u);
     assert(art.uartOffsets[1] == 0);
     assert(art.uartOffsets[2] == 0x00190000u);
+    assert(TimeCardRegisterMapHasUARTPort(&art, TIMECARD_UART_GNSS));
+    assert(!TimeCardRegisterMapHasUARTPort(&art, TIMECARD_UART_GNSS2));
+    assert(TimeCardRegisterMapHasUARTPort(&art, TIMECARD_UART_MAC));
+    assert(!TimeCardRegisterMapHasUARTPort(&art, TIMECARD_UART_NMEA));
     AssertExactBarBoundary(art);
     AssertDriverAccessesFit(art);
 
@@ -187,8 +208,13 @@ int main()
     assert(TimeCardRegisterMapHasI2C(&adva));
     assert((adva.capabilities & kTimeCardCapabilityI2C) != 0);
     assert((adva.capabilities & kTimeCardCapabilitySensors) != 0);
+    assert((adva.capabilities & kTimeCardCapabilityUART) != 0);
     assert(adva.uartOffsets[1] == 0);
     assert(adva.uartOffsets[2] == 0x00181000u);
+    assert(TimeCardRegisterMapHasUARTPort(&adva, TIMECARD_UART_GNSS));
+    assert(!TimeCardRegisterMapHasUARTPort(&adva, TIMECARD_UART_GNSS2));
+    assert(TimeCardRegisterMapHasUARTPort(&adva, TIMECARD_UART_MAC));
+    assert(!TimeCardRegisterMapHasUARTPort(&adva, TIMECARD_UART_NMEA));
     AssertExactBarBoundary(adva);
     AssertExactBarBoundary(advaX1);
     AssertDriverAccessesFit(adva);

@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define TIMECARD_ABI_VERSION 7u
+#define TIMECARD_ABI_VERSION 8u
 #define TIMECARD_DRIVER_VERSION 0x00000002u
 #define TIMECARD_SERVICE_CLASS "TimeCardDriver"
 #define TIMECARD_DRIVER_BUNDLE_ID "org.opentimeserver.timecard.macos.driver"
@@ -29,6 +29,9 @@ enum TimeCardExternalMethod {
     kTimeCardMethodI2CMuxQuery = 11,
     kTimeCardMethodI2CMuxSet = 12,
     kTimeCardMethodSensorQuery = 13,
+    kTimeCardMethodUARTObserve = 14,
+    kTimeCardMethodUARTConfigure = 15,
+    kTimeCardMethodUARTRead = 16,
     kTimeCardMethodCount
 };
 
@@ -60,7 +63,8 @@ enum TimeCardCapability {
     kTimeCardCapabilitySMA = 1u << 4,
     kTimeCardCapabilityLED = 1u << 5,
     kTimeCardCapabilityI2C = 1u << 6,
-    kTimeCardCapabilitySensors = 1u << 7
+    kTimeCardCapabilitySensors = 1u << 7,
+    kTimeCardCapabilityUART = 1u << 8
 };
 
 enum TimeCardSMADirection {
@@ -264,6 +268,47 @@ typedef struct TimeCardI2CMuxControl {
     uint32_t reserved[3];
 } TimeCardI2CMuxControl;
 
+#define TIMECARD_UART_COUNT 4u
+#define TIMECARD_UART_MAX_TRANSFER 256u
+#define TIMECARD_UART_GNSS 0u
+#define TIMECARD_UART_GNSS2 1u
+#define TIMECARD_UART_MAC 2u
+#define TIMECARD_UART_NMEA 3u
+
+enum TimeCardUARTObserveFlag {
+    kTimeCardUARTObserveFlagPresent = 1u << 0,
+    kTimeCardUARTObserveFlagActivity = 1u << 1
+};
+
+typedef struct TimeCardUARTConfig {
+    uint32_t port;
+    uint32_t baud;
+} TimeCardUARTConfig;
+
+typedef struct TimeCardUARTReadRequest {
+    uint32_t port;
+    uint32_t maximumBytes;
+    uint32_t timeoutMilliseconds;
+    uint32_t reserved;
+} TimeCardUARTReadRequest;
+
+typedef struct TimeCardUARTTransfer {
+    uint32_t port;
+    uint32_t length;
+    uint32_t timeoutMilliseconds;
+    uint32_t lineStatus;
+    uint8_t data[TIMECARD_UART_MAX_TRANSFER];
+} TimeCardUARTTransfer;
+
+typedef struct TimeCardUARTObserve {
+    uint32_t size;
+    uint32_t port;
+    uint32_t timeoutMilliseconds;
+    uint32_t flags;
+    uint32_t lineStatus;
+    uint32_t reserved[3];
+} TimeCardUARTObserve;
+
 #define TIMECARD_SENSOR_MAX_READINGS 16u
 
 enum TimeCardSensorType {
@@ -352,6 +397,14 @@ static_assert(sizeof(TimeCardI2CTransfer) == 276,
               "TimeCardI2CTransfer ABI changed");
 static_assert(sizeof(TimeCardI2CMuxControl) == 32,
               "TimeCardI2CMuxControl ABI changed");
+static_assert(sizeof(TimeCardUARTConfig) == 8,
+              "TimeCardUARTConfig ABI changed");
+static_assert(sizeof(TimeCardUARTReadRequest) == 16,
+              "TimeCardUARTReadRequest ABI changed");
+static_assert(sizeof(TimeCardUARTTransfer) == 272,
+              "TimeCardUARTTransfer ABI changed");
+static_assert(sizeof(TimeCardUARTObserve) == 32,
+              "TimeCardUARTObserve ABI changed");
 static_assert(sizeof(TimeCardSensorReading) == 48,
               "TimeCardSensorReading ABI changed");
 static_assert(sizeof(TimeCardSensorTelemetry) == 832,
