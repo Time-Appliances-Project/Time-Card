@@ -2747,7 +2747,8 @@ private struct ReceiverStreamSummaryView: View {
     private var fixSentence: NMEASentence? {
         nmeaSentences.last {
             $0.formatter == "GGA" || $0.formatter == "RMC" ||
-                $0.formatter == "GSA"
+                $0.formatter == "GSA" || $0.formatter == "GLL" ||
+                $0.formatter == "GNS"
         }
     }
 
@@ -2760,7 +2761,7 @@ private struct ReceiverStreamSummaryView: View {
     private var fixDetail: String {
         fixFrame?.summary ??
             fixSentence?.summary ??
-            "No NAV-PVT, NAV-STATUS, GGA, RMC, or GSA data decoded."
+            "No NAV-PVT, NAV-STATUS, GGA, RMC, GSA, GLL, or GNS data decoded."
     }
 
     private var fixDetailAvailable: Bool {
@@ -2775,7 +2776,8 @@ private struct ReceiverStreamSummaryView: View {
 
     private var satelliteSentence: NMEASentence? {
         nmeaSentences.last {
-            $0.formatter == "GSV" || $0.formatter == "GGA"
+            $0.formatter == "GSV" || $0.formatter == "GGA" ||
+                $0.formatter == "GNS"
         }
     }
 
@@ -2792,7 +2794,7 @@ private struct ReceiverStreamSummaryView: View {
     private var satelliteDetail: String {
         satelliteFrame?.summary ??
             satelliteSentence?.summary ??
-            "No NAV-SAT, GSV, or GGA satellite data decoded."
+            "No NAV-SAT, GSV, GGA, or GNS satellite data decoded."
     }
 
     private var satelliteDetailAvailable: Bool {
@@ -2821,7 +2823,8 @@ private struct ReceiverStreamSummaryView: View {
 
     private var timingSentence: NMEASentence? {
         nmeaSentences.last {
-            $0.formatter == "ZDA" || $0.formatter == "RMC"
+            $0.formatter == "ZDA" || $0.formatter == "RMC" ||
+                $0.formatter == "GLL" || $0.formatter == "GNS"
         }
     }
 
@@ -3174,6 +3177,20 @@ private struct NMEASentence: Identifiable, Equatable {
             return gsaSummary
         case "GSV":
             return gsvSummary
+        case "GLL":
+            return gllSummary
+        case "VTG":
+            return vtgSummary
+        case "GNS":
+            return gnsSummary
+        case "GST":
+            return gstSummary
+        case "TXT":
+            return txtSummary
+        case "HDT":
+            return hdtSummary
+        case "THS":
+            return thsSummary
         case "ZDA":
             return zdaSummary
         default:
@@ -3293,6 +3310,66 @@ private struct NMEASentence: Identifiable, Equatable {
         return "Satellites in view \(satellites), message \(messageNumber) of \(messageCount)."
     }
 
+    private var gllSummary: String {
+        let latitude = coordinate(value: field(0), hemisphere: field(1))
+        let longitude = coordinate(value: field(2), hemisphere: field(3))
+        let time = field(4, fallback: "unknown time")
+        let status = field(5) == "A" ? "active" : "void"
+        let mode = field(6, fallback: "unknown mode")
+        return "Geographic position \(status), \(latitude), \(longitude), time \(time), mode \(mode)."
+    }
+
+    private var vtgSummary: String {
+        let trueCourse = field(0, fallback: "?")
+        let magneticCourse = field(2, fallback: "?")
+        let speedKnots = field(4, fallback: "?")
+        let speedKilometers = field(6, fallback: "?")
+        let mode = field(8, fallback: "unknown mode")
+        return "Course \(trueCourse)° true, \(magneticCourse)° magnetic, speed \(speedKnots) knots, \(speedKilometers) km/h, mode \(mode)."
+    }
+
+    private var gnsSummary: String {
+        let time = field(0, fallback: "unknown time")
+        let latitude = coordinate(value: field(1), hemisphere: field(2))
+        let longitude = coordinate(value: field(3), hemisphere: field(4))
+        let mode = field(5, fallback: "unknown mode")
+        let satellites = field(6, fallback: "?")
+        let hdop = field(7, fallback: "?")
+        let altitude = field(8, fallback: "?") + " m"
+        return "GNSS fix mode \(mode), \(satellites) satellites, HDOP \(hdop), \(latitude), \(longitude), altitude \(altitude), time \(time)."
+    }
+
+    private var gstSummary: String {
+        let time = field(0, fallback: "unknown time")
+        let rms = field(1, fallback: "?")
+        let major = field(2, fallback: "?")
+        let minor = field(3, fallback: "?")
+        let orientation = field(4, fallback: "?")
+        let latitudeSigma = field(5, fallback: "?")
+        let longitudeSigma = field(6, fallback: "?")
+        let altitudeSigma = field(7, fallback: "?")
+        return "Pseudo-range noise RMS \(rms) m, error ellipse \(major)/\(minor) m at \(orientation)°, lat sigma \(latitudeSigma) m, lon sigma \(longitudeSigma) m, alt sigma \(altitudeSigma) m, time \(time)."
+    }
+
+    private var txtSummary: String {
+        let messageNumber = field(1, fallback: "?")
+        let messageCount = field(0, fallback: "?")
+        let messageType = field(2, fallback: "?")
+        let text = field(3, fallback: "empty text")
+        return "Text message \(messageNumber) of \(messageCount), type \(messageType): \(text)"
+    }
+
+    private var hdtSummary: String {
+        let heading = field(0, fallback: "?")
+        return "Heading \(heading)° true."
+    }
+
+    private var thsSummary: String {
+        let heading = field(0, fallback: "?")
+        let status = thsStatus(field(1))
+        return "True heading \(heading)°, status \(status)."
+    }
+
     private var zdaSummary: String {
         let time = field(0, fallback: "unknown time")
         let day = field(1, fallback: "??")
@@ -3357,6 +3434,17 @@ private struct NMEASentence: Identifiable, Equatable {
         case "1": "none"
         case "2": "2-D"
         case "3": "3-D"
+        default: code ?? "unknown"
+        }
+    }
+
+    private func thsStatus(_ code: String?) -> String {
+        switch code {
+        case "A": "autonomous"
+        case "E": "estimated"
+        case "M": "manual"
+        case "S": "simulated"
+        case "V": "invalid"
         default: code ?? "unknown"
         }
     }

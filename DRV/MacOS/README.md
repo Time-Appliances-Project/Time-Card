@@ -59,6 +59,8 @@ The current implementation provides:
     NMEA and UBX decoder labs, a mixed UBX/NMEA/RTCM3 receiver timeline, and
     receiver summary rollups for firmware, fix, satellites, timing, position, a
     satellite sky map, and per-satellite signal records
+  - NMEA summaries for GGA, RMC, GSA, GSV, GLL, VTG, GNS, ZDA, GST, TXT, HDT,
+    and THS receiver sentences
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
