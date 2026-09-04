@@ -494,7 +494,7 @@ private enum MacWorkspace: String {
         case .timing: "Generator, counter, and event ABI"
         case .fpga: "Versioned FPGA-core register ABI"
         case .sensors: "I2C/sensor/IMU ABI"
-        case .i2c: "I2C transaction and LED ABI"
+        case .i2c: "I2C diagnostics, mux, and LED ABI"
         case .flash: "SPI-flash query/program/readback ABI"
         }
     }
@@ -571,10 +571,10 @@ private enum MacWorkspace: String {
             ]
         case .i2c:
             return [
-                ("AXI IIC health", "Needs I2C controller status ABI"),
-                ("Known-device probes", "Needs safe transaction ABI"),
-                ("EEPROM/register workbench", "Needs paging and timeout controls"),
-                ("RGB subsystem LEDs", "Needs LED controller ABI"),
+                ("AXI IIC health", "Available through DriverKit ABI v5 and CLI"),
+                ("Known-device probes", "Available through zero-byte probe ABI"),
+                ("Mux routing", "Available through guarded mux ABI"),
+                ("RGB subsystem LEDs", "Available through LED controller ABI"),
             ]
         case .flash:
             return [

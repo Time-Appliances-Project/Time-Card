@@ -98,6 +98,7 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
         if (capabilities & (1 << 3)) != 0 { names.append("ToD") }
         if (capabilities & (1 << 4)) != 0 { names.append("SMA") }
         if (capabilities & (1 << 5)) != 0 { names.append("LEDs") }
+        if (capabilities & (1 << 6)) != 0 { names.append("I2C") }
         return names
     }
 
@@ -260,7 +261,7 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
 enum TimeCardClient {
     private static let serviceClass = "IOUserService"
     private static let userClassValue = "TimeCardDriver"
-    private static let supportedABIVersion: UInt32 = 4
+    private static let supportedABIVersion: UInt32 = 5
 
     static var localABILayoutIsValid: Bool {
         MemoryLayout<TimeCardTimeRaw>.size == 16

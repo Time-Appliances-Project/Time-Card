@@ -24,6 +24,7 @@ struct TimeCardDriver_IVars {
     uint64_t barSize;
     TimeCardRegisterMap registers;
     uint32_t i2cLEDAddress;
+    bool i2cMuxPresent;
     bool deviceOpen;
 };
 
@@ -935,6 +936,7 @@ enum {
     kXIICControlTxFIFOReset = 0x02u,
     kXIICStatusBusBusy = 0x04u,
     kXIICStatusRxEmpty = 0x40u,
+    kXIICStatusTxEmpty = 0x80u,
     kXIICInterruptArbLost = 0x01u,
     kXIICInterruptTxError = 0x02u,
     kXIICInterruptTxEmpty = 0x04u,
@@ -957,12 +959,12 @@ enum {
     kIS32FL3207SpreadSpectrum = 0x78u
 };
 
-typedef struct TimeCardI2CTransfer {
+typedef struct TimeCardI2CInternalTransfer {
     uint32_t controllerStatus;
     uint32_t interruptStatus;
     uint8_t data[255];
     uint32_t length;
-} TimeCardI2CTransfer;
+} TimeCardI2CInternalTransfer;
 
 static bool
 TimeCardI2CAddressValid(uint32_t address)
@@ -1230,7 +1232,7 @@ TimeCardI2CWriteLocked(IOPCIDevice *device, uint8_t memoryIndex,
                        uint32_t *interruptStatus)
 {
     if (!TimeCardI2CAddressValid(address) || data == nullptr ||
-        length == 0 || length > sizeof(TimeCardI2CTransfer::data))
+        length == 0 || length > sizeof(TimeCardI2CInternalTransfer::data))
         return kIOReturnBadArgument;
     *controllerStatus = 0;
     *interruptStatus = 0;
@@ -1260,7 +1262,7 @@ TimeCardI2CSetReceiveWatermark(IOPCIDevice *device, uint8_t memoryIndex,
 static void
 TimeCardI2CDrainReceiveFIFO(IOPCIDevice *device, uint8_t memoryIndex,
                             const TimeCardRegisterMap *map,
-                            TimeCardI2CTransfer *transfer,
+                            TimeCardI2CInternalTransfer *transfer,
                             uint32_t requestedLength)
 {
     uint32_t remaining = requestedLength - transfer->length;
@@ -1287,7 +1289,7 @@ static kern_return_t
 TimeCardI2CReadAttempt(IOPCIDevice *device, uint8_t memoryIndex,
                        const TimeCardRegisterMap *map, uint32_t address,
                        uint32_t subaddressLength, uint32_t subaddress,
-                       TimeCardI2CTransfer *transfer, uint32_t length)
+                       TimeCardI2CInternalTransfer *transfer, uint32_t length)
 {
     uint32_t remainingPolls = kTimeCardI2CDefaultPolls;
     uint32_t observedInterrupts = 0;
@@ -1399,11 +1401,11 @@ TimeCardI2CReadLocked(IOPCIDevice *device, uint8_t memoryIndex,
 {
     if (!TimeCardI2CAddressValid(address) || subaddressLength > 2u ||
         data == nullptr || length == 0 ||
-        length > sizeof(TimeCardI2CTransfer::data))
+        length > sizeof(TimeCardI2CInternalTransfer::data))
         return kIOReturnBadArgument;
 
     kern_return_t result = kIOReturnTimeout;
-    TimeCardI2CTransfer transfer = {};
+    TimeCardI2CInternalTransfer transfer = {};
     for (uint32_t attempt = 0; attempt < 2u; ++attempt) {
         transfer.length = 0;
         transfer.controllerStatus = 0;
@@ -1465,6 +1467,276 @@ TimeCardI2CMuxWriteLocked(IOPCIDevice *device, uint8_t memoryIndex,
     return TimeCardI2CWriteLocked(
         device, memoryIndex, map, kTimeCardI2CMuxAddress, &value, 1,
         controllerStatus, interruptStatus);
+}
+
+static kern_return_t
+TimeCardI2CProbeAttempt(IOPCIDevice *device, uint8_t memoryIndex,
+                        const TimeCardRegisterMap *map, uint32_t address,
+                        uint32_t *controllerStatus,
+                        uint32_t *interruptStatus)
+{
+    uint32_t remainingPolls = kTimeCardI2CDefaultPolls;
+    uint32_t observedInterrupts = 0;
+    uint8_t currentStatus = 0;
+    kern_return_t result =
+        TimeCardI2CPrepareTransfer(device, memoryIndex, map);
+    if (result != kIOReturnSuccess)
+        goto done;
+
+    TimeCardI2CArmPolling(device, memoryIndex, map);
+    TimeCardI2CQueueDynamicStart(
+        device, memoryIndex, map,
+        (uint16_t)(kXIICDynamicStop | (address << 1)));
+    TimeCardI2CClearInterruptMask(device, memoryIndex, map,
+                                  kXIICInterruptTxError |
+                                      kXIICInterruptBusNotBusy);
+
+    result = kIOReturnTimeout;
+    while (remainingPolls != 0) {
+        const uint32_t interrupts =
+            TimeCardI2CRead32(device, memoryIndex, map, kXIICIISROffset);
+        --remainingPolls;
+        observedInterrupts |= interrupts;
+        currentStatus =
+            TimeCardI2CRead8(device, memoryIndex, map, kXIICStatusOffset);
+        if ((interrupts & kXIICInterruptArbLost) != 0) {
+            result = kIOReturnIOError;
+            break;
+        }
+        if ((interrupts & kXIICInterruptTxError) != 0) {
+            result = kIOReturnNoDevice;
+            break;
+        }
+        if ((interrupts & kXIICInterruptBusNotBusy) != 0) {
+            result = kIOReturnSuccess;
+            break;
+        }
+        IODelay(kTimeCardI2CPollDelayUS);
+    }
+
+done:
+    *controllerStatus = currentStatus;
+    *interruptStatus = observedInterrupts;
+    (void)TimeCardI2CReset(device, memoryIndex, map);
+    return result;
+}
+
+static kern_return_t
+TimeCardI2CProbeLocked(IOPCIDevice *device, uint8_t memoryIndex,
+                       const TimeCardRegisterMap *map, uint32_t address,
+                       uint32_t *controllerStatus,
+                       uint32_t *interruptStatus)
+{
+    if (!TimeCardI2CAddressValid(address))
+        return kIOReturnBadArgument;
+    *controllerStatus = 0;
+    *interruptStatus = 0;
+    kern_return_t result = kIOReturnTimeout;
+    for (uint32_t attempt = 0; attempt < 2u; ++attempt) {
+        result = TimeCardI2CProbeAttempt(
+            device, memoryIndex, map, address, controllerStatus,
+            interruptStatus);
+        if (result == kIOReturnSuccess || result == kIOReturnNoDevice)
+            break;
+    }
+    return result;
+}
+
+static bool
+TimeCardDriverHasI2C(const TimeCardRegisterMap *map)
+{
+    return map != nullptr &&
+        (map->capabilities & kTimeCardCapabilityI2C) != 0 &&
+        TimeCardRegisterMapHasI2C(map);
+}
+
+kern_return_t
+TimeCardDriver::GetI2CStatus(TimeCardI2CStatus *status)
+{
+    if (status == nullptr || !ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (status->size < sizeof(*status))
+        return kIOReturnBadArgument;
+    if (!TimeCardDriverHasI2C(&ivars->registers))
+        return kIOReturnUnsupported;
+
+    IOLockLock(ivars->registerLock);
+    TimeCardI2CStatus response = {};
+    response.size = sizeof(response);
+    response.offset = ivars->registers.i2cOffset;
+    response.control = TimeCardI2CRead8(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        kXIICControlOffset);
+    response.status = TimeCardI2CRead8(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        kXIICStatusOffset);
+    response.interruptStatus = TimeCardI2CRead32(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        kXIICIISROffset);
+    response.interruptEnable = TimeCardI2CRead32(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        kXIICIIEROffset);
+    response.txFifoOccupancy = TimeCardI2CRead8(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        kXIICTxOccupancyOffset);
+    response.rxFifoOccupancy = TimeCardI2CRead8(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        kXIICRxOccupancyOffset);
+    response.flags = kTimeCardI2CFlagPresent;
+    if ((response.control & kXIICControlEnable) != 0)
+        response.flags |= kTimeCardI2CFlagEnabled;
+    if ((response.status & kXIICStatusBusBusy) != 0)
+        response.flags |= kTimeCardI2CFlagBusBusy;
+    if ((response.status & kXIICStatusRxEmpty) != 0)
+        response.flags |= kTimeCardI2CFlagRxEmpty;
+    if ((response.status & kXIICStatusTxEmpty) != 0)
+        response.flags |= kTimeCardI2CFlagTxEmpty;
+    if (ivars->i2cLEDAddress != 0)
+        response.knownDeviceMask |= kTimeCardI2CKnownDeviceLED;
+    if (ivars->i2cMuxPresent)
+        response.knownDeviceMask |= kTimeCardI2CKnownDeviceMux;
+    IOLockUnlock(ivars->registerLock);
+
+    *status = response;
+    return kIOReturnSuccess;
+}
+
+kern_return_t
+TimeCardDriver::ProbeI2C(TimeCardI2CProbe *probe)
+{
+    if (probe == nullptr || !ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (probe->size < sizeof(*probe) ||
+        !TimeCardI2CAddressValid(probe->address))
+        return kIOReturnBadArgument;
+    if (!TimeCardDriverHasI2C(&ivars->registers))
+        return kIOReturnUnsupported;
+
+    IOLockLock(ivars->registerLock);
+    TimeCardI2CProbe response = {};
+    response.size = sizeof(response);
+    response.address = probe->address;
+    kern_return_t result = TimeCardI2CProbeLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        probe->address, &response.controllerStatus,
+        &response.interruptStatus);
+    if (result == kIOReturnNoDevice) {
+        response.present = 0;
+        result = kIOReturnSuccess;
+    } else if (result == kIOReturnSuccess) {
+        response.present = 1;
+    }
+    IOLockUnlock(ivars->registerLock);
+
+    if (result == kIOReturnSuccess)
+        *probe = response;
+    return result;
+}
+
+kern_return_t
+TimeCardDriver::ReadI2C(const TimeCardI2CReadRequest *request,
+                        TimeCardI2CTransfer *response)
+{
+    if (request == nullptr || response == nullptr || !ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (request->size < sizeof(*request) ||
+        !TimeCardI2CAddressValid(request->address) ||
+        request->subaddressLength > 2u || request->length == 0 ||
+        request->length > TIMECARD_I2C_MAX_TRANSFER)
+        return kIOReturnBadArgument;
+    if (!TimeCardDriverHasI2C(&ivars->registers))
+        return kIOReturnUnsupported;
+
+    IOLockLock(ivars->registerLock);
+    TimeCardI2CTransfer local = {};
+    local.size = sizeof(local);
+    local.address = request->address;
+    local.length = request->length;
+    kern_return_t result = TimeCardI2CReadLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        request->address, request->subaddressLength, request->subaddress,
+        local.data, request->length, &local.controllerStatus,
+        &local.interruptStatus);
+    IOLockUnlock(ivars->registerLock);
+
+    if (result == kIOReturnSuccess)
+        *response = local;
+    return result;
+}
+
+kern_return_t
+TimeCardDriver::QueryI2CMux(TimeCardI2CMuxControl *control)
+{
+    if (control == nullptr || !ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (control->size < sizeof(*control))
+        return kIOReturnBadArgument;
+    if (!TimeCardDriverHasI2C(&ivars->registers))
+        return kIOReturnUnsupported;
+
+    IOLockLock(ivars->registerLock);
+    TimeCardI2CMuxControl response = {};
+    response.size = sizeof(response);
+    uint8_t channelMask = 0;
+    kern_return_t result = TimeCardI2CMuxReadLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        &channelMask, &response.controllerStatus,
+        &response.interruptStatus);
+    if (result == kIOReturnNoDevice) {
+        response.present = 0;
+        ivars->i2cMuxPresent = false;
+        result = kIOReturnSuccess;
+    } else if (result == kIOReturnSuccess) {
+        response.present = 1;
+        response.channelMask = channelMask;
+        ivars->i2cMuxPresent = true;
+    }
+    IOLockUnlock(ivars->registerLock);
+
+    if (result == kIOReturnSuccess)
+        *control = response;
+    return result;
+}
+
+kern_return_t
+TimeCardDriver::SetI2CMux(const TimeCardI2CMuxControl *request,
+                          TimeCardI2CMuxControl *response)
+{
+    if (request == nullptr || response == nullptr || !ivars->deviceOpen)
+        return kIOReturnNotReady;
+    if (request->size < sizeof(*request) ||
+        (request->channelMask & ~kTimeCardI2CMuxChannelMask) != 0)
+        return kIOReturnBadArgument;
+    if (!TimeCardDriverHasI2C(&ivars->registers))
+        return kIOReturnUnsupported;
+
+    IOLockLock(ivars->registerLock);
+    uint32_t controllerStatus = 0;
+    uint32_t interruptStatus = 0;
+    kern_return_t result = TimeCardI2CMuxWriteLocked(
+        ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+        (uint8_t)request->channelMask, &controllerStatus, &interruptStatus);
+    TimeCardI2CMuxControl local = {};
+    local.size = sizeof(local);
+    local.channelMask = request->channelMask;
+    local.controllerStatus = controllerStatus;
+    local.interruptStatus = interruptStatus;
+    if (result == kIOReturnSuccess) {
+        uint8_t channelMask = 0;
+        result = TimeCardI2CMuxReadLocked(
+            ivars->pciDevice, ivars->memoryIndex, &ivars->registers,
+            &channelMask, &local.controllerStatus, &local.interruptStatus);
+        if (result == kIOReturnSuccess) {
+            local.present = 1;
+            local.channelMask = channelMask;
+            ivars->i2cMuxPresent = true;
+        }
+    }
+    IOLockUnlock(ivars->registerLock);
+
+    if (result == kIOReturnSuccess)
+        *response = local;
+    return result;
 }
 
 static bool
@@ -1965,6 +2237,98 @@ LEDSetAction(OSObject *, void *reference,
     return result;
 }
 
+static kern_return_t
+I2CStatusAction(OSObject *, void *reference,
+                IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    TimeCardI2CStatus status = {sizeof(status)};
+    const kern_return_t result = driver->GetI2CStatus(&status);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&status, sizeof(status));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+I2CProbeAction(OSObject *, void *reference,
+               IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardI2CProbe *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardI2CProbe response = *request;
+    const kern_return_t result = driver->ProbeI2C(&response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+I2CReadAction(OSObject *, void *reference,
+              IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardI2CReadRequest *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardI2CTransfer response = {};
+    const kern_return_t result = driver->ReadI2C(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+I2CMuxQueryAction(OSObject *, void *reference,
+                  IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    TimeCardI2CMuxControl control = {sizeof(control)};
+    const kern_return_t result = driver->QueryI2CMux(&control);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&control, sizeof(control));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+I2CMuxSetAction(OSObject *, void *reference,
+                IOUserClientMethodArguments *arguments)
+{
+    auto *driver = static_cast<TimeCardDriver *>(reference);
+    if (arguments->structureInput == nullptr)
+        return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardI2CMuxControl *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardI2CMuxControl response = {};
+    const kern_return_t result = driver->SetI2CMux(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput =
+            OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr)
+            return kIOReturnNoMemory;
+    }
+    return result;
+}
+
 static const IOUserClientMethodDispatch kTimeCardDispatch[
     kTimeCardMethodCount] = {
     {GetInfoAction, false, 0, 0, 0, sizeof(TimeCardInfo)},
@@ -1980,6 +2344,14 @@ static const IOUserClientMethodDispatch kTimeCardDispatch[
      sizeof(TimeCardLEDControl)},
     {LEDSetAction, false, 0, sizeof(TimeCardLEDControl), 0,
      sizeof(TimeCardLEDControl)},
+    {I2CStatusAction, false, 0, 0, 0, sizeof(TimeCardI2CStatus)},
+    {I2CProbeAction, false, 0, sizeof(TimeCardI2CProbe), 0,
+     sizeof(TimeCardI2CProbe)},
+    {I2CReadAction, false, 0, sizeof(TimeCardI2CReadRequest), 0,
+     sizeof(TimeCardI2CTransfer)},
+    {I2CMuxQueryAction, false, 0, 0, 0, sizeof(TimeCardI2CMuxControl)},
+    {I2CMuxSetAction, false, 0, sizeof(TimeCardI2CMuxControl), 0,
+     sizeof(TimeCardI2CMuxControl)},
 };
 
 kern_return_t

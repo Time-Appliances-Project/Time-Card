@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define TIMECARD_ABI_VERSION 4u
+#define TIMECARD_ABI_VERSION 5u
 #define TIMECARD_DRIVER_VERSION 0x00000002u
 #define TIMECARD_SERVICE_CLASS "TimeCardDriver"
 #define TIMECARD_DRIVER_BUNDLE_ID "org.opentimeserver.timecard.macos.driver"
@@ -23,6 +23,11 @@ enum TimeCardExternalMethod {
     kTimeCardMethodSMASet = 5,
     kTimeCardMethodLEDQuery = 6,
     kTimeCardMethodLEDSet = 7,
+    kTimeCardMethodI2CStatus = 8,
+    kTimeCardMethodI2CProbe = 9,
+    kTimeCardMethodI2CRead = 10,
+    kTimeCardMethodI2CMuxQuery = 11,
+    kTimeCardMethodI2CMuxSet = 12,
     kTimeCardMethodCount
 };
 
@@ -52,7 +57,8 @@ enum TimeCardCapability {
     kTimeCardCapabilityCrossTimestamp = 1u << 2,
     kTimeCardCapabilityTOD = 1u << 3,
     kTimeCardCapabilitySMA = 1u << 4,
-    kTimeCardCapabilityLED = 1u << 5
+    kTimeCardCapabilityLED = 1u << 5,
+    kTimeCardCapabilityI2C = 1u << 6
 };
 
 enum TimeCardSMADirection {
@@ -191,6 +197,71 @@ typedef struct TimeCardLEDControl {
     uint32_t shortOutputMask;
 } TimeCardLEDControl;
 
+#define TIMECARD_I2C_MAX_TRANSFER 255u
+
+enum TimeCardI2CFlag {
+    kTimeCardI2CFlagPresent = 1u << 0,
+    kTimeCardI2CFlagEnabled = 1u << 1,
+    kTimeCardI2CFlagBusBusy = 1u << 2,
+    kTimeCardI2CFlagRxEmpty = 1u << 3,
+    kTimeCardI2CFlagTxEmpty = 1u << 4
+};
+
+enum TimeCardI2CKnownDevice {
+    kTimeCardI2CKnownDeviceMux = 1u << 0,
+    kTimeCardI2CKnownDeviceLED = 1u << 1
+};
+
+typedef struct TimeCardI2CStatus {
+    uint32_t size;
+    uint32_t flags;
+    uint64_t offset;
+    uint32_t control;
+    uint32_t status;
+    uint32_t interruptStatus;
+    uint32_t interruptEnable;
+    uint32_t txFifoOccupancy;
+    uint32_t rxFifoOccupancy;
+    uint32_t knownDeviceMask;
+    uint32_t reserved;
+} TimeCardI2CStatus;
+
+typedef struct TimeCardI2CProbe {
+    uint32_t size;
+    uint32_t address;
+    uint32_t present;
+    uint32_t controllerStatus;
+    uint32_t interruptStatus;
+    uint32_t reserved[3];
+} TimeCardI2CProbe;
+
+typedef struct TimeCardI2CReadRequest {
+    uint32_t size;
+    uint32_t address;
+    uint32_t subaddressLength;
+    uint32_t subaddress;
+    uint32_t length;
+    uint32_t reserved[3];
+} TimeCardI2CReadRequest;
+
+typedef struct TimeCardI2CTransfer {
+    uint32_t size;
+    uint32_t address;
+    uint32_t length;
+    uint32_t controllerStatus;
+    uint32_t interruptStatus;
+    uint8_t data[256];
+} TimeCardI2CTransfer;
+
+typedef struct TimeCardI2CMuxControl {
+    uint32_t size;
+    uint32_t present;
+    uint32_t channelMask;
+    uint32_t controllerStatus;
+    uint32_t interruptStatus;
+    uint32_t reserved[3];
+} TimeCardI2CMuxControl;
+
 #ifdef __cplusplus
 }
 
@@ -202,6 +273,16 @@ static_assert(sizeof(TimeCardSMAControl) == 32,
               "TimeCardSMAControl ABI changed");
 static_assert(sizeof(TimeCardLEDControl) == 48,
               "TimeCardLEDControl ABI changed");
+static_assert(sizeof(TimeCardI2CStatus) == 48,
+              "TimeCardI2CStatus ABI changed");
+static_assert(sizeof(TimeCardI2CProbe) == 32,
+              "TimeCardI2CProbe ABI changed");
+static_assert(sizeof(TimeCardI2CReadRequest) == 32,
+              "TimeCardI2CReadRequest ABI changed");
+static_assert(sizeof(TimeCardI2CTransfer) == 276,
+              "TimeCardI2CTransfer ABI changed");
+static_assert(sizeof(TimeCardI2CMuxControl) == 32,
+              "TimeCardI2CMuxControl ABI changed");
 #endif
 
 #endif /* TIMECARD_ABI_H */

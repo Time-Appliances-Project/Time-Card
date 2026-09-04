@@ -22,7 +22,7 @@ The current implementation provides:
 - Bracketed card/system cross timestamps
 - Version-gated clock and TOD status reads
 - Capability and field-validity reporting for absent or gated registers
-- A versioned, size-checked user-client ABI v4
+- A versioned, size-checked user-client ABI v5
 - SMA connector query and guarded route setting through DriverKit, including
   Linux-compatible fixed-route handling for FPGA images without writable SMA
   routing GPIO
@@ -31,6 +31,8 @@ The current implementation provides:
 - GNSS LED policy application through `timecardctl`, using ToD GNSS telemetry
   when valid and a clock-sync fallback while the exact GNSS image contract is
   still unavailable
+- Safe I2C diagnostics through DriverKit: AXI IIC status, zero-byte address
+  probes, bounded reads, and guarded mux query/set
 - A native SwiftUI Control Center with:
   - driver activation, update, and removal
   - live card discovery and explicit multi-card selection
@@ -41,8 +43,8 @@ The current implementation provides:
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
-  `sma-set`, `led`, `led-set`, `led-sma-auto`, `led-gnss-auto`, and
-  `led-auto`
+  `sma-set`, `led`, `led-set`, `led-sma-auto`, `led-gnss-auto`, `led-auto`,
+  `i2c-status`, `i2c-scan`, `i2c-read`, and `i2c-mux`
 
 The common PHC block is available on every matched profile. ART uses its own
 fixed layout and has no standard TOD block, so the driver never reads one.
@@ -56,12 +58,12 @@ Current upstream Linux defines the classic Meta/Celestica map and the fixed ART
 and ADVA maps. The shifted revision-02 map comes from this repository's
 LitePCIe gateware and Windows/Linux support; it is not currently in upstream
 Linux. The Meta/Facebook classic profile is hardware-validated on an Intel Mac
-Pro, including ABI v4 status, SMA fixed-route readback, and SMA LED policy
-application. Every other profile is covered by host-side layout and safety
-tests but still requires physical-card validation before a production release.
-Celestica cards programmed with the generic Meta PCI identity continue to
-receive safe common-PHC support, but board-specific R4006 identification will
-require the future EEPROM/I2C work.
+Pro, including ABI v5 status, SMA fixed-route readback, SMA/GNSS LED policy
+application, and I2C diagnostics. Every other profile is covered by host-side
+layout and safety tests but still requires physical-card validation before a
+production release. Celestica cards programmed with the generic Meta PCI
+identity continue to receive safe common-PHC support, but board-specific R4006
+identification will require EEPROM decoding on top of the new I2C read path.
 
 ## Project layout
 
@@ -197,7 +199,8 @@ the new driver build.
 7. Open the Control Center and verify that the Overview, Precision Clock, and
    Hardware pages show the selected card.
 8. Run `timecardctl.app/Contents/MacOS/timecardctl status`, followed by the
-   same executable with `get`, `sma`, `led`, and `led-auto`.
+   same executable with `get`, `sma`, `led`, `led-auto`, `i2c-status`,
+   `i2c-scan`, `i2c-read`, and `i2c-mux`.
 9. Compare the reported card time, core versions, and available status fields
    with the Linux reference setup.
 
@@ -211,8 +214,11 @@ and it does not yet apply a UTC/TAI correction.
 - Cross timestamps currently bracket the MMIO clock read with macOS realtime
   samples. PCIe PTM support is not implemented.
 - UARTs, PPS interrupts, external timestamp inputs beyond SMA route readback,
-  raw I2C access, SPI flash, frequency counters, and signal generators are not
-  implemented.
+  arbitrary raw I2C writes, SPI flash, frequency counters, and signal generators
+  are not implemented.
+- I2C support intentionally exposes diagnostics, probes, bounded reads, and mux
+  control only. General writes remain gated until the Control Center has device
+  profiles, paging rules, and write-safety warnings.
 - SMA routing is implemented for the classic, shifted LitePCIe, ART, and ADVA
   register maps. FPGA images with absent or fixed route GPIO report fixed
   direction and fixed function, and writable changes are rejected.

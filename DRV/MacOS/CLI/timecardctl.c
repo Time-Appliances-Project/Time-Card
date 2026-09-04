@@ -28,7 +28,12 @@ print_usage(FILE *stream)
             "       timecardctl led-set led red green blue [current]\n"
             "       timecardctl led-sma-auto\n"
             "       timecardctl led-gnss-auto\n"
-            "       timecardctl led-auto\n");
+            "       timecardctl led-auto\n"
+            "       timecardctl i2c-status\n"
+            "       timecardctl i2c-scan\n"
+            "       timecardctl i2c-read address [subaddress [length "
+            "[subaddress-length]]]\n"
+            "       timecardctl i2c-mux [channel-mask]\n");
 }
 
 static io_connect_t
@@ -197,7 +202,7 @@ command_status(io_connect_t connection)
     }
     printf("Register layout:  %s\n",
            TimeCardRegisterLayoutName(info.layout));
-    printf("Capabilities:     %s%s%s%s%s%s\n",
+    printf("Capabilities:     %s%s%s%s%s%s%s\n",
            (info.capabilities & kTimeCardCapabilityReadClock) != 0 ?
                "clock-read" : "no-clock-read",
            (info.capabilities & kTimeCardCapabilitySetClock) != 0 ?
@@ -209,7 +214,9 @@ command_status(io_connect_t connection)
            (info.capabilities & kTimeCardCapabilitySMA) != 0 ?
                ", SMA" : "",
            (info.capabilities & kTimeCardCapabilityLED) != 0 ?
-               ", LEDs" : "");
+               ", LEDs" : "",
+           (info.capabilities & kTimeCardCapabilityI2C) != 0 ?
+               ", I2C" : "");
     printf("Clock offset:     0x%" PRIx64 "\n", info.clockOffset);
     if ((info.validFields & kTimeCardInfoValidClockVersion) != 0)
         printf("Clock version:    0x%08x\n", info.clockVersion);
@@ -618,6 +625,160 @@ command_led_auto(io_connect_t connection, int argc, char **argv)
     return command_led_sma_auto(connection, 2, smaArgv);
 }
 
+static const char *
+i2c_bool(bool value)
+{
+    return value ? "yes" : "no";
+}
+
+static void
+print_i2c_status_flags(uint32_t flags)
+{
+    printf("%s%s%s%s%s",
+           (flags & kTimeCardI2CFlagPresent) != 0 ? "present" :
+                                                     "not-present",
+           (flags & kTimeCardI2CFlagEnabled) != 0 ? ", enabled" : "",
+           (flags & kTimeCardI2CFlagBusBusy) != 0 ? ", bus-busy" : "",
+           (flags & kTimeCardI2CFlagRxEmpty) != 0 ? ", rx-empty" : "",
+           (flags & kTimeCardI2CFlagTxEmpty) != 0 ? ", tx-empty" : "");
+}
+
+static int
+command_i2c_status(io_connect_t connection, int argc, char **argv)
+{
+    (void)argv;
+    if (argc != 2)
+        return 2;
+    TimeCardI2CStatus status = {.size = sizeof(status)};
+    if (call_output(connection, kTimeCardMethodI2CStatus, &status,
+                    sizeof(status)))
+        return 1;
+    printf("I2C offset:        0x%" PRIx64 "\n", status.offset);
+    printf("I2C flags:         ");
+    print_i2c_status_flags(status.flags);
+    putchar('\n');
+    printf("I2C control:       0x%02x\n", status.control);
+    printf("I2C status:        0x%02x\n", status.status);
+    printf("I2C interrupts:    status 0x%02x, enable 0x%02x\n",
+           status.interruptStatus, status.interruptEnable);
+    printf("I2C FIFO:          TX %u, RX %u\n", status.txFifoOccupancy,
+           status.rxFifoOccupancy);
+    printf("Known devices:     mux %s, LED %s\n",
+           i2c_bool((status.knownDeviceMask & kTimeCardI2CKnownDeviceMux) != 0),
+           i2c_bool((status.knownDeviceMask & kTimeCardI2CKnownDeviceLED) != 0));
+    return 0;
+}
+
+static int
+command_i2c_scan(io_connect_t connection, int argc, char **argv)
+{
+    (void)argv;
+    if (argc != 2)
+        return 2;
+    printf("I2C devices:");
+    unsigned found = 0;
+    for (uint32_t address = 0x08u; address <= 0x77u; address++) {
+        TimeCardI2CProbe probe = {
+            .size = sizeof(probe),
+            .address = address,
+        };
+        if (call_inout(connection, kTimeCardMethodI2CProbe,
+                       &probe, sizeof(probe), &probe, sizeof(probe)))
+            return 1;
+        if (probe.present != 0) {
+            printf(" 0x%02x", address);
+            found++;
+        }
+    }
+    if (found == 0)
+        printf(" none");
+    putchar('\n');
+    return 0;
+}
+
+static void
+print_i2c_transfer(const TimeCardI2CTransfer *transfer)
+{
+    printf("I2C 0x%02x read %u byte%s, controller 0x%02x, interrupts 0x%02x\n",
+           transfer->address, transfer->length,
+           transfer->length == 1 ? "" : "s", transfer->controllerStatus,
+           transfer->interruptStatus);
+    for (uint32_t i = 0; i < transfer->length; i++) {
+        if ((i % 16u) == 0)
+            printf("%04x:", i);
+        printf(" %02x", transfer->data[i]);
+        if ((i % 16u) == 15u || i + 1u == transfer->length)
+            putchar('\n');
+    }
+}
+
+static int
+command_i2c_read(io_connect_t connection, int argc, char **argv)
+{
+    if (argc < 3 || argc > 6)
+        return 2;
+    TimeCardI2CReadRequest request = {
+        .size = sizeof(request),
+        .address = (uint32_t)parse_ulong(argv[2], "I2C address"),
+        .subaddress = argc >= 4 ?
+            (uint32_t)parse_ulong(argv[3], "I2C subaddress") : 0,
+        .length = argc >= 5 ?
+            (uint32_t)parse_ulong(argv[4], "I2C read length") : 1,
+        .subaddressLength = argc >= 6 ?
+            (uint32_t)parse_ulong(argv[5], "I2C subaddress length") :
+            (argc >= 4 ? 1u : 0u),
+    };
+    if (request.address < 0x08u || request.address > 0x77u ||
+        request.subaddressLength > 2u || request.length == 0 ||
+        request.length > TIMECARD_I2C_MAX_TRANSFER)
+        return 2;
+    TimeCardI2CTransfer transfer = {0};
+    if (call_inout(connection, kTimeCardMethodI2CRead,
+                   &request, sizeof(request), &transfer, sizeof(transfer)))
+        return 1;
+    print_i2c_transfer(&transfer);
+    return 0;
+}
+
+static void
+print_i2c_mux(const TimeCardI2CMuxControl *control)
+{
+    if (control->present == 0) {
+        printf("I2C mux:           not present");
+    } else {
+        printf("I2C mux:           channel mask 0x%02x",
+               control->channelMask);
+    }
+    printf(", controller 0x%02x, interrupts 0x%02x\n",
+           control->controllerStatus, control->interruptStatus);
+}
+
+static int
+command_i2c_mux(io_connect_t connection, int argc, char **argv)
+{
+    if (argc > 3)
+        return 2;
+    TimeCardI2CMuxControl control = {
+        .size = sizeof(control),
+        .channelMask = argc == 3 ?
+            (uint32_t)parse_ulong(argv[2], "I2C mux channel mask") : 0,
+    };
+    if (argc == 2) {
+        if (call_output(connection, kTimeCardMethodI2CMuxQuery, &control,
+                        sizeof(control)))
+            return 1;
+    } else {
+        if ((control.channelMask & ~kTimeCardI2CMuxChannelMask) != 0)
+            return 2;
+        if (call_inout(connection, kTimeCardMethodI2CMuxSet,
+                       &control, sizeof(control), &control,
+                       sizeof(control)))
+            return 1;
+    }
+    print_i2c_mux(&control);
+    return 0;
+}
+
 static int
 command_get(io_connect_t connection)
 {
@@ -692,6 +853,14 @@ main(int argc, char **argv)
         status = command_led_gnss_auto(connection, argc, argv);
     else if (strcmp(argv[1], "led-auto") == 0)
         status = command_led_auto(connection, argc, argv);
+    else if (strcmp(argv[1], "i2c-status") == 0)
+        status = command_i2c_status(connection, argc, argv);
+    else if (strcmp(argv[1], "i2c-scan") == 0)
+        status = command_i2c_scan(connection, argc, argv);
+    else if (strcmp(argv[1], "i2c-read") == 0)
+        status = command_i2c_read(connection, argc, argv);
+    else if (strcmp(argv[1], "i2c-mux") == 0)
+        status = command_i2c_mux(connection, argc, argv);
     else {
         print_usage(stderr);
         status = 2;

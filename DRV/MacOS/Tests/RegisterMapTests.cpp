@@ -38,7 +38,7 @@ AssertDriverAccessesFit(const TimeCardRegisterMap &map)
         assert(TimeCardRangeFits(map.requiredBarSize,
                                  map.todOffset + kTimeCardTodVersion, 4));
     }
-    if (TimeCardRegisterMapHasLED(&map)) {
+    if (TimeCardRegisterMapHasI2C(&map)) {
         assert(TimeCardRangeFits(map.requiredBarSize,
                                  map.i2cOffset, kTimeCardI2CRegisterLength));
     }
@@ -101,6 +101,8 @@ int main()
     assert((facebookMSI.capabilities & kTimeCardCapabilityTOD) != 0);
     assert(TimeCardRegisterMapHasLED(&facebookMSI));
     assert((facebookMSI.capabilities & kTimeCardCapabilityLED) != 0);
+    assert(TimeCardRegisterMapHasI2C(&facebookMSI));
+    assert((facebookMSI.capabilities & kTimeCardCapabilityI2C) != 0);
     assert(facebookMSI.requiredBarSize >=
            facebookMSI.i2cOffset + kTimeCardI2CRegisterLength);
     assert(facebookMSI.requiredBarSize <
@@ -156,9 +158,11 @@ int main()
     assert(art.todOffset == 0);
     assert(!TimeCardRegisterMapHasTOD(&art));
     assert(!TimeCardRegisterMapHasLED(&art));
+    assert(!TimeCardRegisterMapHasI2C(&art));
     assert((art.capabilities & kTimeCardCapabilityReadClock) != 0);
     assert((art.capabilities & kTimeCardCapabilityTOD) == 0);
     assert((art.capabilities & kTimeCardCapabilityLED) == 0);
+    assert((art.capabilities & kTimeCardCapabilityI2C) == 0);
     assert(art.uartOffsets[0] == 0x00161000u);
     assert(art.uartOffsets[1] == 0);
     assert(art.uartOffsets[2] == 0x00190000u);
@@ -178,6 +182,8 @@ int main()
     assert(TimeCardRegisterMapHasTOD(&adva));
     assert(TimeCardRegisterMapHasLED(&adva));
     assert((adva.capabilities & kTimeCardCapabilityLED) != 0);
+    assert(TimeCardRegisterMapHasI2C(&adva));
+    assert((adva.capabilities & kTimeCardCapabilityI2C) != 0);
     assert(adva.uartOffsets[1] == 0);
     assert(adva.uartOffsets[2] == 0x00181000u);
     AssertExactBarBoundary(adva);

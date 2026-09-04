@@ -30,6 +30,13 @@ public:
     kern_return_t QueryLED(TimeCardLEDControl *control) LOCALONLY;
     kern_return_t SetLED(const TimeCardLEDControl *request,
                          TimeCardLEDControl *response) LOCALONLY;
+    kern_return_t GetI2CStatus(TimeCardI2CStatus *status) LOCALONLY;
+    kern_return_t ProbeI2C(TimeCardI2CProbe *probe) LOCALONLY;
+    kern_return_t ReadI2C(const TimeCardI2CReadRequest *request,
+                          TimeCardI2CTransfer *response) LOCALONLY;
+    kern_return_t QueryI2CMux(TimeCardI2CMuxControl *control) LOCALONLY;
+    kern_return_t SetI2CMux(const TimeCardI2CMuxControl *request,
+                            TimeCardI2CMuxControl *response) LOCALONLY;
 };
 
 #endif /* TIMECARD_DRIVER_IIG */
