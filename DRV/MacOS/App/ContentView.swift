@@ -6957,7 +6957,7 @@ private struct OperationsView: View {
 
                         Text(
                             supportBundleMessage.isEmpty
-                                ? "The ZIP includes diagnostics, self-test, configuration profiles, FPGA core readiness, receiver validation, serial inventory, serial preview, hardware UART, raw UART capture bytes, mixed receiver decode, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
+                                ? "The ZIP includes diagnostics, self-test, configuration profiles, FPGA core readiness, variant compatibility, receiver validation, serial inventory, serial preview, hardware UART, raw UART capture bytes, mixed receiver decode, receiver satellite records, sampling history, SMA, sensors, I2C, LEDs, and the session log."
                                 : supportBundleMessage
                         )
                         .font(.caption)
@@ -7141,6 +7141,11 @@ private struct OperationsView: View {
             into: stagingURL
         )
         try writeSupportText(
+            variantCompatibilityText,
+            named: "variant-compatibility.txt",
+            into: stagingURL
+        )
+        try writeSupportText(
             receiverValidationText,
             named: "receiver-validation.txt",
             into: stagingURL
@@ -7210,6 +7215,7 @@ private struct OperationsView: View {
             "self-test.txt",
             "configuration-profiles.txt",
             "fpga-core-readiness.txt",
+            "variant-compatibility.txt",
             "receiver-validation.txt",
             "serial-ports.csv",
             "serial-capture.txt",
@@ -7305,6 +7311,10 @@ private struct OperationsView: View {
 
     private var fpgaCoreReadinessText: String {
         TimeCardFPGACoreReadiness.reportText(for: monitor.snapshot)
+    }
+
+    private var variantCompatibilityText: String {
+        TimeCardBoardVariantCompatibility.reportText(for: monitor.snapshot)
     }
 
     private var receiverValidationText: String {
@@ -7851,6 +7861,13 @@ private struct SubsystemMapView: View {
                     subtitle: "Windows FPGA Engines features mapped to this card"
                 ) {
                     FPGACoreReadinessMatrixView(snapshot: monitor.snapshot)
+                }
+
+                ControlCenterPanel(
+                    title: "Board variant compatibility",
+                    subtitle: "Driver profile coverage for supported Time Card variants"
+                ) {
+                    BoardVariantCompatibilityView(snapshot: monitor.snapshot)
                 }
 
                 ControlCenterPanel(
@@ -8504,6 +8521,181 @@ private struct TimeCardFPGACoreReadiness: Identifiable {
                 lines.append("  Evidence: \(row.evidence)")
                 lines.append("  Next: \(row.nextStep)")
             }
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+private struct BoardVariantCompatibilityView: View {
+    let snapshot: TimeCardDeviceSnapshot?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                StatusPill(
+                    snapshot?.boardName ?? "No active board",
+                    snapshot == nil ? .secondary : .green
+                )
+                if let snapshot {
+                    StatusPill(snapshot.pciIdentity, .blue)
+                    StatusPill(snapshot.layoutName, .purple)
+                }
+                Spacer()
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 255), spacing: 12)],
+                spacing: 12
+            ) {
+                ForEach(TimeCardBoardVariantCompatibility.rows(for: snapshot)) { row in
+                    BoardVariantCompatibilityCard(row: row)
+                }
+            }
+
+            Text(
+                "The driver matches each supported PCI identity before MMIO "
+                    + "access and selects a profile-specific register map. "
+                    + "Only the active card is marked Active; the others remain "
+                    + "Supported until hardware is installed for live validation."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+        }
+    }
+}
+
+private struct BoardVariantCompatibilityCard: View {
+    let row: TimeCardBoardVariantCompatibility
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(row.name)
+                    .font(.headline)
+                Spacer()
+                StatusPill(row.state, row.accent)
+            }
+            InfoRow(label: "PCI ID", value: row.pciIdentity)
+            InfoRow(label: "Register map", value: row.registerMap)
+            InfoRow(label: "Live coverage", value: row.liveCoverage)
+            Text(row.note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        .padding(14)
+        .background(
+            row.accent.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(row.accent.opacity(0.18), lineWidth: 1)
+        )
+    }
+}
+
+private struct TimeCardBoardVariantCompatibility: Identifiable {
+    let id: UInt32
+    let name: String
+    let pciIdentity: String
+    let registerMap: String
+    let liveCoverage: String
+    let note: String
+    let active: Bool
+
+    var state: String {
+        active ? "Active" : "Supported"
+    }
+
+    var accent: Color {
+        active ? .green : .blue
+    }
+
+    static func rows(
+        for snapshot: TimeCardDeviceSnapshot?
+    ) -> [TimeCardBoardVariantCompatibility] {
+        func row(
+            id: UInt32,
+            name: String,
+            pciIdentity: String,
+            registerMap: String,
+            liveCoverage: String,
+            note: String
+        ) -> TimeCardBoardVariantCompatibility {
+            TimeCardBoardVariantCompatibility(
+                id: id,
+                name: name,
+                pciIdentity: pciIdentity,
+                registerMap: registerMap,
+                liveCoverage: liveCoverage,
+                note: note,
+                active: snapshot?.boardProfile == id ||
+                    snapshot?.pciIdentity == pciIdentity
+            )
+        }
+
+        return [
+            row(
+                id: 1,
+                name: "Meta/Facebook Time Card",
+                pciIdentity: "1d9b:0400",
+                registerMap: "Classic or shifted LitePCIe",
+                liveCoverage: "PHC, ToD, SMA, I2C, LEDs, sensors, UART",
+                note: "Hardware-validated on the Mac Pro with the classic map."
+            ),
+            row(
+                id: 2,
+                name: "Celestica R4006",
+                pciIdentity: "18d4:1008",
+                registerMap: "Classic or shifted LitePCIe",
+                liveCoverage: "PHC, ToD, SMA, I2C, LEDs, sensors, UART",
+                note: "Uses the Celestica sensor mux profile and LED path."
+            ),
+            row(
+                id: 3,
+                name: "Orolia/Safran ART",
+                pciIdentity: "1ad7:a000",
+                registerMap: "Fixed ART map",
+                liveCoverage: "PHC, ToD, fixed SMA route handling",
+                note: "Profile keeps ART fixed-route warnings visible before control."
+            ),
+            row(
+                id: 4,
+                name: "ADVA Time Card",
+                pciIdentity: "ad5a:0400",
+                registerMap: "Fixed common clock and ToD map",
+                liveCoverage: "PHC, ToD, SMA, I2C, LEDs, sensors",
+                note: "Uses the upstream Linux ADVA PCI identity and fixed map."
+            ),
+            row(
+                id: 5,
+                name: "ADVA Time Card X1",
+                pciIdentity: "ad5a:0410",
+                registerMap: "Fixed common clock and ToD map",
+                liveCoverage: "PHC, ToD, SMA, I2C, LEDs, sensors",
+                note: "Uses the upstream Linux ADVA X1 PCI identity and fixed map."
+            ),
+        ]
+    }
+
+    static func reportText(for snapshot: TimeCardDeviceSnapshot?) -> String {
+        var lines = ["Time Card macOS board variant compatibility"]
+        if let snapshot {
+            lines.append("Active board: \(snapshot.boardName)")
+            lines.append("Active PCI ID: \(snapshot.pciIdentity)")
+            lines.append("Active layout: \(snapshot.layoutName)")
+        } else {
+            lines.append("Active board: unavailable")
+        }
+        for row in rows(for: snapshot) {
+            lines.append("")
+            lines.append("\(row.name): \(row.state)")
+            lines.append("PCI ID: \(row.pciIdentity)")
+            lines.append("Register map: \(row.registerMap)")
+            lines.append("Live coverage: \(row.liveCoverage)")
+            lines.append("Note: \(row.note)")
         }
         return lines.joined(separator: "\n")
     }

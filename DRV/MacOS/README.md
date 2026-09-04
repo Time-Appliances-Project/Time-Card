@@ -78,6 +78,8 @@ The current implementation provides:
     and RTCM3 correction CRC status
   - polished Windows-style LED policy preset cards for GNSS health, SMA
     direction, and full front-panel status, with guarded verified readback
+  - a board-variant compatibility matrix for Meta/Facebook, Celestica R4006,
+    Orolia/Safran ART, ADVA, and ADVA X1 profiles, also exported in support ZIPs
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
