@@ -201,7 +201,10 @@ foreach(required_control_center_monitor IN ITEMS
         "TimeCardSelfTestReport"
         "buildSelfTestReport"
         "refreshSerialPorts"
-        "serialCaptureInProgress")
+        "serialCaptureInProgress"
+        "TimeCardSessionLogEntry"
+        "appendSessionLog"
+        "clearSessionLog")
     string(FIND "${control_center_monitor}" "${required_control_center_monitor}" monitor_offset)
     if(monitor_offset EQUAL -1)
         message(FATAL_ERROR
@@ -239,7 +242,12 @@ foreach(required_control_center_view IN ITEMS
         "Checksum OK"
         "Serial preview capture"
         "Capture Preview"
-        "Decode Capture")
+        "Decode Capture"
+        "Session log and support bundle"
+        "Save Support ZIP"
+        "Copy Session Log"
+        "supportBundleManifestText"
+        "writeSupportBundle")
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)
         message(FATAL_ERROR

@@ -24,6 +24,21 @@ struct SensorHistoryPoint: Identifiable, Equatable, Sendable {
     let value: Double
 }
 
+enum TimeCardSessionLogSeverity: String, Equatable, Sendable {
+    case info = "Info"
+    case success = "Success"
+    case warning = "Warning"
+    case error = "Error"
+}
+
+struct TimeCardSessionLogEntry: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let timestamp: Date
+    let severity: TimeCardSessionLogSeverity
+    let category: String
+    let message: String
+}
+
 enum TimeCardSelfTestSeverity: String, Equatable, Sendable {
     case pass = "Pass"
     case warning = "Warning"
@@ -182,6 +197,7 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var serialMessage = ""
     @Published private(set) var serialCapture: TimeCardSerialCapture?
     @Published private(set) var serialCaptureInProgress = false
+    @Published private(set) var sessionLog: [TimeCardSessionLogEntry] = []
 
     private var refreshTimer: Timer?
     private var nextAutomaticAttempt = Date.distantPast
@@ -189,8 +205,17 @@ final class TimeCardMonitor: ObservableObject {
     private var refreshInProgress = false
     private var manualRefreshPending = false
     private let historyCapacity = 120
+    private let sessionLogCapacity = 300
+    private var lastLoggedServiceID: UInt64?
+    private var lastLoggedSyncState = ""
+    private var lastLoggedFailure = ""
 
     init() {
+        appendSessionLog(
+            severity: .info,
+            category: "App",
+            message: "Time Card Control Center started."
+        )
         refresh()
         refreshSerialPorts()
         refreshTimer = Timer.scheduledTimer(
@@ -223,6 +248,11 @@ final class TimeCardMonitor: ObservableObject {
         i2cOperationMessage = ""
         selfTestReport = nil
         selfTestMessage = ""
+        appendSessionLog(
+            severity: .info,
+            category: "Device",
+            message: "Selected Time Card service \(serviceID)."
+        )
         refresh()
     }
 
@@ -230,6 +260,11 @@ final class TimeCardMonitor: ObservableObject {
         guard !serialRefreshInProgress else { return }
         serialRefreshInProgress = true
         serialMessage = "Refreshing macOS serial ports..."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: "Refreshing macOS serial port inventory."
+        )
 
         Task { [weak self] in
             let ports = await Task.detached(priority: .utility) {
@@ -242,6 +277,11 @@ final class TimeCardMonitor: ObservableObject {
             self.serialMessage = ports.isEmpty
                 ? "No macOS serial ports were found."
                 : "\(ports.count) macOS serial port(s) found."
+            self.appendSessionLog(
+                severity: ports.isEmpty ? .warning : .success,
+                category: "UART",
+                message: self.serialMessage
+            )
         }
     }
 
@@ -250,6 +290,11 @@ final class TimeCardMonitor: ObservableObject {
         serialCaptureInProgress = true
         serialCapture = nil
         serialMessage = "Capturing serial preview from \(portPath)..."
+        appendSessionLog(
+            severity: .info,
+            category: "UART",
+            message: "Starting bounded preview from \(portPath) at \(baudRate) baud."
+        )
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -272,11 +317,30 @@ final class TimeCardMonitor: ObservableObject {
                 self.serialCapture = capture
                 self.serialMessage =
                     "Captured \(capture.byteCount) byte(s) from \(capture.portPath)."
+                self.appendSessionLog(
+                    severity: capture.byteCount == 0 ? .warning : .success,
+                    category: "UART",
+                    message: self.serialMessage
+                )
             case .failure(let error):
                 self.serialMessage =
                     "Serial preview failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "UART",
+                    message: self.serialMessage
+                )
             }
         }
+    }
+
+    func clearSessionLog() {
+        sessionLog.removeAll(keepingCapacity: true)
+        appendSessionLog(
+            severity: .info,
+            category: "App",
+            message: "Session log cleared."
+        )
     }
 
     func refresh() {
@@ -297,6 +361,11 @@ final class TimeCardMonitor: ObservableObject {
 
         commandInProgress = true
         commandMessage = "Setting Time Card from macOS system time..."
+        appendSessionLog(
+            severity: .info,
+            category: "Clock",
+            message: commandMessage
+        )
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -313,9 +382,19 @@ final class TimeCardMonitor: ObservableObject {
             switch result {
             case .success:
                 self.commandMessage = "Time Card clock was set from macOS system time."
+                self.appendSessionLog(
+                    severity: .success,
+                    category: "Clock",
+                    message: self.commandMessage
+                )
                 self.refresh()
             case .failure(let error):
                 self.commandMessage = "Set-time failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "Clock",
+                    message: self.commandMessage
+                )
             }
         }
     }
@@ -347,8 +426,18 @@ final class TimeCardMonitor: ObservableObject {
             case .success(let routes):
                 self.smaRoutes = routes
                 self.smaMessage = "SMA connector states refreshed."
+                self.appendSessionLog(
+                    severity: .success,
+                    category: "SMA",
+                    message: self.smaMessage
+                )
             case .failure(let error):
                 self.smaMessage = "SMA refresh failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "SMA",
+                    message: self.smaMessage
+                )
             }
         }
     }
@@ -366,6 +455,11 @@ final class TimeCardMonitor: ObservableObject {
 
         commandInProgress = true
         smaMessage = "Applying SMA \(connector) route..."
+        appendSessionLog(
+            severity: .info,
+            category: "SMA",
+            message: smaMessage
+        )
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -396,9 +490,19 @@ final class TimeCardMonitor: ObservableObject {
                 }
                 self.smaRoutes = routes
                 self.smaMessage = "SMA \(route.connector) route applied and verified."
+                self.appendSessionLog(
+                    severity: .success,
+                    category: "SMA",
+                    message: self.smaMessage
+                )
                 self.refresh()
             case .failure(let error):
                 self.smaMessage = "SMA apply failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "SMA",
+                    message: self.smaMessage
+                )
             }
         }
     }
@@ -418,6 +522,11 @@ final class TimeCardMonitor: ObservableObject {
         i2cOperationInProgress = true
         i2cTransfer = nil
         i2cOperationMessage = "Scanning I2C addresses 0x08 through 0x77..."
+        appendSessionLog(
+            severity: .info,
+            category: "I2C",
+            message: i2cOperationMessage
+        )
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -445,10 +554,20 @@ final class TimeCardMonitor: ObservableObject {
                     self.i2cOperationMessage =
                         "I2C scan completed: \(present.count) device(s) responded at \(addresses)."
                 }
+                self.appendSessionLog(
+                    severity: present.isEmpty ? .warning : .success,
+                    category: "I2C",
+                    message: self.i2cOperationMessage
+                )
                 self.refresh()
             case .failure(let error):
                 self.i2cOperationMessage =
                     "I2C scan failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "I2C",
+                    message: self.i2cOperationMessage
+                )
             }
         }
     }
@@ -468,6 +587,11 @@ final class TimeCardMonitor: ObservableObject {
         i2cOperationMessage = String(
             format: "Setting I2C mux channel mask to 0x%02x...",
             channelMask & 0xff
+        )
+        appendSessionLog(
+            severity: .info,
+            category: "I2C",
+            message: i2cOperationMessage
         )
 
         Task { [weak self] in
@@ -495,10 +619,20 @@ final class TimeCardMonitor: ObservableObject {
                     format: "I2C mux set and verified at 0x%02x.",
                     mux.channelMask & 0xff
                 )
+                self.appendSessionLog(
+                    severity: .success,
+                    category: "I2C",
+                    message: self.i2cOperationMessage
+                )
                 self.refresh()
             case .failure(let error):
                 self.i2cOperationMessage =
                     "I2C mux set failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "I2C",
+                    message: self.i2cOperationMessage
+                )
             }
         }
     }
@@ -522,6 +656,11 @@ final class TimeCardMonitor: ObservableObject {
 
         i2cOperationInProgress = true
         i2cOperationMessage = "Setting \(led.label) LED..."
+        appendSessionLog(
+            severity: .info,
+            category: "LED",
+            message: i2cOperationMessage
+        )
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -548,10 +687,20 @@ final class TimeCardMonitor: ObservableObject {
                 self.mergeLEDStates([state])
                 self.i2cOperationMessage =
                     "\(state.led.label) LED set and verified at RGB \(state.rgbText)."
+                self.appendSessionLog(
+                    severity: .success,
+                    category: "LED",
+                    message: self.i2cOperationMessage
+                )
                 self.refresh()
             case .failure(let error):
                 self.i2cOperationMessage =
                     "\(led.label) LED set failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "LED",
+                    message: self.i2cOperationMessage
+                )
             }
         }
     }
@@ -606,6 +755,11 @@ final class TimeCardMonitor: ObservableObject {
 
         selfTestInProgress = true
         selfTestMessage = "Running read-only production self-test..."
+        appendSessionLog(
+            severity: .info,
+            category: "Self-test",
+            message: selfTestMessage
+        )
 
         Task { [weak self] in
             let outcome = await Task.detached(
@@ -734,6 +888,11 @@ final class TimeCardMonitor: ObservableObject {
 
         i2cOperationInProgress = true
         i2cOperationMessage = "Applying \(label)..."
+        appendSessionLog(
+            severity: .info,
+            category: "LED",
+            message: i2cOperationMessage
+        )
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -795,10 +954,20 @@ final class TimeCardMonitor: ObservableObject {
                 }
                 self.i2cOperationMessage =
                     "\(label) applied to \(policyResult.states.count) LED(s)."
+                self.appendSessionLog(
+                    severity: .success,
+                    category: "LED",
+                    message: self.i2cOperationMessage
+                )
                 self.refresh()
             case .failure(let error):
                 self.i2cOperationMessage =
                     "\(label) failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "LED",
+                    message: self.i2cOperationMessage
+                )
             }
         }
     }
@@ -860,10 +1029,20 @@ final class TimeCardMonitor: ObservableObject {
             }
             selfTestReport = report
             selfTestMessage = "Self-test complete: \(report.summary)."
+            appendSessionLog(
+                severity: report.attentionCount == 0 ? .success : .warning,
+                category: "Self-test",
+                message: selfTestMessage
+            )
 
         case .failure(let report, let message):
             selfTestReport = report
             selfTestMessage = message
+            appendSessionLog(
+                severity: .error,
+                category: "Self-test",
+                message: message
+            )
         }
     }
 
@@ -1280,6 +1459,11 @@ final class TimeCardMonitor: ObservableObject {
             length,
             address & 0xff
         )
+        appendSessionLog(
+            severity: .info,
+            category: "I2C",
+            message: i2cOperationMessage
+        )
 
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
@@ -1309,10 +1493,20 @@ final class TimeCardMonitor: ObservableObject {
                     transfer.addressText,
                     transfer.controllerStatus & 0xff
                 )
+                self.appendSessionLog(
+                    severity: .success,
+                    category: "I2C",
+                    message: self.i2cOperationMessage
+                )
                 self.refresh()
             case .failure(let error):
                 self.i2cOperationMessage =
                     "I2C read failed: \(error.localizedDescription)"
+                self.appendSessionLog(
+                    severity: .error,
+                    category: "I2C",
+                    message: self.i2cOperationMessage
+                )
             }
         }
     }
@@ -1458,6 +1652,7 @@ final class TimeCardMonitor: ObservableObject {
             recoverySuggestion = ""
             lastUpdated = Date()
             appendSamplingWindow(current.sampleWindowNanoseconds)
+            logRefreshStateIfNeeded(current)
             sensorTelemetry = sensors
             if let sensors {
                 sensorMessage = sensors.validReadings.isEmpty
@@ -1542,6 +1737,7 @@ final class TimeCardMonitor: ObservableObject {
                 state = .failed
                 nextAutomaticAttempt = Date().addingTimeInterval(5)
             }
+            logRefreshFailureIfNeeded(error.localizedDescription)
 
         case .unexpected(let message):
             snapshot = nil
@@ -1555,6 +1751,7 @@ final class TimeCardMonitor: ObservableObject {
             errorMessage = message
             recoverySuggestion = ""
             nextAutomaticAttempt = Date().addingTimeInterval(5)
+            logRefreshFailureIfNeeded(message)
         }
     }
 
@@ -1568,6 +1765,67 @@ final class TimeCardMonitor: ObservableObject {
             sensorHistory.removeAll(keepingCapacity: true)
             i2cScanResults.removeAll(keepingCapacity: true)
             i2cTransfer = nil
+        }
+    }
+
+    private func logRefreshStateIfNeeded(_ snapshot: TimeCardDeviceSnapshot) {
+        let syncState = monitorSyncStatus(snapshot)
+        if lastLoggedServiceID != selectedServiceID {
+            lastLoggedServiceID = selectedServiceID
+            appendSessionLog(
+                severity: .success,
+                category: "Driver",
+                message: "Connected to \(snapshot.boardName), PCI \(snapshot.pciIdentity), ABI \(snapshot.abiVersion)."
+            )
+        }
+        if syncState != lastLoggedSyncState {
+            lastLoggedSyncState = syncState
+            appendSessionLog(
+                severity: syncState == "In sync" ? .success : .warning,
+                category: "Clock",
+                message: "Clock state is \(syncState), source \(monitorClockSource(snapshot))."
+            )
+        }
+        lastLoggedFailure = ""
+    }
+
+    private func monitorSyncStatus(_ snapshot: TimeCardDeviceSnapshot) -> String {
+        guard let inSync = snapshot.clockInSync else { return "Unavailable" }
+        return inSync ? "In sync" : "Not in sync"
+    }
+
+    private func monitorClockSource(_ snapshot: TimeCardDeviceSnapshot) -> String {
+        guard let source = snapshot.configuredClockSource else {
+            return "Unavailable"
+        }
+        return String(format: "0x%02x", source)
+    }
+
+    private func logRefreshFailureIfNeeded(_ message: String) {
+        guard message != lastLoggedFailure else { return }
+        lastLoggedFailure = message
+        appendSessionLog(
+            severity: .error,
+            category: "Driver",
+            message: message
+        )
+    }
+
+    private func appendSessionLog(
+        severity: TimeCardSessionLogSeverity,
+        category: String,
+        message: String
+    ) {
+        sessionLog.append(
+            TimeCardSessionLogEntry(
+                timestamp: Date(),
+                severity: severity,
+                category: category,
+                message: message
+            )
+        )
+        if sessionLog.count > sessionLogCapacity {
+            sessionLog.removeFirst(sessionLog.count - sessionLogCapacity)
         }
     }
 

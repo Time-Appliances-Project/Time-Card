@@ -3,6 +3,7 @@
 import Charts
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum ControlCenterPage: String, CaseIterable, Identifiable {
     case overview = "Overview"
@@ -3568,6 +3569,8 @@ private struct TelemetryStudioView: View {
 private struct OperationsView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
     @State private var copiedDiagnostics = false
+    @State private var supportBundleMessage = ""
+    @State private var copiedSessionLog = false
 
     var body: some View {
         ScrollView {
@@ -3679,6 +3682,67 @@ private struct OperationsView: View {
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
+
+                ControlCenterPanel(
+                    title: "Session log and support bundle",
+                    subtitle: "Windows-style support capture for field debugging"
+                ) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Button("Save Support ZIP") {
+                                saveSupportBundle()
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            Button("Copy Session Log") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(
+                                    sessionLogText,
+                                    forType: .string
+                                )
+                                copiedSessionLog = true
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button("Clear Log") {
+                                monitor.clearSessionLog()
+                                copiedSessionLog = false
+                            }
+                            .buttonStyle(.bordered)
+
+                            Spacer()
+
+                            StatusPill(
+                                "\(monitor.sessionLog.count) event(s)",
+                                monitor.sessionLog.isEmpty ? .orange : .blue
+                            )
+                        }
+
+                        Text(
+                            supportBundleMessage.isEmpty
+                                ? "The ZIP includes diagnostics, self-test, serial inventory, serial preview, sampling history, SMA, sensors, I2C, LEDs, and the session log."
+                                : supportBundleMessage
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+
+                        Text(
+                            copiedSessionLog
+                                ? "Session log copied."
+                                : sessionLogPreviewText
+                        )
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            Color.secondary.opacity(0.07),
+                            in: RoundedRectangle(cornerRadius: 10)
+                        )
+                    }
+                }
             }
             .padding(24)
         }
@@ -3760,6 +3824,396 @@ private struct OperationsView: View {
             lines.append("LED states: \(ledText.joined(separator: ", "))")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private enum SupportBundleError: LocalizedError {
+        case zipFailed(Int32)
+
+        var errorDescription: String? {
+            switch self {
+            case .zipFailed(let status):
+                "Support ZIP creation failed with exit status \(status)."
+            }
+        }
+    }
+
+    private func saveSupportBundle() {
+        let panel = NSSavePanel()
+        panel.title = "Save Time Card Support Bundle"
+        panel.nameFieldStringValue =
+            "TimeCardMacOS-Support-\(supportBundleTimestampForFilename).zip"
+        panel.allowedContentTypes = [.zip]
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            supportBundleMessage = "Support bundle save canceled."
+            return
+        }
+
+        do {
+            try writeSupportBundle(to: destinationURL)
+            supportBundleMessage =
+                "Saved support bundle to \(destinationURL.path)."
+            NSWorkspace.shared.activateFileViewerSelecting([destinationURL])
+        } catch {
+            supportBundleMessage =
+                "Support bundle failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func writeSupportBundle(to destinationURL: URL) throws {
+        let fileManager = FileManager.default
+        let stagingURL = fileManager.temporaryDirectory.appendingPathComponent(
+            "TimeCardMacOS-Support-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(
+            at: stagingURL,
+            withIntermediateDirectories: true
+        )
+        defer { try? fileManager.removeItem(at: stagingURL) }
+
+        try writeSupportText(
+            supportBundleManifestText,
+            named: "manifest.json",
+            into: stagingURL
+        )
+        try writeSupportText(diagnosticsText, named: "diagnostics.txt", into: stagingURL)
+        try writeSupportText(sessionLogText, named: "session-log.txt", into: stagingURL)
+        try writeSupportText(liveSnapshotText, named: "live-snapshot.json", into: stagingURL)
+        try writeSupportText(selfTestText, named: "self-test.txt", into: stagingURL)
+        try writeSupportText(serialPortsCSVText, named: "serial-ports.csv", into: stagingURL)
+        try writeSupportText(serialCaptureText, named: "serial-capture.txt", into: stagingURL)
+        try writeSupportText(samplingHistoryCSVText, named: "sampling-history.csv", into: stagingURL)
+        try writeSupportText(smaRoutesCSVText, named: "sma-routes.csv", into: stagingURL)
+        try writeSupportText(sensorCSVText, named: "sensors.csv", into: stagingURL)
+        try writeSupportText(i2cText, named: "i2c.txt", into: stagingURL)
+        try writeSupportText(ledCSVText, named: "leds.csv", into: stagingURL)
+
+        if fileManager.fileExists(atPath: destinationURL.path) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = ["-c", "-k", stagingURL.path, destinationURL.path]
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw SupportBundleError.zipFailed(process.terminationStatus)
+        }
+    }
+
+    private func writeSupportText(
+        _ text: String,
+        named fileName: String,
+        into directoryURL: URL
+    ) throws {
+        try text.write(
+            to: directoryURL.appendingPathComponent(fileName),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    private var supportBundleManifestText: String {
+        let files = [
+            "diagnostics.txt",
+            "session-log.txt",
+            "live-snapshot.json",
+            "self-test.txt",
+            "serial-ports.csv",
+            "serial-capture.txt",
+            "sampling-history.csv",
+            "sma-routes.csv",
+            "sensors.csv",
+            "i2c.txt",
+            "leds.csv",
+        ]
+        let object: [String: Any] = [
+            "generatedAt": TimeCardFormatting.date(Date()),
+            "app": "TimeCardMacOS",
+            "state": String(describing: monitor.state),
+            "serviceCount": monitor.services.count,
+            "selectedServiceID": monitor.selectedServiceID.map(String.init)
+                ?? "none",
+            "files": files,
+        ]
+        return supportJSONText(object)
+    }
+
+    private var liveSnapshotText: String {
+        guard let snapshot = monitor.snapshot else {
+            return supportJSONText([
+                "generatedAt": TimeCardFormatting.date(Date()),
+                "state": String(describing: monitor.state),
+                "error": monitor.errorMessage,
+            ])
+        }
+        return supportJSONText([
+            "generatedAt": TimeCardFormatting.date(Date()),
+            "board": snapshot.boardName,
+            "pciIdentity": snapshot.pciIdentity,
+            "pciRevision": String(
+                format: "0x%02x",
+                snapshot.pciRevision & 0xff
+            ),
+            "driverVersion": snapshot.driverVersionText,
+            "abiVersion": Int(snapshot.abiVersion),
+            "layout": snapshot.layoutName,
+            "bar0": TimeCardFormatting.hex(snapshot.barSize),
+            "capabilities": snapshot.capabilityNames,
+            "clockStatus": TimeCardFormatting.syncStatus(snapshot),
+            "clockSource": TimeCardFormatting.clockSource(snapshot),
+            "sampleWindowNanoseconds":
+                String(snapshot.sampleWindowNanoseconds),
+            "gnssTelemetryAvailable": snapshot.gnssTelemetryAvailable,
+            "gnssFix": snapshot.gnssFixName,
+            "seenSatellites": snapshot.seenSatellites.map(String.init)
+                ?? "unavailable",
+            "lockedSatellites": snapshot.lockedSatellites.map(String.init)
+                ?? "unavailable",
+            "todTelemetryAvailable": snapshot.todTelemetryAvailable,
+            "utcOffsetSeconds": snapshot.utcOffsetSeconds.map(String.init)
+                ?? "unavailable",
+        ])
+    }
+
+    private func supportJSONText(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(
+                withJSONObject: object,
+                options: [.prettyPrinted, .sortedKeys]
+              ),
+              let text = String(data: data, encoding: .utf8) else {
+            return "{\n  \"error\" : \"JSON encoding failed\"\n}"
+        }
+        return text
+    }
+
+    private var selfTestText: String {
+        guard let report = monitor.selfTestReport else {
+            return "No self-test run yet."
+        }
+        var lines = [
+            "Self-test run: \(TimeCardFormatting.date(report.runAt))",
+            "Overall: \(report.overallState)",
+            "Summary: \(report.summary)",
+        ]
+        for item in report.items {
+            lines.append("\(item.state): \(item.name): \(item.detail)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var sessionLogText: String {
+        guard !monitor.sessionLog.isEmpty else {
+            return "No session events recorded."
+        }
+        return monitor.sessionLog.map { entry in
+            "\(TimeCardFormatting.date(entry.timestamp)) [\(entry.severity.rawValue)] \(entry.category): \(entry.message)"
+        }.joined(separator: "\n")
+    }
+
+    private var sessionLogPreviewText: String {
+        let text = monitor.sessionLog.suffix(12).map { entry in
+            "\(TimeCardFormatting.date(entry.timestamp)) [\(entry.severity.rawValue)] \(entry.category): \(entry.message)"
+        }.joined(separator: "\n")
+        return text.isEmpty ? "No session events recorded." : text
+    }
+
+    private var serialPortsCSVText: String {
+        var rows = [supportCSVLine([
+            "display_name",
+            "callout_device",
+            "dialin_device",
+            "tty_device",
+            "bsd_type",
+        ])]
+        for port in monitor.serialPorts {
+            rows.append(supportCSVLine([
+                port.displayName,
+                port.calloutDevice,
+                port.dialinDevice ?? "",
+                port.ttyDevice ?? "",
+                port.bsdType ?? "",
+            ]))
+        }
+        return rows.joined(separator: "\n")
+    }
+
+    private var serialCaptureText: String {
+        guard let capture = monitor.serialCapture else {
+            return "No serial preview capture recorded."
+        }
+        return [
+            "Port: \(capture.portPath)",
+            "Baud: \(capture.baudRate)",
+            "Captured at: \(TimeCardFormatting.date(capture.capturedAt))",
+            "Duration: \(String(format: "%.2f", capture.durationSeconds)) s",
+            "Bytes: \(capture.byteCount)",
+            "",
+            capture.text.isEmpty
+                ? "No bytes arrived during the preview window."
+                : capture.text,
+        ].joined(separator: "\n")
+    }
+
+    private var samplingHistoryCSVText: String {
+        var rows = [supportCSVLine(["timestamp", "nanoseconds"])]
+        for point in monitor.samplingWindowHistory {
+            rows.append(supportCSVLine([
+                TimeCardFormatting.date(point.timestamp),
+                String(format: "%.0f", point.nanoseconds),
+            ]))
+        }
+        return rows.joined(separator: "\n")
+    }
+
+    private var smaRoutesCSVText: String {
+        var rows = [supportCSVLine([
+            "connector",
+            "direction",
+            "function",
+            "function_name",
+            "present",
+            "fixed_direction",
+            "fixed_function",
+            "input_map",
+            "output_map",
+        ])]
+        for route in monitor.smaRoutes {
+            rows.append(supportCSVLine([
+                String(route.connector),
+                route.direction.label,
+                TimeCardFormatting.hex(UInt64(route.function)),
+                route.functionName,
+                String(route.isPresent),
+                String(route.isFixedDirection),
+                String(route.isFixedFunction),
+                TimeCardFormatting.hex(UInt64(route.inputMap)),
+                TimeCardFormatting.hex(UInt64(route.outputMap)),
+            ]))
+        }
+        return rows.joined(separator: "\n")
+    }
+
+    private var sensorCSVText: String {
+        var rows = [supportCSVLine([
+            "kind",
+            "route",
+            "present",
+            "valid",
+            "temperature_c",
+            "humidity_percent",
+            "raw0",
+            "raw1",
+            "raw2",
+        ])]
+        guard let telemetry = monitor.sensorTelemetry else {
+            return rows.joined(separator: "\n")
+        }
+        for reading in telemetry.readings {
+            rows.append(supportCSVLine([
+                reading.kind.label,
+                SensorUIFormatting.route(reading),
+                String(reading.isPresent),
+                String(reading.isValid),
+                reading.temperatureCelsius.map {
+                    String(format: "%.3f", $0)
+                } ?? "",
+                reading.humidityPercent.map {
+                    String(format: "%.3f", $0)
+                } ?? "",
+                TimeCardFormatting.hex(UInt64(reading.raw0)),
+                TimeCardFormatting.hex(UInt64(reading.raw1)),
+                TimeCardFormatting.hex(UInt64(reading.raw2)),
+            ]))
+        }
+        return rows.joined(separator: "\n")
+    }
+
+    private var i2cText: String {
+        var lines: [String] = []
+        if let status = monitor.i2cStatus {
+            lines.append("I2C controller")
+            lines.append("present: \(status.isPresent)")
+            lines.append("enabled: \(status.isEnabled)")
+            lines.append("bus busy: \(status.isBusBusy)")
+            lines.append("control: \(TimeCardFormatting.byteHex(status.control))")
+            lines.append("status: \(TimeCardFormatting.byteHex(status.status))")
+            lines.append(
+                "interrupt status: \(TimeCardFormatting.byteHex(status.interruptStatus))"
+            )
+            lines.append(
+                "known devices: \(status.knownDeviceNames.joined(separator: ", "))"
+            )
+        } else {
+            lines.append("No I2C status snapshot recorded.")
+        }
+        if let mux = monitor.i2cMux {
+            lines.append("")
+            lines.append("I2C mux")
+            lines.append("present: \(mux.isPresent)")
+            lines.append(
+                "channel mask: \(TimeCardFormatting.byteHex(mux.channelMask))"
+            )
+            lines.append(
+                "controller status: \(TimeCardFormatting.byteHex(mux.controllerStatus))"
+            )
+        }
+        if let transfer = monitor.i2cTransfer {
+            lines.append("")
+            lines.append("Last I2C transfer")
+            lines.append("address: \(transfer.addressText)")
+            lines.append("length: \(transfer.length)")
+            lines.append("data: \(transfer.dataHex)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var ledCSVText: String {
+        var rows = [supportCSVLine([
+            "led",
+            "present",
+            "enabled",
+            "rgb",
+            "current",
+            "open_mask",
+            "short_mask",
+        ])]
+        for led in monitor.ledStates {
+            rows.append(supportCSVLine([
+                led.led.label,
+                String(led.isPresent),
+                String(led.isEnabled),
+                led.rgbText,
+                String(led.globalCurrent),
+                TimeCardFormatting.hex(UInt64(led.openOutputMask)),
+                TimeCardFormatting.hex(UInt64(led.shortOutputMask)),
+            ]))
+        }
+        return rows.joined(separator: "\n")
+    }
+
+    private var supportBundleTimestampForFilename: String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
+    }
+
+    private func supportCSVLine(_ fields: [String]) -> String {
+        fields.map(supportCSVField).joined(separator: ",")
+    }
+
+    private func supportCSVField(_ value: String) -> String {
+        if value.contains(",") || value.contains("\"") ||
+            value.contains("\n") {
+            return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+        }
+        return value
     }
 
     private var displayedSelfTestItems: [TimeCardSelfTestItem] {
