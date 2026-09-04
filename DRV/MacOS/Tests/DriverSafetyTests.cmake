@@ -191,11 +191,14 @@ foreach(required_control_center_monitor IN ITEMS
         "applySMALEDPolicy"
         "applyAllLEDPolicy"
         "gnssLEDPlans"
-        "smaLEDPlan")
+        "smaLEDPlan"
+        "runReadOnlySelfTest"
+        "TimeCardSelfTestReport"
+        "buildSelfTestReport")
     string(FIND "${control_center_monitor}" "${required_control_center_monitor}" monitor_offset)
     if(monitor_offset EQUAL -1)
         message(FATAL_ERROR
-            "Control Center monitor must expose LED policy controls")
+            "Control Center monitor must expose LED policy and self-test controls")
     endif()
 endforeach()
 
@@ -212,7 +215,10 @@ foreach(required_control_center_view IN ITEMS
         "GNSS fix and satellite counts"
         "I2C controller registers"
         "I2C bus laboratory"
-        "LED controller readback")
+        "LED controller readback"
+        "Production readiness self-test"
+        "Run Self-Test"
+        "advertised live subsystem")
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)
         message(FATAL_ERROR

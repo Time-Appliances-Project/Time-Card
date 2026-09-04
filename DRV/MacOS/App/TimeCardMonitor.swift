@@ -24,6 +24,81 @@ struct SensorHistoryPoint: Identifiable, Equatable, Sendable {
     let value: Double
 }
 
+enum TimeCardSelfTestSeverity: String, Equatable, Sendable {
+    case pass = "Pass"
+    case warning = "Warning"
+    case fail = "Fail"
+    case gated = "Gated"
+    case waiting = "Waiting"
+}
+
+struct TimeCardSelfTestItem: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let severity: TimeCardSelfTestSeverity
+    let detail: String
+
+    init(
+        _ name: String,
+        severity: TimeCardSelfTestSeverity,
+        detail: String
+    ) {
+        self.id = name
+        self.name = name
+        self.severity = severity
+        self.detail = detail
+    }
+
+    var state: String {
+        severity.rawValue
+    }
+}
+
+struct TimeCardSelfTestReport: Equatable, Sendable {
+    let runAt: Date
+    let items: [TimeCardSelfTestItem]
+
+    var passCount: Int {
+        items.filter { $0.severity == .pass }.count
+    }
+
+    var warningCount: Int {
+        items.filter { $0.severity == .warning }.count
+    }
+
+    var failCount: Int {
+        items.filter { $0.severity == .fail }.count
+    }
+
+    var gatedCount: Int {
+        items.filter { $0.severity == .gated }.count
+    }
+
+    var attentionCount: Int {
+        warningCount + failCount
+    }
+
+    var overallState: String {
+        if failCount > 0 { return "Fail" }
+        if warningCount > 0 { return "Warning" }
+        if passCount > 0 { return "Pass" }
+        return "Waiting"
+    }
+
+    var summary: String {
+        if failCount > 0 {
+            return "\(failCount) failed check(s), \(warningCount) warning(s)"
+        }
+        if warningCount > 0 {
+            return "\(warningCount) warning(s), \(passCount) passed check(s)"
+        }
+        if gatedCount > 0 {
+            return "\(passCount) passed, \(gatedCount) gated by FPGA or ABI"
+        }
+        return "\(passCount) passed check(s)"
+    }
+}
+
 private struct TimeCardLEDPlan: Sendable {
     let led: TimeCardLEDKind
     let red: UInt32
@@ -36,6 +111,22 @@ private struct TimeCardLEDPlan: Sendable {
 private struct TimeCardLEDPolicyResult: Sendable {
     let states: [TimeCardLEDState]
     let routes: [TimeCardSMARoute]
+}
+
+private enum TimeCardSelfTestOutcome: Sendable {
+    case success(
+        snapshot: TimeCardDeviceSnapshot,
+        sensors: TimeCardSensorSnapshot?,
+        sensorError: String?,
+        routes: [TimeCardSMARoute],
+        smaError: String?,
+        i2cStatus: TimeCardI2CStatusSnapshot?,
+        i2cMux: TimeCardI2CMuxSnapshot?,
+        ledStates: [TimeCardLEDState],
+        i2cError: String?,
+        report: TimeCardSelfTestReport
+    )
+    case failure(report: TimeCardSelfTestReport, message: String)
 }
 
 private enum TimeCardRefreshOutcome: Sendable {
@@ -83,6 +174,9 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var i2cTransfer: TimeCardI2CTransferSnapshot?
     @Published private(set) var i2cOperationInProgress = false
     @Published private(set) var i2cOperationMessage = ""
+    @Published private(set) var selfTestReport: TimeCardSelfTestReport?
+    @Published private(set) var selfTestInProgress = false
+    @Published private(set) var selfTestMessage = ""
 
     private var refreshTimer: Timer?
     private var nextAutomaticAttempt = Date.distantPast
@@ -121,6 +215,8 @@ final class TimeCardMonitor: ObservableObject {
         i2cScanResults.removeAll(keepingCapacity: true)
         i2cTransfer = nil
         i2cOperationMessage = ""
+        selfTestReport = nil
+        selfTestMessage = ""
         refresh()
     }
 
@@ -425,6 +521,135 @@ final class TimeCardMonitor: ObservableObject {
         )
     }
 
+    func runReadOnlySelfTest() {
+        guard !selfTestInProgress else { return }
+        guard let descriptor = selectedDescriptor else {
+            selfTestMessage = "No Time Card is selected."
+            selfTestReport = TimeCardSelfTestReport(
+                runAt: Date(),
+                items: [
+                    TimeCardSelfTestItem(
+                        "Driver service",
+                        severity: serviceDetected ? .warning : .waiting,
+                        detail: serviceDetected
+                            ? "A service was seen earlier, but it is not selected."
+                            : "No Time Card DriverKit service has been discovered."
+                    ),
+                    TimeCardSelfTestItem(
+                        "User-client access",
+                        severity: .waiting,
+                        detail: "Select or discover a Time Card before running the self-test."
+                    ),
+                ]
+            )
+            return
+        }
+
+        selfTestInProgress = true
+        selfTestMessage = "Running read-only production self-test..."
+
+        Task { [weak self] in
+            let outcome = await Task.detached(
+                priority: .userInitiated
+            ) { () -> TimeCardSelfTestOutcome in
+                do {
+                    let currentSnapshot = try TimeCardClient.readSnapshot(
+                        for: descriptor
+                    )
+                    var sensors: TimeCardSensorSnapshot?
+                    var sensorError: String?
+                    var routes: [TimeCardSMARoute] = []
+                    var smaError: String?
+                    var i2cStatus: TimeCardI2CStatusSnapshot?
+                    var i2cMux: TimeCardI2CMuxSnapshot?
+                    var ledStates: [TimeCardLEDState] = []
+                    var i2cErrors: [String] = []
+
+                    if currentSnapshot.capabilityNames.contains("SMA") {
+                        do {
+                            routes = try TimeCardClient.querySMARoutes(
+                                for: descriptor
+                            )
+                        } catch {
+                            smaError = error.localizedDescription
+                        }
+                    }
+
+                    if currentSnapshot.capabilityNames.contains("Sensors") {
+                        do {
+                            sensors = try TimeCardClient.querySensors(
+                                for: descriptor
+                            )
+                        } catch {
+                            sensorError = error.localizedDescription
+                        }
+                    }
+
+                    if currentSnapshot.capabilityNames.contains("I2C") {
+                        do {
+                            i2cStatus = try TimeCardClient.queryI2CStatus(
+                                for: descriptor
+                            )
+                            i2cMux = try TimeCardClient.queryI2CMux(
+                                for: descriptor
+                            )
+                        } catch {
+                            i2cErrors.append(error.localizedDescription)
+                        }
+                    }
+
+                    if currentSnapshot.capabilityNames.contains("LEDs") {
+                        do {
+                            ledStates = try TimeCardClient.queryLEDStates(
+                                for: descriptor
+                            )
+                        } catch {
+                            i2cErrors.append(error.localizedDescription)
+                        }
+                    }
+
+                    let i2cError = i2cErrors.isEmpty
+                        ? nil : i2cErrors.joined(separator: "; ")
+                    let report = TimeCardMonitor.buildSelfTestReport(
+                        snapshot: currentSnapshot,
+                        sensors: sensors,
+                        sensorError: sensorError,
+                        routes: routes,
+                        smaError: smaError,
+                        i2cStatus: i2cStatus,
+                        i2cMux: i2cMux,
+                        ledStates: ledStates,
+                        i2cError: i2cError
+                    )
+                    return .success(
+                        snapshot: currentSnapshot,
+                        sensors: sensors,
+                        sensorError: sensorError,
+                        routes: routes,
+                        smaError: smaError,
+                        i2cStatus: i2cStatus,
+                        i2cMux: i2cMux,
+                        ledStates: ledStates,
+                        i2cError: i2cError,
+                        report: report
+                    )
+                } catch {
+                    let report = TimeCardMonitor.buildFailedSelfTestReport(
+                        error: error
+                    )
+                    return .failure(
+                        report: report,
+                        message: "Self-test failed: \(error.localizedDescription)"
+                    )
+                }
+            }.value
+
+            guard let self else { return }
+            self.selfTestInProgress = false
+            self.applySelfTestOutcome(outcome)
+        }
+    }
+
     private func applyLEDPolicy(
         label: String,
         includeGNSS: Bool,
@@ -516,6 +741,70 @@ final class TimeCardMonitor: ObservableObject {
                 self.i2cOperationMessage =
                     "\(label) failed: \(error.localizedDescription)"
             }
+        }
+    }
+
+    private func applySelfTestOutcome(_ outcome: TimeCardSelfTestOutcome) {
+        switch outcome {
+        case .success(
+            let currentSnapshot, let sensors, let sensorError, let routes,
+            let smaError, let currentI2CStatus, let currentI2CMux,
+            let currentLEDStates, let i2cError, let report
+        ):
+            snapshot = currentSnapshot
+            state = .connected
+            errorMessage = ""
+            recoverySuggestion = ""
+            lastUpdated = Date()
+            appendSamplingWindow(currentSnapshot.sampleWindowNanoseconds)
+            if !routes.isEmpty {
+                smaRoutes = routes
+            }
+            if let smaError {
+                smaMessage = "SMA self-test failed: \(smaError)"
+            } else if !routes.isEmpty {
+                smaMessage = "SMA connector states refreshed by self-test."
+            } else if currentSnapshot.capabilityNames.contains("SMA") {
+                smaMessage = "SMA self-test returned no connector routes."
+            } else {
+                smaMessage = "SMA routing is not advertised by this profile."
+            }
+            sensorTelemetry = sensors
+            if let sensors {
+                sensorMessage = sensors.validReadings.isEmpty
+                    ? "Sensor self-test returned no valid samples."
+                    : "\(sensors.validReadings.count) live sensor block(s)."
+                appendSensorHistory(sensors)
+            } else if let sensorError {
+                sensorMessage = "Sensor self-test failed: \(sensorError)"
+            } else if currentSnapshot.capabilityNames.contains("Sensors") {
+                sensorMessage = "Sensor branch is advertised but no sample was returned."
+            } else {
+                sensorMessage = "Sensor branch is not advertised by this profile."
+                sensorHistory.removeAll(keepingCapacity: true)
+            }
+            i2cStatus = currentI2CStatus
+            i2cMux = currentI2CMux
+            ledStates = currentLEDStates
+            if let i2cError {
+                i2cMessage = "I2C/LED self-test issue: \(i2cError)"
+            } else if currentI2CStatus != nil || currentI2CMux != nil ||
+                !currentLEDStates.isEmpty {
+                let fitted = currentLEDStates.filter(\.isPresent).count
+                i2cMessage =
+                    "I2C/LED self-test refreshed, \(fitted)/\(currentLEDStates.count) LED state(s) live."
+            } else if currentSnapshot.capabilityNames.contains("I2C") ||
+                currentSnapshot.capabilityNames.contains("LEDs") {
+                i2cMessage = "I2C or LED capability is advertised but returned no sample."
+            } else {
+                i2cMessage = "I2C and LED control are not advertised by this profile."
+            }
+            selfTestReport = report
+            selfTestMessage = "Self-test complete: \(report.summary)."
+
+        case .failure(let report, let message):
+            selfTestReport = report
+            selfTestMessage = message
         }
     }
 
@@ -651,6 +940,263 @@ final class TimeCardMonitor: ObservableObject {
                 result == kIOReturnUnsupported {
             return nil
         }
+    }
+
+    nonisolated private static func buildSelfTestReport(
+        snapshot: TimeCardDeviceSnapshot,
+        sensors: TimeCardSensorSnapshot?,
+        sensorError: String?,
+        routes: [TimeCardSMARoute],
+        smaError: String?,
+        i2cStatus: TimeCardI2CStatusSnapshot?,
+        i2cMux: TimeCardI2CMuxSnapshot?,
+        ledStates: [TimeCardLEDState],
+        i2cError: String?
+    ) -> TimeCardSelfTestReport {
+        var items: [TimeCardSelfTestItem] = [
+            TimeCardSelfTestItem(
+                "Driver service",
+                severity: .pass,
+                detail: "A Time Card DriverKit service is selected."
+            ),
+            TimeCardSelfTestItem(
+                "User-client access",
+                severity: .pass,
+                detail: "The app opened the DriverKit user client successfully."
+            ),
+            TimeCardSelfTestItem(
+                "Board profile",
+                severity: snapshot.boardProfile >= 1 &&
+                    snapshot.boardProfile <= 5 ? .pass : .warning,
+                detail: "\(snapshot.boardName), PCI \(snapshot.pciIdentity), \(snapshot.layoutName) register map."
+            ),
+            TimeCardSelfTestItem(
+                "Clock read and cross-timestamp",
+                severity: snapshot.sampleWindowNanoseconds > 0 ? .pass : .warning,
+                detail: "Sampling window \(snapshot.sampleWindowNanoseconds) ns, source \(snapshot.configuredClockSource ?? 0)."
+            ),
+            TimeCardSelfTestItem(
+                "Driver capability contract",
+                severity: snapshot.abiVersion >= 7 ? .pass : .warning,
+                detail: "ABI v\(snapshot.abiVersion), capabilities \(snapshot.capabilityNames.joined(separator: ", "))."
+            ),
+        ]
+
+        if snapshot.capabilityNames.contains("ToD") {
+            items.append(
+                TimeCardSelfTestItem(
+                    "ToD and GNSS summary",
+                    severity: snapshot.todTelemetryAvailable ||
+                        snapshot.gnssTelemetryAvailable ? .pass : .gated,
+                    detail: snapshot.todTelemetryAvailable ||
+                        snapshot.gnssTelemetryAvailable
+                        ? "Optional UTC, leap, GNSS, or satellite summary registers are exposed."
+                        : "This FPGA image exposes ToD status but not optional UTC/GNSS summary registers."
+                )
+            )
+        } else {
+            items.append(
+                TimeCardSelfTestItem(
+                    "ToD and GNSS summary",
+                    severity: .gated,
+                    detail: "The selected board profile does not advertise ToD telemetry."
+                )
+            )
+        }
+
+        if snapshot.capabilityNames.contains("SMA") {
+            if let smaError {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "SMA routing",
+                        severity: .fail,
+                        detail: smaError
+                    )
+                )
+            } else {
+                let present = routes.filter(\.isPresent).count
+                items.append(
+                    TimeCardSelfTestItem(
+                        "SMA routing",
+                        severity: present == 4 ? .pass : .warning,
+                        detail: "\(present)/4 connector route(s) returned live readback."
+                    )
+                )
+            }
+        } else {
+            items.append(
+                TimeCardSelfTestItem(
+                    "SMA routing",
+                    severity: .gated,
+                    detail: "SMA routing is not advertised by this profile."
+                )
+            )
+        }
+
+        if snapshot.capabilityNames.contains("Sensors") {
+            if let sensorError {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "Sensor fabric",
+                        severity: .fail,
+                        detail: sensorError
+                    )
+                )
+            } else if let sensors {
+                let valid = sensors.validReadings.count
+                let severity: TimeCardSelfTestSeverity =
+                    valid > 0 && sensors.muxWasRestored ? .pass : .warning
+                items.append(
+                    TimeCardSelfTestItem(
+                        "Sensor fabric",
+                        severity: severity,
+                        detail: "\(valid)/\(sensors.readings.count) valid block(s), mux restored \(sensors.muxWasRestored ? "yes" : "no")."
+                    )
+                )
+            } else {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "Sensor fabric",
+                        severity: .warning,
+                        detail: "Sensors are advertised but no sample was returned."
+                    )
+                )
+            }
+        } else {
+            items.append(
+                TimeCardSelfTestItem(
+                    "Sensor fabric",
+                    severity: .gated,
+                    detail: "Sensors are not advertised by this profile."
+                )
+            )
+        }
+
+        if snapshot.capabilityNames.contains("I2C") {
+            if let i2cError {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "I2C controller",
+                        severity: .fail,
+                        detail: i2cError
+                    )
+                )
+            } else if let i2cStatus {
+                let knownDevices = i2cStatus.knownDeviceNames.isEmpty
+                    ? "none" : i2cStatus.knownDeviceNames.joined(separator: ", ")
+                let severity: TimeCardSelfTestSeverity =
+                    i2cStatus.isPresent &&
+                    !i2cStatus.isBusBusy ? .pass : .warning
+                items.append(
+                    TimeCardSelfTestItem(
+                        "I2C controller",
+                        severity: severity,
+                        detail: "Status 0x\(String(format: "%02x", i2cStatus.status & 0xff)), idle between transactions, known devices \(knownDevices)."
+                    )
+                )
+            } else {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "I2C controller",
+                        severity: .warning,
+                        detail: "I2C is advertised but controller status was not returned."
+                    )
+                )
+            }
+
+            if let i2cMux {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "I2C mux",
+                        severity: i2cMux.isPresent ? .pass : .warning,
+                        detail: String(
+                            format: "Mux %@, channel mask 0x%02x.",
+                            i2cMux.isPresent ? "present" : "not present",
+                            i2cMux.channelMask & 0xff
+                        )
+                    )
+                )
+            } else {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "I2C mux",
+                        severity: .warning,
+                        detail: "I2C mux readback was not returned."
+                    )
+                )
+            }
+        } else {
+            items.append(
+                TimeCardSelfTestItem(
+                    "I2C controller",
+                    severity: .gated,
+                    detail: "I2C is not advertised by this profile."
+                )
+            )
+            items.append(
+                TimeCardSelfTestItem(
+                    "I2C mux",
+                    severity: .gated,
+                    detail: "Mux control depends on the I2C controller ABI."
+                )
+            )
+        }
+
+        if snapshot.capabilityNames.contains("LEDs") {
+            if let i2cError {
+                items.append(
+                    TimeCardSelfTestItem(
+                        "LED controller",
+                        severity: .fail,
+                        detail: i2cError
+                    )
+                )
+            } else {
+                let present = ledStates.filter(\.isPresent).count
+                items.append(
+                    TimeCardSelfTestItem(
+                        "LED controller",
+                        severity: present > 0 ? .pass : .warning,
+                        detail: "\(present)/\(ledStates.count) subsystem LED state(s) returned readback."
+                    )
+                )
+            }
+        } else {
+            items.append(
+                TimeCardSelfTestItem(
+                    "LED controller",
+                    severity: .gated,
+                    detail: "LED control is not advertised by this profile."
+                )
+            )
+        }
+
+        return TimeCardSelfTestReport(runAt: Date(), items: items)
+    }
+
+    nonisolated private static func buildFailedSelfTestReport(
+        error: Error
+    ) -> TimeCardSelfTestReport {
+        TimeCardSelfTestReport(
+            runAt: Date(),
+            items: [
+                TimeCardSelfTestItem(
+                    "Driver service",
+                    severity: .warning,
+                    detail: "A selected service was available before the self-test started."
+                ),
+                TimeCardSelfTestItem(
+                    "User-client access",
+                    severity: .fail,
+                    detail: error.localizedDescription
+                ),
+                TimeCardSelfTestItem(
+                    "Clock read and cross-timestamp",
+                    severity: .fail,
+                    detail: "The status snapshot could not be read."
+                ),
+            ]
+        )
     }
 
     func readI2C(

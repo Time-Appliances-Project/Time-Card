@@ -2494,30 +2494,90 @@ private struct OperationsView: View {
             VStack(alignment: .leading, spacing: 18) {
                 ControlCenterHeader()
 
+                if let report = monitor.selfTestReport {
+                    HStack(spacing: 14) {
+                        MetricCard(
+                            title: "Self-test",
+                            value: report.overallState,
+                            detail: report.summary,
+                            systemImage: selfTestSymbol(for: report.overallState),
+                            accent: selfTestColor(for: report.overallState)
+                        )
+                        MetricCard(
+                            title: "Passed",
+                            value: "\(report.passCount)",
+                            detail: "Readback checks completed",
+                            systemImage: "checkmark.circle"
+                        )
+                        MetricCard(
+                            title: "Attention",
+                            value: "\(report.attentionCount)",
+                            detail: "Warnings or failures",
+                            systemImage: report.attentionCount == 0
+                                ? "checkmark.shield" : "exclamationmark.triangle",
+                            accent: report.attentionCount == 0 ? .green : .orange
+                        )
+                    }
+                }
+
                 ControlCenterPanel(
-                    title: "Guided self-test",
-                    subtitle: "Read-only macOS coverage"
+                    title: "Production readiness self-test",
+                    subtitle: "One-click read-only live check"
                 ) {
-                    FeatureRow(
-                        name: "Driver service",
-                        state: monitor.serviceDetected ? "Pass" : "Waiting",
-                        note: "Checks DriverKit service discovery."
-                    )
-                    FeatureRow(
-                        name: "User-client entitlement",
-                        state: monitor.state == .connected ? "Pass" : "Check",
-                        note: "Opening the user client proves Apple entitlement/profile wiring."
-                    )
-                    FeatureRow(
-                        name: "Clock read and cross-timestamp",
-                        state: monitor.snapshot == nil ? "Waiting" : "Pass",
-                        note: "Uses the same ABI path as the CLI status and get commands."
-                    )
-                    FeatureRow(
-                        name: "Advanced workspaces",
-                        state: "Gated",
-                        note: "Requires the next macOS DriverKit ABI milestone."
-                    )
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Button("Run Self-Test") {
+                                monitor.runReadOnlySelfTest()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                monitor.selfTestInProgress ||
+                                    !monitor.serviceDetected
+                            )
+
+                            if monitor.selfTestInProgress {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+
+                            Spacer()
+
+                            if let report = monitor.selfTestReport {
+                                Text(TimeCardFormatting.date(report.runAt))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+
+                        Text(
+                            "The self-test opens the DriverKit user client, "
+                                + "checks clock readback, and samples each "
+                                + "advertised live subsystem without changing "
+                                + "clock, SMA route, mux, or LED state."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        if !monitor.selfTestMessage.isEmpty {
+                            Text(monitor.selfTestMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+
+                        Divider()
+
+                        VStack(spacing: 10) {
+                            ForEach(displayedSelfTestItems) { item in
+                                FeatureRow(
+                                    name: item.name,
+                                    state: item.state,
+                                    note: item.detail
+                                )
+                            }
+                        }
+                    }
                 }
 
                 ControlCenterPanel(
@@ -2562,6 +2622,32 @@ private struct OperationsView: View {
             "Sampling window: \(TimeCardFormatting.duration(snapshot.sampleWindowNanoseconds))",
             "Last update: \(TimeCardFormatting.date(monitor.lastUpdated))",
         ]
+        if let report = monitor.selfTestReport {
+            lines.append("Self-test: \(report.overallState), \(report.summary)")
+            lines.append("Self-test run: \(TimeCardFormatting.date(report.runAt))")
+            for item in report.items {
+                lines.append(
+                    "Self-test \(item.name): \(item.state) - \(item.detail)"
+                )
+            }
+        }
+        if snapshot.gnssTelemetryAvailable {
+            lines.append("GNSS fix: \(snapshot.gnssFixName)")
+            lines.append("Satellites: \(satelliteDiagnostic(snapshot))")
+        } else {
+            lines.append("GNSS summary: unavailable in this FPGA image")
+        }
+        if snapshot.todTelemetryAvailable {
+            lines.append("UTC offset: \(snapshot.utcOffsetSeconds ?? 0) s")
+        } else {
+            lines.append("UTC summary: unavailable in this FPGA image")
+        }
+        if !monitor.smaRoutes.isEmpty {
+            let routeText = monitor.smaRoutes.map {
+                "SMA \($0.connector) \($0.direction.label) \($0.functionName)"
+            }
+            lines.append("SMA routes: \(routeText.joined(separator: ", "))")
+        }
         if let sensors = monitor.sensorTelemetry {
             lines.append("Sensor blocks: \(sensors.validReadings.count)/\(sensors.readings.count) valid")
             lines.append(
@@ -2575,7 +2661,79 @@ private struct OperationsView: View {
             }
             lines.append("ICP-10100 OTP: \(SensorUIFormatting.otp(sensors.icp10100Otp))")
         }
+        if let i2cStatus = monitor.i2cStatus {
+            let knownDevices = i2cStatus.knownDeviceNames.isEmpty
+                ? "none" : i2cStatus.knownDeviceNames.joined(separator: ", ")
+            lines.append(
+                "I2C status: control \(TimeCardFormatting.byteHex(i2cStatus.control)), status \(TimeCardFormatting.byteHex(i2cStatus.status)), known devices \(knownDevices)"
+            )
+        }
+        if let i2cMux = monitor.i2cMux {
+            lines.append(
+                "I2C mux: present \(i2cMux.isPresent), channel \(TimeCardFormatting.byteHex(i2cMux.channelMask))"
+            )
+        }
+        if !monitor.ledStates.isEmpty {
+            let ledText = monitor.ledStates.map {
+                "\($0.led.label) \($0.rgbText) current \($0.globalCurrent)"
+            }
+            lines.append("LED states: \(ledText.joined(separator: ", "))")
+        }
         return lines.joined(separator: "\n")
+    }
+
+    private var displayedSelfTestItems: [TimeCardSelfTestItem] {
+        if let report = monitor.selfTestReport {
+            return report.items
+        }
+        return [
+            TimeCardSelfTestItem(
+                "Driver service",
+                severity: monitor.serviceDetected ? .pass : .waiting,
+                detail: "Checks DriverKit service discovery."
+            ),
+            TimeCardSelfTestItem(
+                "User-client access",
+                severity: monitor.state == .connected ? .pass : .waiting,
+                detail: "Opening the user client proves entitlement and profile wiring."
+            ),
+            TimeCardSelfTestItem(
+                "Clock read and cross-timestamp",
+                severity: monitor.snapshot == nil ? .waiting : .pass,
+                detail: "Uses the same ABI path as the CLI status and get commands."
+            ),
+            TimeCardSelfTestItem(
+                "Live subsystem readback",
+                severity: monitor.snapshot == nil ? .waiting : .gated,
+                detail: "Run the self-test to sample SMA, sensors, I2C, mux, and LEDs."
+            ),
+        ]
+    }
+
+    private func selfTestColor(for state: String) -> Color {
+        switch state.lowercased() {
+        case "pass": .green
+        case "warning": .orange
+        case "fail": .red
+        default: .secondary
+        }
+    }
+
+    private func selfTestSymbol(for state: String) -> String {
+        switch state.lowercased() {
+        case "pass": "checkmark.shield"
+        case "warning": "exclamationmark.triangle"
+        case "fail": "xmark.octagon"
+        default: "clock.badge.questionmark"
+        }
+    }
+
+    private func satelliteDiagnostic(_ snapshot: TimeCardDeviceSnapshot) -> String {
+        guard let seen = snapshot.seenSatellites,
+              let locked = snapshot.lockedSatellites else {
+            return "unavailable"
+        }
+        return "\(seen) seen, \(locked) locked"
     }
 }
 
@@ -3077,6 +3235,10 @@ private struct FeatureRow: View {
         switch state.lowercased() {
         case "live", "pass":
             "checkmark.circle.fill"
+        case "fail":
+            "xmark.octagon.fill"
+        case "warning":
+            "exclamationmark.triangle.fill"
         case "waiting", "check", "partial":
             "clock.badge.questionmark"
         case "gated", "unavailable":
@@ -3090,7 +3252,9 @@ private struct FeatureRow: View {
         switch state.lowercased() {
         case "live", "pass":
             .green
-        case "waiting", "check", "partial":
+        case "fail":
+            .red
+        case "warning", "waiting", "check", "partial":
             .orange
         case "gated", "unavailable":
             .secondary
