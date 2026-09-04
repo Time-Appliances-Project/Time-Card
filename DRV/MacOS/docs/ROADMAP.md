@@ -42,8 +42,8 @@ the bounded ABI v8 read path.
   FPGA images
 - GNSS, GNSS2, atomic-clock, and NMEA 16550 UART polling access
 - Bounded UART writes, guarded UBX poll requests, and poll-response capture
-- Continuous bounded polling capture in the SwiftUI app and CLI, with raw
-  capture save and support-bundle export
+- Continuous bounded polling capture in the SwiftUI app and CLI, with live
+  app progress, raw capture save, and support-bundle export
 - Interrupt-backed stream capture
 - MSI-X interrupt allocation and dispatch
 - PPS and external timestamp events

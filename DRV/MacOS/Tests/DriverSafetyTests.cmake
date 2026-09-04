@@ -199,7 +199,9 @@ foreach(required_control_center_sma IN ITEMS
         "TimeCardUARTReadResult"
         "TimeCardUARTWriteResult"
         "TimeCardUARTCapture"
-        "captureUART")
+        "captureUART"
+        "captureSnapshot"
+        "progress")
     string(FIND "${control_center}" "${required_control_center_sma}" control_sma_offset)
     if(control_sma_offset EQUAL -1)
         message(FATAL_ERROR
@@ -228,6 +230,7 @@ foreach(required_control_center_monitor IN ITEMS
         "startUARTCapture"
         "stopUARTCapture"
         "clearUARTCapture"
+        "capture running"
         "TimeCardSessionLogEntry"
         "appendSessionLog"
         "clearSessionLog")

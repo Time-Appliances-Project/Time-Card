@@ -1728,7 +1728,8 @@ enum TimeCardClient {
         baudRate: UInt32,
         durationSeconds: Double = 5.0,
         maxBytes: Int = 65_536,
-        readTimeoutMilliseconds: UInt32 = 250
+        readTimeoutMilliseconds: UInt32 = 250,
+        progress: ((TimeCardUARTCapture) -> Void)? = nil
     ) throws -> TimeCardUARTCapture {
         let boundedDuration = min(max(durationSeconds, 0.5), 60.0)
         let boundedMaxBytes = min(max(maxBytes, 1), 262_144)
@@ -1740,6 +1741,22 @@ enum TimeCardClient {
         var readCount = 0
         var emptyReadCount = 0
         var lastLineStatus: UInt32 = 0
+
+        func captureSnapshot(cancelled: Bool) -> TimeCardUARTCapture {
+            TimeCardUARTCapture(
+                port: port,
+                baudRate: baudRate,
+                capturedAt: capturedAt,
+                durationSeconds: Date().timeIntervalSince(capturedAt),
+                requestedDurationSeconds: boundedDuration,
+                readCount: readCount,
+                emptyReadCount: emptyReadCount,
+                lastLineStatus: lastLineStatus,
+                stoppedByLimit: captured.count >= boundedMaxBytes,
+                cancelled: cancelled,
+                data: captured
+            )
+        }
 
         while Date() < deadline && captured.count < boundedMaxBytes &&
             !Task.isCancelled {
@@ -1765,21 +1782,10 @@ enum TimeCardClient {
             } else {
                 captured.append(contentsOf: transfer.data.prefix(remainingBytes))
             }
+            progress?(captureSnapshot(cancelled: false))
         }
 
-        return TimeCardUARTCapture(
-            port: port,
-            baudRate: baudRate,
-            capturedAt: capturedAt,
-            durationSeconds: Date().timeIntervalSince(capturedAt),
-            requestedDurationSeconds: boundedDuration,
-            readCount: readCount,
-            emptyReadCount: emptyReadCount,
-            lastLineStatus: lastLineStatus,
-            stoppedByLimit: captured.count >= boundedMaxBytes,
-            cancelled: Task.isCancelled,
-            data: captured
-        )
+        return captureSnapshot(cancelled: Task.isCancelled)
     }
 
     static func writeUART(

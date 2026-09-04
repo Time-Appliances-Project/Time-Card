@@ -717,7 +717,30 @@ final class TimeCardMonitor: ObservableObject {
                     for: descriptor,
                     port: port,
                     baudRate: baudRate,
-                    durationSeconds: durationSeconds
+                    durationSeconds: durationSeconds,
+                    progress: { partialCapture in
+                        Task { @MainActor [weak self] in
+                            guard let self,
+                                  self.selectionGeneration == generation,
+                                  self.uartCaptureInProgress else {
+                                return
+                            }
+                            self.uartCapture = partialCapture
+                            if !partialCapture.data.isEmpty {
+                                self.uartReadResult = TimeCardUARTReadResult(
+                                    port: partialCapture.port,
+                                    timeoutMilliseconds: 0,
+                                    lineStatus: partialCapture.lastLineStatus,
+                                    data: Array(partialCapture.data.prefix(256))
+                                )
+                            }
+                            self.uartMessage =
+                                "\(partialCapture.port.label) capture running: "
+                                    + "\(partialCapture.byteCount) byte(s), "
+                                    + "\(partialCapture.readCount) read window(s), "
+                                    + "LSR \(partialCapture.lineStatusText)."
+                        }
+                    }
                 )
                 await MainActor.run { [weak self] in
                     guard let self, self.selectionGeneration == generation else {
