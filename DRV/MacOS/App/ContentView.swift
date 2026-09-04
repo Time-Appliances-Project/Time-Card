@@ -7156,6 +7156,13 @@ private struct SubsystemMapView: View {
                 ControlCenterHeader()
 
                 ControlCenterPanel(
+                    title: "Live Time Card topology",
+                    subtitle: "Windows topology view rebuilt as native SwiftUI"
+                ) {
+                    TimeCardTopologyDiagramView(snapshot: monitor.snapshot)
+                }
+
+                ControlCenterPanel(
                     title: "Subsystem capability map",
                     subtitle: "Windows topology imported as a macOS readiness map"
                 ) {
@@ -7203,6 +7210,175 @@ private struct SubsystemMapView: View {
             }
             .padding(24)
         }
+    }
+}
+
+private struct TimeCardTopologyDiagramView: View {
+    let snapshot: TimeCardDeviceSnapshot?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                topologyNode(
+                    title: "PCIe",
+                    state: snapshot == nil ? "Waiting" : "Live",
+                    detail: snapshot?.pciIdentity ?? "No device selected",
+                    color: snapshot == nil ? .secondary : .green
+                )
+                topologyLink()
+                topologyNode(
+                    title: "DriverKit",
+                    state: snapshot == nil ? "Waiting" : "Connected",
+                    detail: snapshot.map { "ABI v\($0.abiVersion)" }
+                        ?? "User client not open",
+                    color: snapshot == nil ? .secondary : .green
+                )
+                topologyLink()
+                topologyNode(
+                    title: "PHC",
+                    state: hasCapability("Clock read") ? "Live" : "Gated",
+                    detail: clockDetail,
+                    color: hasCapability("Clock read") ? .green : .orange
+                )
+                topologyLink()
+                topologyNode(
+                    title: "macOS service",
+                    state: hasCapability("Clock set") ? "Ready" : "Read-only",
+                    detail: "Control Center and future discipline daemon",
+                    color: hasCapability("Clock set") ? .teal : .secondary
+                )
+            }
+
+            HStack(spacing: 10) {
+                topologyNode(
+                    title: "GNSS",
+                    state: gnssState,
+                    detail: gnssDetail,
+                    color: gnssColor
+                )
+                topologyNode(
+                    title: "ToD",
+                    state: hasCapability("ToD") ? "Present" : "Not present",
+                    detail: snapshot?.todTelemetryAvailable == true
+                        ? "UTC and leap summaries live"
+                        : "Summary registers gated",
+                    color: hasCapability("ToD") ? .cyan : .secondary
+                )
+                topologyNode(
+                    title: "SMA I/O",
+                    state: hasCapability("SMA") ? "Live" : "Gated",
+                    detail: "Connector route fabric",
+                    color: hasCapability("SMA") ? .orange : .secondary
+                )
+                topologyNode(
+                    title: "I2C fabric",
+                    state: hasCapability("I2C") ? "Live" : "Gated",
+                    detail: "Mux, probes, LEDs, and sensors",
+                    color: hasCapability("I2C") ? .yellow : .secondary
+                )
+            }
+
+            HStack(spacing: 10) {
+                topologyNode(
+                    title: "Sensors",
+                    state: hasCapability("Sensors") ? "Live" : "Gated",
+                    detail: "Temperature, humidity, pressure, IMU path",
+                    color: hasCapability("Sensors") ? .pink : .secondary
+                )
+                topologyNode(
+                    title: "Status LEDs",
+                    state: hasCapability("LEDs") ? "Live" : "Gated",
+                    detail: "Manual and policy-driven RGB state",
+                    color: hasCapability("LEDs") ? .mint : .secondary
+                )
+                topologyNode(
+                    title: "FPGA cores",
+                    state: hasCapability("ToD") || hasCapability("SMA")
+                        ? "Partially live" : "Gated",
+                    detail: "PPS, parser, counters, generators, flash roadmap",
+                    color: hasCapability("ToD") || hasCapability("SMA")
+                        ? .purple : .secondary
+                )
+            }
+
+            Text(
+                "Green nodes are live through the current DriverKit user "
+                    + "client. Orange or purple nodes are partially available "
+                    + "or waiting on a guarded ABI. Gray nodes are absent or "
+                    + "not exposed by this FPGA image."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+        }
+    }
+
+    private func topologyNode(
+        title: String,
+        state: String,
+        detail: String,
+        color: Color
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                StatusPill(state, color)
+            }
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .textSelection(.enabled)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+        .background(
+            color.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 14)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(color.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    private func topologyLink() -> some View {
+        Image(systemName: "arrow.right")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
+
+    private func hasCapability(_ name: String) -> Bool {
+        snapshot?.capabilityNames.contains(name) == true
+    }
+
+    private var clockDetail: String {
+        guard let snapshot else { return "No PHC snapshot yet" }
+        return "\(TimeCardFormatting.syncStatus(snapshot)), source \(TimeCardFormatting.clockSource(snapshot))"
+    }
+
+    private var gnssState: String {
+        if snapshot?.gnssTelemetryAvailable == true { return "Live" }
+        if snapshot?.supportsUART == true { return "UART-ready" }
+        return "Gated"
+    }
+
+    private var gnssDetail: String {
+        if snapshot?.gnssTelemetryAvailable == true {
+            return snapshot?.gnssFixName ?? "GNSS summary live"
+        }
+        if snapshot?.supportsUART == true {
+            return "Receiver traffic available through UART labs"
+        }
+        return "GNSS path is not advertised"
+    }
+
+    private var gnssColor: Color {
+        if snapshot?.gnssTelemetryAvailable == true { return .green }
+        if snapshot?.supportsUART == true { return .teal }
+        return .secondary
     }
 }
 

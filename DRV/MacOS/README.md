@@ -68,6 +68,9 @@ The current implementation provides:
   - a read-only Windows built-in profile planner for GNSS disciplined,
     External PPS, PTP disciplined, NMEA service, and lab timing output profiles,
     with live macOS readiness and support-bundle export
+  - a native SwiftUI subsystem topology diagram that maps PCIe, DriverKit, PHC,
+    macOS service, GNSS, ToD, SMA, I2C, sensors, LEDs, and FPGA cores against
+    live capabilities
   - a rolling bracketed sampling-window chart
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
