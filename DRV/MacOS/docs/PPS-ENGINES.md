@@ -5,6 +5,11 @@ with driver 28 / ABI v12 and CLI 23. This controls the FPGA PPS engines, not the
 SA53 oscillator. It does not reroute SMA connectors, set the PHC epoch, or
 change macOS time.
 
+The same driver contract remains active in app 67. Its current Generators
+page is shown below; this is a readback capture, not a physical output test.
+
+![App 67 with live PPS 1.2 input/output readbacks and gated optional engines](screenshots/control-center-pps-build67.png)
+
 ## Register contract
 
 The Meta/Celestica classic and revision-02 LitePCIe block designs map PPS

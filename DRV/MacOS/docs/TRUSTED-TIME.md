@@ -6,6 +6,27 @@ is unchanged; CLI 24 labels raw PHC reads as UTC/TAI epoch unqualified instead
 of presenting them as UTC. This is a safety foundation, not full Windows parity
 or a production clock service.
 
+![Build 67 Time Synchronization, with PHC UTC unqualified and clock steering disabled](screenshots/control-center-time-sync-build67.png)
+
+## Using the workspace
+
+1. Select the connected Time Card, then open **Time Synchronization**.
+2. Choose GNSS or GNSS 2 and the host UART baud. Close other card-control
+   clients before starting; this app's ownership guard cannot stop external
+   programs from using the same hardware.
+3. Start a session. Optional read-only UBX polls request receiver identity and
+   time metadata. The page shows received bytes, checksum errors, qualification
+   reasons and time-service conflicts. Other manual hardware operations in
+   the app stay blocked until the session stops.
+4. Export evidence to save the observed state and the bounded message log.
+   Exported host receive times are not precision GNSS timestamps.
+5. Stop the session before returning to hardware configuration. Stop revokes
+   time evidence and releases the app's hardware-operation guard.
+
+The screenshot was captured after the validated session stopped. Its zero
+received bytes and unavailable UTC/TAI values are the actual test-card state,
+not example readings. No clocks are changed by this workspace.
+
 ## Implemented
 
 - A continuous GNSS/GNSS2 polling session, limited to 24 hours and the latest

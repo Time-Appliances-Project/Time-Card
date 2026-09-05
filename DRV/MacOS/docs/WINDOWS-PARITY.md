@@ -5,6 +5,9 @@ Windows Control Center in the same repository (Windows driver ABI 15).
 An implemented screen does not imply that every supported board has been
 physically validated.
 
+The [build 67 screenshot gallery](screenshots/README.md) shows the installed
+app's actual hardware state and remaining safety gates.
+
 | Workspace | macOS implementation | Remaining Windows capabilities |
 | --- | --- | --- |
 | Precision Clock | PHC read/set, cross timestamps, synchronization status, guarded source selection, active/configured input, supported-source mask | Trusted time-domain conversion, NTP/SyncE/Dynamic synthesis contracts, smooth/advanced adjustment, system discipline |
@@ -34,7 +37,7 @@ physically validated.
   See [TRUSTED-TIME.md](TRUSTED-TIME.md).
 - Build 66 adds PPS transaction and Swift model tests. Seven CTest and six
   Swift suites pass, with universal app/driver builds and strict signatures.
-  App 66 and CLI 23 are installed on `.141`; the approved restart activated
+  App 66 and CLI 23 were installed on `.141`; the approved restart activated
   the hash-verified, actually bound driver 28 / ABI v12. Both PPS 1.2 cores
   returned live data; the output editor's validation and confirmation were
   checked without applying a change. Clock sync recovered, and sensor, SMA,

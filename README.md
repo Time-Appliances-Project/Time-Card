@@ -167,7 +167,7 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
 * Bill of Materials (parts from Digikey)
 * Schematic and PCB of the time card
 * Linux Time Card driver and Rust/Relm4 Control Center in [`DRV/Linux`](DRV/Linux)
-* macOS DriverKit extension, activation app, and command-line tool in
+* Native macOS SwiftUI Control Center, DriverKit extension, and command-line tool in
   [`DRV/MacOS`](DRV/MacOS)
 * Windows KMDF driver, command-line tools, and Control Center in
   [`DRV/Windows`](DRV/Windows)
@@ -177,7 +177,7 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
   GNSS/PHC phase measurements. Windows performs edge-bound GNSS/PHC startup
   alignment, steering, per-card persistence, hot-plug recovery, monitoring, and
   optional qualified Windows Time Service integration directly through driver
-  ABI 15—without WSL, `/dev/ptp*`, chrony, or Linux NTP shared memory. It accepts
+  ABI 15, without WSL, `/dev/ptp*`, chrony, or Linux NTP shared memory. It accepts
   only fresh, checksum-valid, iTOW-coherent GNSS epochs and new error-free FPGA
   PPS counters; PHC writes are verified against newer GNSS data. SA5x/SA53
   hardware discipline and safe SA3x monitoring are selected by capabilities on
@@ -193,6 +193,31 @@ Using a Calnex Sentinel device are comparing various things. Here we are compari
   discipline-EEPROM monitoring returns validity, length, SHA-256, and the exact
   binary payload as Base64.
 * CAD files for the custom PCIe bracket 
+
+# Native macOS Control Center
+
+The [macOS package](DRV/MacOS/README.md) includes a SwiftUI Control Center,
+PCIDriverKit extension, and signed diagnostic CLI. The latest validated
+deployment is **app 67, driver 28 / ABI v12, and CLI 24**, with universal Intel
+and Apple Silicon builds and hardware checks on a classic Meta Time Card in
+an Intel Mac Pro.
+
+The app provides live PHC and cross-timestamp telemetry, guarded clock-source
+and PPS controls, SA53 telemetry and reviewed controls, BNO08x 3D orientation
+and low-rate vibration, UART decoding, profiles, and diagnostic exports.
+Build 67 adds continuous GNSS observation, UTC/GPS/leap-second consistency
+checks, exact receiver UTC/TAI epochs, and a Time Synchronization workspace.
+
+![Native macOS Time Card Control Center, build 67](DRV/MacOS/docs/screenshots/control-center-overview-build67.png)
+
+See the [full-resolution screenshot gallery](DRV/MacOS/docs/screenshots/README.md),
+[trusted-time validation](DRV/MacOS/docs/TRUSTED-TIME.md), and
+[Windows parity matrix](DRV/MacOS/docs/WINDOWS-PARITY.md).
+On the current test card, PHC UTC remains unqualified and the SA53 reports no
+PPS input. System-clock steering is disabled; full Windows parity and a
+production release are still in progress.
+
+# Windows Control Center
 
 The Windows package currently ships driver **1.43 / ABI 15** and a native
 Control Center that brings the complete Time Card into one application:

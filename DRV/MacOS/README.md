@@ -4,23 +4,39 @@ This repository contains the native macOS driver and Control Center for the OCP
 Time Card. It uses PCIDriverKit, packages the driver in a SwiftUI monitoring
 app, and provides a small command-line diagnostic client.
 
+## Latest validated deployment
+
+**App 67 · Driver 28 / ABI v12 · CLI 24**, validated September 5, 2026.
+The signed universal app and CLI are installed on the Intel Mac Pro test system.
+Seven CTest and seven Swift suites pass. This update preserves the existing
+driver and does not require a reboot.
+
+The latest addition is the Time Synchronization workspace: continuous bounded
+GNSS observation, corrected leap-second decoding, exact receiver UTC/TAI epochs,
+UTC/GPS consistency and freshness checks, evidence export, and macOS time-service
+diagnostics. A tested slew controller is not yet connected to a clock writer.
+
+The test card remains PPS frequency-locked but has invalid PHC UTC metadata,
+no GNSS UART replies, and no PPS input detected by SA53. System-clock steering
+is disabled. See [trusted-time evidence and remaining work](docs/TRUSTED-TIME.md)
+and the [Windows parity matrix](docs/WINDOWS-PARITY.md).
+
 ## Screenshots
 
-Representative macOS Control Center screenshots:
+Actual build 67 captures from the Intel Mac Pro, at 2560 × 1440. These show
+real hardware states, including unavailable data and safety gates.
 
-Build 65 on the Intel Mac Pro, with real SA53 and BNO08x telemetry:
+![Time Synchronization with unqualified UTC and system-clock steering disabled](docs/screenshots/control-center-time-sync-build67.png)
 
-| SA53 atomic clock | Live 3D orientation and vibration |
+| Live overview | PPS timing engines |
 | --- | --- |
-| ![SA53 lock, telemetry, alarms and guarded controls](docs/screenshots/control-center-atomic-clock-build65.png) | ![Live BNO08x orientation and low-rate vibration on the Mac Pro](docs/screenshots/control-center-live-motion-build65.png) |
+| ![Raw PHC telemetry and bracketed sampling-window history](docs/screenshots/control-center-overview-build67.png) | ![Live PPS input and output readbacks with version-aware controls](docs/screenshots/control-center-pps-build67.png) |
 
-| Overview | GNSS and UART |
+| SA53 atomic clock | 3D orientation and low-rate vibration |
 | --- | --- |
-| ![TimeCardMacOS overview dashboard](docs/screenshots/control-center-overview.png) | ![TimeCardMacOS GNSS and UART workbench](docs/screenshots/control-center-gnss-uart.png) |
+| ![SA53 atomic lock, missing PPS input, telemetry and guarded controls](docs/screenshots/control-center-atomic-clock-build67.png) | ![BNO08x orientation, calibration status and low-rate vibration](docs/screenshots/control-center-motion-build67.png) |
 
-| LEDs and sensors | Operations and exports |
-| --- | --- |
-| ![TimeCardMacOS LEDs, I2C, sensors, and IMU workspace](docs/screenshots/control-center-leds-sensors.png) | ![TimeCardMacOS profiles, self-test, diagnostics, and support bundle exports](docs/screenshots/control-center-operations.png) |
+See the [annotated full-resolution gallery and earlier captures](docs/screenshots/README.md).
 
 ## Current milestone
 
