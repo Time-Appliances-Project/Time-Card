@@ -213,7 +213,7 @@ TimeCardFacebookRegisterMap(bool useMSIX, uint32_t boardProfile)
             kTimeCardCapabilityCrossTimestamp | kTimeCardCapabilityTOD |
             kTimeCardCapabilitySMA | kTimeCardCapabilityLED |
             kTimeCardCapabilityI2C | kTimeCardCapabilitySensors |
-            kTimeCardCapabilityUART,
+            kTimeCardCapabilityUART | kTimeCardCapabilityIMU,
         0, 0, 0, {0, 0, 0, 0}, 0, 0, 0, 0, 0
     };
 

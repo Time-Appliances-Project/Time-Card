@@ -34,7 +34,7 @@ The current implementation provides:
 - Bracketed card/system cross timestamps
 - Version-gated clock and TOD status reads
 - Capability and field-validity reporting for absent or gated registers
-- A versioned, size-checked user-client ABI v10
+- A versioned, size-checked user-client ABI v11
 - Guarded clock-source query/set with supported-source masks, active-source
   readback, expected-state checks, and verified rollback on failed writes
 - Four frequency counters with integration controls and error/overrun states
@@ -67,7 +67,11 @@ The current implementation provides:
     exposes writable routing
   - live Sensors and IMU workspace with environmental metric cards, board
     temperature zones, pressure compensation, temperature history, raw sensor
-    inventory, and IMU bring-up status
+    inventory, BNO055/BNO08x fused motion, quaternion-driven 3D orientation,
+    calibration status, low-rate vibration trends, and motion CSV/JSON export
+  - a dedicated SA53 atomic-clock workspace with identity, lock/PPS/alarm
+    telemetry, checksummed C3 transactions, bounded confirmed setters, mode
+    conflict checks, readback, and reviewed JamSync/load/store/acknowledge actions
   - a Time Card hardware UART workspace for port selection, baud-rate
     configuration, non-draining line-status observation, bounded reads, guarded
     UBX poll writes, bounded poll-response capture, continuous polling capture
@@ -194,11 +198,41 @@ the ABI. Profiles do not set PHC epoch, macOS time, GNSS configuration, LEDs,
 oscillator settings, or flash. Support bundles include valid staged profiles and
 the last apply report, or validation diagnostics for an invalid draft.
 
+## SA53 atomic clock and IMU motion
+
+App build 64 bundles driver 26 (ABI v11) and CLI 22. **Atomic Clock** works
+with ABI v9 or later on the Meta/Celestica MAC UART at 57,600 baud. Refresh
+identifies the oscillator before exposing settings. Unsupported firmware
+fields remain unavailable. Clock-changing actions require confirmation,
+fresh serial identity, parameter bounds and mode checks, and readback.
+Timed-out writes are never automatically retried or phase-rolled-back.
+Close other oscillator-control applications before applying changes.
+
+**Sensors and IMU → Start Motion** requires the ABI v11 driver actually bound
+to the PCI card, not merely listed as activated. It enables volatile BNO08x
+reports or BNO055 NDOF fusion on the known Meta/Celestica sensor routes. The
+3D sensor-frame schematic follows valid quaternions; grey geometry means
+orientation is unavailable. Missing or stale axes do not become zero values.
+The vibration chart shows gravity-compensated acceleration magnitude and
+60-second RMS, with bounded history and CSV/JSON export. Times are host receive
+times. Requested BNO08x report rate is 4 Hz; actual throughput depends on the
+sensor and bus. This is a low-rate motion trend, not a calibrated vibration
+analyzer or high-frequency spectral measurement. Stop before closing the app
+to disable BNO08x subscriptions; BNO055 fusion mode is retained.
+
+The SA53 fitted in `.141` returned valid identity and telemetry during read-only
+hardware testing. It reported atomic lock but no PPS input or disciplining
+lock, with alarm `0x00020000`. No oscillator settings were changed. Its older
+firmware rejected eight optional queries, which are shown as unavailable.
+Driver 26 was accepted for upgrade, but the card still returned ABI v10 during
+this deployment. A restart is pending approval before live IMU validation.
+See [validation and protocol details](docs/PERIPHERALS.md).
+
 ## Clock sources and frequency counters
 
-App build 63 bundles driver build 25 (ABI v10). Activate the bundled driver
-update before using the new controls. Older ABI v7-v9 drivers remain usable
-for their existing features; the new controls stay disabled.
+Clock-source and frequency controls require driver build 25 (ABI v10) or
+later. Older ABI v7-v9 drivers remain usable for their existing features;
+unsupported controls stay disabled.
 
 **Precision Clock** and **Generators** show the configured source separately
 from the active input. Source changes require confirmation, preserve the PHC
@@ -418,10 +452,11 @@ and it does not yet apply a UTC/TAI correction.
 - I2C support intentionally exposes diagnostics, probes, bounded reads, and mux
   control only. General writes remain gated until the Control Center has device
   profiles, paging rules, and write-safety warnings.
-- Sensor support currently reports LM75B, SHT3x, ICP-10100 telemetry with
-  compensated pressure when OTP calibration is available, BNO08x SHTP-header
-  presence, and BNO055 identity presence. BME/BMP280, INA219 rail telemetry,
-  and fused IMU decoding remain planned on top of the same mux-aware sensor ABI.
+- Sensor support reports LM75B, SHT3x, ICP-10100 telemetry with compensated
+  pressure when OTP calibration is available, plus BNO08x/BNO055 motion with
+  ABI v11. Physical motion validation is pending driver activation on `.141`.
+  BME/BMP280 and INA219 rail telemetry remain planned. ART/ADVA IMU routes
+  and ART mRO-50 oscillator support remain gated.
 - SMA routing is implemented for the classic, shifted LitePCIe, ART, and ADVA
   register maps. FPGA images with absent or fixed route GPIO report fixed
   direction and fixed function, and writable changes are rejected.

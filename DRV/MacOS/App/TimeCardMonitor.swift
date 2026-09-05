@@ -190,6 +190,7 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var profilePlan: TimeCardProfilePlan?
     @Published private(set) var profileReport: TimeCardProfileApplyReport?
     @Published private(set) var profileOperationInProgress = false
+    @Published private(set) var peripheralOperationInProgress = false
     @Published private(set) var profileMessage = ""
     @Published private(set) var clockControl: TimeCardClockControlState?
     @Published private(set) var frequencyStates: [TimeCardFrequencyState] = []
@@ -257,7 +258,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func selectService(_ serviceID: UInt64) {
-        guard !profileOperationInProgress, services.contains(where: { $0.id == serviceID }),
+        guard !profileOperationInProgress, !peripheralOperationInProgress, services.contains(where: { $0.id == serviceID }),
               selectedServiceID != serviceID else {
             return
         }
@@ -1021,6 +1022,20 @@ final class TimeCardMonitor: ObservableObject {
         }
     }
 
+    func beginPeripheralOperation() -> Bool {
+        guard state == .connected, !commandInProgress, !profileOperationInProgress,
+              !peripheralOperationInProgress, !selfTestInProgress, !i2cOperationInProgress,
+              !uartOperationInProgress, !uartCaptureInProgress, !serialCaptureInProgress else { return false }
+        peripheralOperationInProgress = true
+        commandInProgress = true
+        return true
+    }
+    func endPeripheralOperation(_ message: String, failed: Bool) {
+        peripheralOperationInProgress = false
+        commandInProgress = false
+        appendSessionLog(severity: failed ? .error : .info, category: "Peripherals", message: message)
+    }
+
     func stageProfile(_ profile: TimeCardConfigurationProfile) {
         guard !profileOperationInProgress else { return }
         do {
@@ -1462,7 +1477,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func runReadOnlySelfTest() {
-        guard !selfTestInProgress, !profileOperationInProgress else { return }
+        guard !selfTestInProgress, !profileOperationInProgress, !peripheralOperationInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             selfTestMessage = "No Time Card is selected."
             selfTestReport = TimeCardSelfTestReport(

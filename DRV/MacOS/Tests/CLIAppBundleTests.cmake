@@ -43,6 +43,6 @@ execute_process(
 if(NOT version_result EQUAL 0)
     message(FATAL_ERROR "cannot read timecardctl bundle version: ${version_error}")
 endif()
-if(NOT bundle_version STREQUAL "21")
+if(NOT bundle_version STREQUAL "22")
     message(FATAL_ERROR "unexpected timecardctl bundle version: ${bundle_version}")
 endif()

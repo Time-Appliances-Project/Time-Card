@@ -452,7 +452,7 @@ endforeach()
 set(abi_source "${TIMECARD_SOURCE_DIR}/Shared/TimeCardABI.h")
 file(READ "${abi_source}" abi)
 foreach(required_uart_abi IN ITEMS
-        "TIMECARD_ABI_VERSION 10u"
+        "TIMECARD_ABI_VERSION 11u"
         "kTimeCardCapabilityUART"
         "TimeCardUARTObserve"
         "TimeCardUARTConfig"
@@ -470,6 +470,19 @@ foreach(required_uart_abi IN ITEMS
 endforeach()
 
 file(READ "${TIMECARD_SOURCE_DIR}/Shared/TimeCardTiming.h" timing_transactions)
+foreach(required_motion_guard IN ITEMS
+        "TimeCardMotionRequestValid(*request)"
+        "ivars->registers.capabilities & kTimeCardCapabilityIMU"
+        "ivars->registers.boardProfile != kTimeCardBoardFacebook"
+        "ivars->registers.boardProfile != kTimeCardBoardCelestica"
+        "restored == savedMux"
+        "sizeof(TimeCardIMURequest), 0, sizeof(TimeCardIMUTelemetry)")
+    string(FIND "${driver}" "${required_motion_guard}" motion_guard_offset)
+    if(motion_guard_offset EQUAL -1)
+        message(FATAL_ERROR "Motion path lost guard: ${required_motion_guard}")
+    endif()
+endforeach()
+
 foreach(required_timing_guard IN ITEMS
         "TimeCardTimingResult::stale"
         "TimeCardTimingResult::rollbackFailed"

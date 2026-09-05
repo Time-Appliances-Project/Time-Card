@@ -45,6 +45,7 @@ print_usage(FILE *stream)
             "[subaddress-length]]]\n"
             "       timecardctl i2c-mux [channel-mask]\n"
             "       timecardctl sensors\n"
+            "       timecardctl imu [start|stop]\n"
             "       timecardctl uart-observe port [timeout-ms]\n"
             "       timecardctl uart-config port baud\n"
             "       timecardctl uart-read port [max-bytes [timeout-ms]]\n"
@@ -278,7 +279,7 @@ command_status(io_connect_t connection)
     }
     printf("Register layout:  %s\n",
            TimeCardRegisterLayoutName(info.layout));
-    printf("Capabilities:     %s%s%s%s%s%s%s%s%s%s%s\n",
+    printf("Capabilities:     %s%s%s%s%s%s%s%s%s%s%s%s\n",
            (info.capabilities & kTimeCardCapabilityReadClock) != 0 ?
                "clock-read" : "no-clock-read",
            (info.capabilities & kTimeCardCapabilitySetClock) != 0 ?
@@ -300,7 +301,9 @@ command_status(io_connect_t connection)
            (info.capabilities & kTimeCardCapabilityClockSource) != 0 ?
                ", clock-source" : "",
            (info.capabilities & kTimeCardCapabilityFrequency) != 0 ?
-               ", frequency-counters" : "");
+               ", frequency-counters" : "",
+           (info.capabilities & kTimeCardCapabilityIMU) != 0 ?
+               ", fused-IMU" : "");
     printf("Clock offset:     0x%" PRIx64 "\n", info.clockOffset);
     if ((info.validFields & kTimeCardInfoValidClockVersion) != 0)
         printf("Clock version:    0x%08x\n", info.clockVersion);
@@ -1703,6 +1706,33 @@ command_frequency(io_connect_t connection, int argc, char **argv, bool set)
     return 0;
 }
 
+static int command_imu(io_connect_t connection, int argc, char **argv)
+{
+    TimeCardIMURequest request = { .size = sizeof(request) };
+    TimeCardIMUTelemetry response = {0};
+    if (argc > 3) return 2;
+    if (argc == 3) {
+        if (strcmp(argv[2], "start") == 0) request.mode = 1;
+        else if (strcmp(argv[2], "stop") == 0) request.mode = 2;
+        else return 2;
+    }
+    if (call_inout(connection, kTimeCardMethodIMUQuery, &request, sizeof(request), &response, sizeof(response))) return 1;
+    if (response.size != sizeof(response)) return 1;
+    printf("IMU: %s, flags 0x%04x, route 0x%02x/0x%02x, restored mux 0x%02x\n",
+           sensor_type_name(response.type), response.flags, response.muxChannelMask, response.address, response.restoredMuxChannelMask);
+    printf("Sequence: %u, reports: %u, calibration: 0x%02x, system: 0x%04x\n",
+           response.sampleSequence, response.reportCount, response.calibration, response.systemStatus);
+    if ((response.flags & (kTimeCardIMUPresent | kTimeCardIMUConfigured | kTimeCardIMUMuxRestored | kTimeCardIMUReset)) !=
+        (kTimeCardIMUPresent | kTimeCardIMUConfigured | kTimeCardIMUMuxRestored)) return 0;
+    if (response.flags & kTimeCardIMURotation)
+        printf("Quaternion x/y/z/w: %.6f %.6f %.6f %.6f\n", response.quaternionQ14[0]/16384.0,
+               response.quaternionQ14[1]/16384.0, response.quaternionQ14[2]/16384.0, response.quaternionQ14[3]/16384.0);
+    if (response.flags & kTimeCardIMULinearAcceleration)
+        printf("Linear acceleration m/s2: %.6f %.6f %.6f\n", response.linearAccelerationQ8[0]/256.0,
+               response.linearAccelerationQ8[1]/256.0, response.linearAccelerationQ8[2]/256.0);
+    return 0;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1753,6 +1783,8 @@ main(int argc, char **argv)
         status = command_i2c_mux(connection, argc, argv);
     else if (strcmp(argv[1], "sensors") == 0)
         status = command_sensors(connection, argc, argv);
+    else if (strcmp(argv[1], "imu") == 0)
+        status = command_imu(connection, argc, argv);
     else if (strcmp(argv[1], "uart-observe") == 0)
         status = command_uart_observe(connection, argc, argv);
     else if (strcmp(argv[1], "uart-config") == 0)

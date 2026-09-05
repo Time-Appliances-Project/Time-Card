@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 private enum ControlCenterPage: String, CaseIterable, Identifiable {
     case overview = "Overview"
     case clock = "Precision Clock"
+    case atomic = "Atomic Clock"
     case gnss = "GNSS"
     case uart = "UART and NMEA"
     case sma = "SMA Routing"
@@ -41,6 +42,7 @@ private enum ControlCenterPage: String, CaseIterable, Identifiable {
         switch self {
         case .overview: "gauge.with.dots.needle.67percent"
         case .clock: "clock.badge.checkmark"
+        case .atomic: "atom"
         case .gnss: "location.north.line"
         case .uart: "terminal"
         case .sma: "cable.connector"
@@ -62,6 +64,7 @@ struct ContentView: View {
     @EnvironmentObject private var driverManager: DriverManager
     @EnvironmentObject private var monitor: TimeCardMonitor
     @State private var selectedPage: ControlCenterPage = .initialPage
+    @StateObject private var deviceLab = DeviceLabMonitor()
 
     var body: some View {
         NavigationSplitView {
@@ -79,6 +82,8 @@ struct ContentView: View {
                     OverviewView()
                 case .clock:
                     PrecisionClockView()
+                case .atomic:
+                    AtomicClockView()
                 case .gnss:
                     GNSSWorkspaceView()
                 case .uart:
@@ -108,7 +113,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle(selectedPage.rawValue)
-            .disabled(monitor.profileOperationInProgress)
+            .disabled(monitor.profileOperationInProgress || monitor.peripheralOperationInProgress)
             .background(ControlCenterBackground())
             .toolbar {
                 ToolbarItemGroup {
@@ -137,6 +142,10 @@ struct ContentView: View {
                 }
             }
         }
+        .environmentObject(deviceLab)
+        .onReceive(monitor.$snapshot) { _ in deviceLab.bind(monitor) }
+        .onChange(of: monitor.state) { _, _ in deviceLab.bind(monitor) }
+        .onChange(of: monitor.selectedServiceID) { _, _ in deviceLab.bind(monitor) }
         .onChange(of: selectedPage) { _, page in
             UserDefaults.standard.set(page.rawValue, forKey: "controlCenterPage")
         }
@@ -4174,7 +4183,7 @@ private enum MacWorkspace: String {
                 ("SHT3x humidity and temperature", "Live through DriverKit ABI v7 and CLI"),
                 ("ICP-10100 pressure sensor", "Live with OTP compensated pressure"),
                 ("BME/BMP and INA rails", "Profile-aware, decoder pending"),
-                ("BNO055/BNO08x IMU", "Probe path live, fusion decoder pending"),
+                ("BNO055/BNO08x IMU", "Fused motion, 3D orientation, and low-rate vibration with ABI v11"),
                 ("Vibration charts", "Needs live IMU fused-motion samples"),
             ]
         case .i2c:
@@ -4337,6 +4346,7 @@ private struct SensorDashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 ControlCenterHeader()
+                MotionWorkspaceView()
                 sensorHeader
 
                 if !sensorCapabilityAvailable {
@@ -4357,7 +4367,6 @@ private struct SensorDashboardView: View {
                     SensorBoardTemperatureView(telemetry: telemetry)
                     SensorTemperatureHistoryChart()
                     SensorInventoryView(telemetry: telemetry)
-                    SensorIMUView(telemetry: telemetry)
                 } else {
                     ControlCenterPanel(
                         title: "Waiting for sensor sample",
@@ -4383,7 +4392,7 @@ private struct SensorDashboardView: View {
     private var sensorHeader: some View {
         ControlCenterPanel(
             title: "Sensors and IMU",
-            subtitle: "Live DriverKit ABI v7 environmental telemetry"
+            subtitle: "Environmental telemetry with ABI v7; fused motion with ABI v11"
         ) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: "gyroscope")
@@ -4396,8 +4405,8 @@ private struct SensorDashboardView: View {
                     Text(
                         "The macOS Control Center now reads the Celestica "
                             + "fixed-channel environmental stack, carries "
-                            + "ICP-10100 factory OTP calibration, and tracks "
-                            + "BNO08x/BNO055 IMU bring-up without treating "
+                            + "ICP-10100 factory OTP calibration, and supports "
+                            + "BNO08x/BNO055 fused motion without treating "
                             + "missing devices as plausible data."
                     )
                     .foregroundStyle(.secondary)
@@ -4712,75 +4721,6 @@ private struct SensorInventoryRow: View {
     }
 }
 
-private struct SensorIMUView: View {
-    let telemetry: TimeCardSensorSnapshot
-
-    var body: some View {
-        ControlCenterPanel(
-            title: "IMU workspace",
-            subtitle: "BNO055/BNO08x detection and fused-motion gap tracking"
-        ) {
-            VStack(alignment: .leading, spacing: 10) {
-                if imuReadings.isEmpty {
-                    FeatureRow(
-                        name: "BNO055/BNO08x probe",
-                        state: "Waiting",
-                        note: "The active profile did not return an IMU probe row."
-                    )
-                } else {
-                    ForEach(imuReadings) { reading in
-                        FeatureRow(
-                            name: reading.kind.label,
-                            state: imuState(reading),
-                            note: imuDetail(reading)
-                        )
-                    }
-                }
-
-                Divider()
-
-                Text(
-                    "Full Windows parity still needs the SH-2/BNO055 stream "
-                        + "decoder, quaternion orientation, calibration levels, "
-                        + "and the 3D cube. This page now exposes the live "
-                        + "presence path so that the next decoder slice has a "
-                        + "real macOS telemetry row to attach to."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var imuReadings: [TimeCardSensorReading] {
-        telemetry.readings.filter {
-            $0.isIMU || $0.kind == .bno08x || $0.kind == .bno055
-        }
-    }
-
-    private func imuState(_ reading: TimeCardSensorReading) -> String {
-        if reading.isValid { return "Live" }
-        if reading.isPresent { return "Partial" }
-        return "Unavailable"
-    }
-
-    private func imuDetail(_ reading: TimeCardSensorReading) -> String {
-        if reading.isValid {
-            return "\(SensorUIFormatting.route(reading)) responded with a valid identity."
-        }
-        if reading.isPresent {
-            if reading.kind == .bno08x {
-                let channel = (reading.raw2 >> 8) & 0xff
-                return "\(SensorUIFormatting.route(reading)) SHTP header " +
-                    "length \(reading.raw0), channel \(channel). " +
-                    "Decoder bring-up is next."
-            }
-            return "\(SensorUIFormatting.route(reading)) ACKed. Decoder bring-up is next."
-        }
-        return "\(SensorUIFormatting.route(reading)) did not ACK on this sample."
-    }
-}
-
 private struct SensorStatusBadge: Identifiable {
     let label: String
     let color: Color
@@ -5043,6 +4983,7 @@ private struct SMARouteCard: View {
 
 private struct TelemetryStudioView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
+    @EnvironmentObject private var lab: DeviceLabMonitor
     @State private var telemetryExportMessage = ""
 
     var body: some View {
@@ -5050,6 +4991,9 @@ private struct TelemetryStudioView: View {
             VStack(alignment: .leading, spacing: 18) {
                 ControlCenterHeader()
                 TelemetryChartsView()
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    MotionVibrationPanel(now: context.date)
+                }
 
                 ControlCenterPanel(
                     title: "Telemetry Studio",
@@ -5072,8 +5016,8 @@ private struct TelemetryStudioView: View {
                     )
                     FeatureRow(
                         name: "Vibration history",
-                        state: "Gated",
-                        note: "Requires fused IMU measurements from the driver."
+                        state: lab.motionRunning ? "Sampling" : "Stopped",
+                        note: "Start in Sensors and IMU. Uses actual gravity-compensated reports, with CSV/JSON export."
                     )
                     FeatureRow(
                         name: "CSV and JSON export",
@@ -8019,7 +7963,7 @@ private struct TimeCardConfigurationProfilePlan: Identifiable {
     }
 }
 
-private struct ControlCenterHeader: View {
+struct ControlCenterHeader: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
 
     var body: some View {

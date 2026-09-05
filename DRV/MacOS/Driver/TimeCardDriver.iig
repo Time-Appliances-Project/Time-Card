@@ -38,6 +38,8 @@ public:
     kern_return_t SetI2CMux(const TimeCardI2CMuxControl *request,
                             TimeCardI2CMuxControl *response) LOCALONLY;
     kern_return_t QuerySensors(TimeCardSensorTelemetry *telemetry) LOCALONLY;
+    kern_return_t QueryIMU(const TimeCardIMURequest *request,
+                          TimeCardIMUTelemetry *response) LOCALONLY;
     kern_return_t ObserveUART(const TimeCardUARTObserve *request,
                               TimeCardUARTObserve *response) LOCALONLY;
     kern_return_t ConfigureUART(const TimeCardUARTConfig *config) LOCALONLY;

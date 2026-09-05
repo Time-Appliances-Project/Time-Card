@@ -172,6 +172,7 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
         if (capabilities & (1 << 6)) != 0 { names.append("I2C") }
         if (capabilities & (1 << 7)) != 0 { names.append("Sensors") }
         if (capabilities & (1 << 8)) != 0 { names.append("UART") }
+        if abiVersion >= 11 && (capabilities & (1 << 11)) != 0 { names.append("Fused IMU") }
         if supportsClockSource { names.append("Clock source") }
         if supportsFrequency { names.append("Frequency counters") }
         return names
@@ -1078,10 +1079,16 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
 }
 
 enum TimeCardClient {
+    private static let uartSessionLock = NSRecursiveLock()
+    static func withUARTSession<T>(_ operation: () throws -> T) rethrows -> T {
+        uartSessionLock.lock()
+        defer { uartSessionLock.unlock() }
+        return try operation()
+    }
     private static let serviceClass = "IOUserService"
     private static let userClassValue = "TimeCardDriver"
     private static let minimumSupportedABIVersion: UInt32 = 7
-    private static let supportedABIVersion: UInt32 = 10
+    private static let supportedABIVersion: UInt32 = 11
 
     static var localABILayoutIsValid: Bool {
         MemoryLayout<TimeCardClockControlState>.size == 32
@@ -1747,6 +1754,22 @@ enum TimeCardClient {
         }
     }
 
+    static func queryIMU(for descriptor: TimeCardServiceDescriptor, mode: UInt32 = 0) throws -> MotionSample {
+        guard mode <= 2 else { throw MotionError.invalid("Invalid motion operation.") }
+        let snapshot = try readSnapshot(for: descriptor)
+        guard snapshot.abiVersion >= 11, snapshot.capabilities & (1 << 11) != 0 else {
+            throw MotionError.invalid("Live motion requires active driver build 26 / ABI v11 and a supported Meta/Celestica sensor route.")
+        }
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+        var input = [UInt8](repeating: 0, count: 16)
+        TimeCardUARTTransferRawLayout.writeUInt32(16, into: &input, at: 0)
+        TimeCardUARTTransferRawLayout.writeUInt32(mode, into: &input, at: 4)
+        var output = [UInt8](repeating: 0, count: 144)
+        try callInOutRawBytes(connection: connection, selector: 22, input: input, output: &output)
+        return try MotionSample(bytes: output)
+    }
+
     static func querySensors(
         for descriptor: TimeCardServiceDescriptor
     ) throws -> TimeCardSensorSnapshot {
@@ -1781,6 +1804,8 @@ enum TimeCardClient {
         port: TimeCardUARTPort,
         baudRate: UInt32
     ) throws {
+        uartSessionLock.lock()
+        defer { uartSessionLock.unlock() }
         try validateUARTBaudRate(baudRate)
         let connection = try openConnection(for: descriptor)
         defer { IOServiceClose(connection) }
@@ -1798,6 +1823,8 @@ enum TimeCardClient {
         maximumBytes: UInt32,
         timeoutMilliseconds: UInt32
     ) throws -> TimeCardUARTReadResult {
+        uartSessionLock.lock()
+        defer { uartSessionLock.unlock() }
         guard maximumBytes > 0 && maximumBytes <= 256 else {
             throw TimeCardClientError.invalidUARTRequest(
                 "UART read length must be between 1 and 256 bytes."
@@ -1833,6 +1860,8 @@ enum TimeCardClient {
         readTimeoutMilliseconds: UInt32 = 250,
         progress: ((TimeCardUARTCapture) -> Void)? = nil
     ) throws -> TimeCardUARTCapture {
+        uartSessionLock.lock()
+        defer { uartSessionLock.unlock() }
         let boundedDuration = min(max(durationSeconds, 0.5), 60.0)
         let boundedMaxBytes = min(max(maxBytes, 1), 262_144)
         try configureUART(for: descriptor, port: port, baudRate: baudRate)
@@ -1896,6 +1925,8 @@ enum TimeCardClient {
         bytes: [UInt8],
         timeoutMilliseconds: UInt32
     ) throws -> TimeCardUARTWriteResult {
+        uartSessionLock.lock()
+        defer { uartSessionLock.unlock() }
         guard !bytes.isEmpty && bytes.count <= 256 else {
             throw TimeCardClientError.invalidUARTRequest(
                 "UART write length must be between 1 and 256 bytes."

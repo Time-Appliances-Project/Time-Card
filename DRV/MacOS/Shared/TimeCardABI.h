@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define TIMECARD_ABI_VERSION 10u
+#define TIMECARD_ABI_VERSION 11u
 #define TIMECARD_DRIVER_VERSION 0x00000002u
 #define TIMECARD_SERVICE_CLASS "TimeCardDriver"
 #define TIMECARD_DRIVER_BUNDLE_ID "org.opentimeserver.timecard.macos.driver"
@@ -37,6 +37,7 @@ enum TimeCardExternalMethod {
     kTimeCardMethodClockSourceSet = 19,
     kTimeCardMethodFrequencyQuery = 20,
     kTimeCardMethodFrequencySet = 21,
+    kTimeCardMethodIMUQuery = 22,
     kTimeCardMethodCount
 };
 
@@ -71,7 +72,8 @@ enum TimeCardCapability {
     kTimeCardCapabilitySensors = 1u << 7,
     kTimeCardCapabilityUART = 1u << 8,
     kTimeCardCapabilityClockSource = 1u << 9,
-    kTimeCardCapabilityFrequency = 1u << 10
+    kTimeCardCapabilityFrequency = 1u << 10,
+    kTimeCardCapabilityIMU = 1u << 11
 };
 
 enum TimeCardSMADirection {
@@ -362,6 +364,41 @@ typedef struct TimeCardUARTObserve {
 
 #define TIMECARD_SENSOR_MAX_READINGS 16u
 
+/* ABI v11: opt-in fused motion. mode 0 polls, 1 starts/re-subscribes,
+ * 2 stops BNO08x reports. No generic I2C write or clock control is exposed. */
+typedef struct TimeCardIMURequest {
+    uint32_t size;
+    uint32_t mode;
+    uint32_t reserved[2];
+} TimeCardIMURequest;
+enum TimeCardIMUFlag {
+    kTimeCardIMUPresent = 1u << 0,
+    kTimeCardIMUConfigured = 1u << 1,
+    kTimeCardIMURotation = 1u << 2,
+    kTimeCardIMUAcceleration = 1u << 3,
+    kTimeCardIMULinearAcceleration = 1u << 4,
+    kTimeCardIMUGravity = 1u << 5,
+    kTimeCardIMUGyroscope = 1u << 6,
+    kTimeCardIMUMagnetic = 1u << 7,
+    kTimeCardIMUTemperature = 1u << 8,
+    kTimeCardIMUIncomplete = 1u << 9,
+    kTimeCardIMUMuxRestored = 1u << 10,
+    kTimeCardIMUReset = 1u << 11
+};
+typedef struct TimeCardIMUTelemetry {
+    uint32_t size, flags, type, muxChannelMask;
+    uint32_t address, restoredMuxChannelMask, controllerStatus, interruptStatus;
+    uint32_t sampleSequence, reportCount, calibration, systemStatus;
+    int32_t quaternionQ14[4]; /* x, y, z, w */
+    int32_t accelerationQ8[3]; /* m/s2 */
+    int32_t linearAccelerationQ8[3]; /* m/s2, gravity removed */
+    int32_t gravityQ8[3]; /* m/s2 */
+    int32_t gyroscopeQ9[3]; /* radians/s */
+    int32_t magneticQ4[3]; /* microtesla */
+    int32_t temperatureQ7; /* Celsius */
+    uint32_t reserved[4];
+} TimeCardIMUTelemetry;
+
 enum TimeCardSensorType {
     kTimeCardSensorTypeUnknown = 0,
     kTimeCardSensorTypeLM75B = 1,
@@ -431,6 +468,8 @@ typedef struct TimeCardSensorTelemetry {
 }
 
 static_assert(sizeof(TimeCardTime) == 16, "TimeCardTime ABI changed");
+static_assert(sizeof(TimeCardIMURequest) == 16, "IMU request ABI changed");
+static_assert(sizeof(TimeCardIMUTelemetry) == 144, "IMU telemetry ABI changed");
 static_assert(sizeof(TimeCardClockControl) == 32, "Clock control ABI changed");
 static_assert(sizeof(TimeCardClockSourceRequest) == 16, "Clock request ABI changed");
 static_assert(sizeof(TimeCardFrequencyControl) == 32, "Frequency ABI changed");

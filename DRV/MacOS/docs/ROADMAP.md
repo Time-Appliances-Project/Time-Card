@@ -95,6 +95,13 @@ images remain gated until exact-image presence is established.
 
 ## Milestone 4: system integration
 
+App build 64 also adds the dedicated SA53 C3 workspace and ABI v11 fused-motion
+path, including quaternion 3D visualization and low-rate vibration/RMS export.
+SA53 read-only telemetry is hardware-validated. Motion hardware validation
+awaits the approved driver-replacement restart; oscillator writes, other
+variants and high-rate vibration measurement remain unvalidated or pending.
+See [PERIPHERALS.md](PERIPHERALS.md) for exact scope and limitations.
+
 - Privileged `launchd` service
 - Offset and drift estimator
 - Controlled macOS clock discipline

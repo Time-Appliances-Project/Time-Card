@@ -13,6 +13,7 @@
 #include "TimeCardUserClient.h"
 #include "TimeCardRegisters.h"
 #include "TimeCardTiming.h"
+#include "TimeCardMotion.h"
 
 struct TimeCardDriver_IVars {
     IOPCIDevice *pciDevice;
@@ -27,6 +28,10 @@ struct TimeCardDriver_IVars {
     uint32_t i2cLEDAddress;
     bool i2cMuxPresent;
     bool deviceOpen;
+    uint32_t imuType, imuAddress, imuMux, imuSampleSequence;
+    uint8_t imuControlSequence;
+    bool imuConfigured;
+    bool imuResync;
 };
 
 struct TimeCardUserClient_IVars {
@@ -2287,6 +2292,169 @@ TimeCardBNO055ProbeLocked(IOPCIDevice *device, uint8_t memoryIndex,
     return false;
 }
 
+struct TimeCardMotionIO {
+    TimeCardDriver_IVars *state;
+    uint32_t address;
+    uint32_t controller = 0, interrupts = 0;
+    kern_return_t result = kIOReturnSuccess;
+    bool read(uint8_t *data, uint32_t count) {
+        result = TimeCardI2CReadLocked(state->pciDevice, state->memoryIndex, &state->registers,
+            address, 0, 0, data, count, &controller, &interrupts);
+        return result == kIOReturnSuccess;
+    }
+    bool readRegister(uint8_t reg, uint8_t *data, uint32_t count) {
+        result = TimeCardI2CReadLocked(state->pciDevice, state->memoryIndex, &state->registers,
+            address, 1, reg, data, count, &controller, &interrupts);
+        return result == kIOReturnSuccess;
+    }
+    bool write(const uint8_t *data, uint32_t count) {
+        result = TimeCardI2CWriteLocked(state->pciDevice, state->memoryIndex, &state->registers,
+            address, data, count, &controller, &interrupts);
+        return result == kIOReturnSuccess;
+    }
+    bool writeRegister(uint8_t reg, uint8_t value) {
+        const uint8_t data[] = {reg, value};
+        return write(data, 2);
+    }
+    bool select(uint32_t mux) {
+        return TimeCardSensorSelectBranchLocked(state->pciDevice, state->memoryIndex,
+            &state->registers, mux, &controller, &interrupts);
+    }
+};
+
+static bool TimeCardMotionResolve(TimeCardMotionIO &io) {
+    if (io.state->imuAddress) { io.address = io.state->imuAddress; return io.select(io.state->imuMux); }
+    if (io.select(8)) {
+        for (uint32_t address = 0x4a; address <= 0x4b; ++address) {
+            uint8_t header[4] = {};
+            io.address = address;
+            if (io.read(header, 4) && TimeCardBNO08xHeaderValid(header)) {
+                io.state->imuType = kTimeCardSensorTypeBNO08x;
+                io.state->imuAddress = address; io.state->imuMux = 8;
+                return true;
+            }
+        }
+    }
+    if (io.select(2)) {
+        for (uint32_t address = 0x28; address <= 0x29; ++address) {
+            uint8_t id = 0;
+            io.address = address;
+            if (io.readRegister(0, &id, 1) && id == 0xa0) {
+                io.state->imuType = kTimeCardSensorTypeBNO055;
+                io.state->imuAddress = address; io.state->imuMux = 2;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool TimeCardMotionSubscribe(TimeCardMotionIO &io, uint32_t interval) {
+    const uint8_t reports[] = {1, 2, 3, 4, 5, 6, 0x0e};
+    for (uint8_t report : reports) {
+        uint8_t packet[21];
+        TimeCardMotionFeature(packet, report, io.state->imuControlSequence++,
+            report == 0x0e && interval ? 1000000 : interval);
+        if (!io.write(packet, sizeof(packet))) { io.state->imuConfigured = false; return false; }
+    }
+    io.state->imuConfigured = interval != 0;
+    return true;
+}
+
+static void TimeCardMotionDrain(TimeCardMotionIO &io, TimeCardIMUTelemetry *out) {
+    const uint64_t deadline = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) + 100000000ull;
+    for (uint32_t pass = 0; pass < 12 && clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) < deadline; ++pass) {
+        uint8_t cargo[1024] = {};
+        uint32_t length = 0; uint8_t channel = 0;
+        bool resync = false;
+        if (!TimeCardMotionReadCargo(io, cargo, length, channel, &resync)) {
+            io.state->imuResync |= resync;
+            if (out && io.result != kIOReturnNoDevice) out->flags |= kTimeCardIMUIncomplete;
+            break;
+        }
+        if (length == 0) break;
+        if (io.state->imuResync) { io.state->imuResync = false; continue; }
+        if (channel == 1 && cargo[0] == 1) {
+            io.state->imuConfigured = false;
+            io.state->imuControlSequence = 0;
+            if (out) { out->flags = kTimeCardIMUPresent | kTimeCardIMUReset; out->reportCount = 0; }
+        }
+        if (out && channel == 3 && !TimeCardMotionParse(*out, cargo, length)) out->flags |= kTimeCardIMUIncomplete;
+    }
+}
+
+static bool TimeCardMotionReadBNO055(TimeCardMotionIO &io, uint32_t mode, TimeCardIMUTelemetry &out) {
+    uint8_t operation = 0, units = 0, calibration = 0, status[2] = {}, data[45] = {};
+    if (!io.readRegister(0x3d, &operation, 1)) return false;
+    if (mode == 1 && (operation & 0xf) != 0x0c) {
+        if (!io.writeRegister(0x3d, 0)) return false;
+        IODelay(20000);
+        // Use SI units and Android orientation; preserve the fitted clock source.
+        if (!io.writeRegister(0x3b, 0x80) || !io.writeRegister(0x3d, 0x0c)) return false;
+        IODelay(20000);
+        if (!io.readRegister(0x3d, &operation, 1)) return false;
+    }
+    io.state->imuConfigured = (operation & 0xf) == 0x0c;
+    if (!io.state->imuConfigured) return true;
+    if (!io.readRegister(0x3b, &units, 1) || !io.readRegister(0x35, &calibration, 1) ||
+        !io.readRegister(0x39, status, 2) || !io.readRegister(8, data, sizeof(data))) return false;
+    out.calibration = calibration;
+    out.systemStatus = status[0] | ((uint32_t)status[1] << 8);
+    // Fusion must be running, with no reported system error.
+    if (status[0] != 5 || status[1] != 0) return true;
+    TimeCardMotionBNO055(out, data, units);
+    return true;
+}
+
+kern_return_t TimeCardDriver::QueryIMU(const TimeCardIMURequest *request, TimeCardIMUTelemetry *response) {
+    if (!request || !response || !TimeCardMotionRequestValid(*request)) return kIOReturnBadArgument;
+    if (!ivars->deviceOpen) return kIOReturnNotReady;
+    if (!TimeCardDriverHasSensors(&ivars->registers) ||
+        !(ivars->registers.capabilities & kTimeCardCapabilityIMU) ||
+        (ivars->registers.boardProfile != kTimeCardBoardFacebook &&
+         ivars->registers.boardProfile != kTimeCardBoardCelestica)) return kIOReturnUnsupported;
+    *response = {}; response->size = sizeof(*response);
+    IOLockLock(ivars->registerLock);
+    if (!ivars->imuAddress && request->mode != 1) { IOLockUnlock(ivars->registerLock); return kIOReturnSuccess; }
+    TimeCardMotionIO io{ivars, ivars->imuAddress};
+    uint8_t savedMux = 0, restored = 0;
+    kern_return_t result = TimeCardI2CMuxReadLocked(ivars->pciDevice, ivars->memoryIndex,
+        &ivars->registers, &savedMux, &io.controller, &io.interrupts);
+    if (result == kIOReturnSuccess) {
+        if (TimeCardMotionResolve(io)) {
+            response->flags |= kTimeCardIMUPresent;
+            response->type = ivars->imuType; response->address = ivars->imuAddress;
+            response->muxChannelMask = ivars->imuMux;
+            if (ivars->imuType == kTimeCardSensorTypeBNO08x) {
+                if (request->mode == 1) {
+                    TimeCardMotionDrain(io, nullptr);
+                    if (!TimeCardMotionSubscribe(io, 250000)) result = io.result;
+                } else if (request->mode == 2) {
+                    if (!TimeCardMotionSubscribe(io, 0)) result = io.result;
+                }
+                if (request->mode != 2 && result == kIOReturnSuccess) TimeCardMotionDrain(io, response);
+            } else if (request->mode != 2 && !TimeCardMotionReadBNO055(io, request->mode, *response)) {
+                result = io.result;
+            }
+            if (ivars->imuConfigured) response->flags |= kTimeCardIMUConfigured;
+            if (response->reportCount) response->sampleSequence = ++ivars->imuSampleSequence;
+        } else {
+            ivars->imuAddress = 0; ivars->imuConfigured = false;
+            result = kIOReturnNoDevice;
+        }
+        const auto restoreResult = TimeCardI2CMuxWriteLocked(ivars->pciDevice, ivars->memoryIndex,
+            &ivars->registers, savedMux, &io.controller, &io.interrupts);
+        if (restoreResult == kIOReturnSuccess && TimeCardI2CMuxReadLocked(ivars->pciDevice,
+            ivars->memoryIndex, &ivars->registers, &restored, &io.controller, &io.interrupts) == kIOReturnSuccess && restored == savedMux) {
+            response->flags |= kTimeCardIMUMuxRestored;
+        } else result = kIOReturnIOError;
+    }
+    response->restoredMuxChannelMask = restored;
+    response->controllerStatus = io.controller; response->interruptStatus = io.interrupts;
+    IOLockUnlock(ivars->registerLock);
+    return result;
+}
+
 static uint32_t
 TimeCardSensorCapabilitiesForBoard(uint32_t boardProfile)
 {
@@ -3357,6 +3525,18 @@ FrequencySetAction(OSObject *, void *reference,
     return result;
 }
 
+static kern_return_t IMUQueryAction(OSObject *, void *reference, IOUserClientMethodArguments *arguments) {
+    if (!arguments->structureInput) return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardIMURequest *>(arguments->structureInput->getBytesNoCopy());
+    TimeCardIMUTelemetry response = {};
+    const auto result = static_cast<TimeCardDriver *>(reference)->QueryIMU(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput = OSData::withBytes(&response, sizeof(response));
+        if (!arguments->structureOutput) return kIOReturnNoMemory;
+    }
+    return result;
+}
+
 static const IOUserClientMethodDispatch kTimeCardDispatch[
     kTimeCardMethodCount] = {
     {GetInfoAction, false, 0, 0, 0, sizeof(TimeCardInfo)},
@@ -3395,6 +3575,7 @@ static const IOUserClientMethodDispatch kTimeCardDispatch[
      sizeof(TimeCardFrequencyControl)},
     {FrequencySetAction, false, 0, sizeof(TimeCardFrequencyRequest), 0,
      sizeof(TimeCardFrequencyControl)},
+    {IMUQueryAction, false, 0, sizeof(TimeCardIMURequest), 0, sizeof(TimeCardIMUTelemetry)},
 };
 
 kern_return_t

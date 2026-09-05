@@ -9,17 +9,23 @@ check:
 	cmake -E make_directory .build/cmake/swift-module-cache
 	xcrun swiftc -parse-as-library -swift-version 5 \
 		-module-cache-path .build/cmake/swift-module-cache \
-		App/TimeCardClient.swift Tests/TimeCardClientTests.swift \
+		App/TimeCardClient.swift App/MotionModels.swift Tests/TimeCardClientTests.swift \
 		-framework IOKit -framework CoreFoundation \
 		-o .build/cmake/timecard-control-center-model-tests
 	.build/cmake/timecard-control-center-model-tests
 	xcrun swiftc -parse-as-library -swift-version 5 \
 		-module-cache-path .build/cmake/swift-module-cache \
-		App/TimeCardClient.swift App/ConfigurationProfiles.swift App/ConfigurationProfileClient.swift \
+		App/TimeCardClient.swift App/MotionModels.swift App/ConfigurationProfiles.swift App/ConfigurationProfileClient.swift \
 		Tests/ConfigurationProfileTests.swift \
 		-framework IOKit -framework CoreFoundation \
 		-o .build/cmake/timecard-profile-tests
 	.build/cmake/timecard-profile-tests
+	xcrun swiftc -parse-as-library -swift-version 5 \
+		-module-cache-path .build/cmake/swift-module-cache \
+		App/TimeCardClient.swift App/MotionModels.swift App/AtomicClockModels.swift App/AtomicClockClient.swift \
+		Tests/PeripheralTests.swift -framework IOKit -framework CoreFoundation \
+		-o .build/cmake/timecard-peripheral-tests
+	.build/cmake/timecard-peripheral-tests
 	xcrun swiftc -parse-as-library -swift-version 5 \
 		-module-cache-path .build/cmake/swift-module-cache \
 		App/ReceiverModels.swift App/ReceiverCapture.swift App/TelemetryModels.swift \
