@@ -85,6 +85,8 @@ images remain gated until exact-image presence is established.
   supported SMA routes, clock sources, and frequency integration. Includes
   capture/import/edit/export, capability-aware preview, confirmed apply with
   readback, conservative rollback, recovery profiles, and exported reports.
+  Build 65 adds a persistent, bounded profile library with immutable snapshots,
+  review-only loading, corruption isolation, and confirmed removal to Trash.
   Windows XML migration and settings for future typed APIs remain pending.
 - IRIG-B and DCF configuration
 - Periodic outputs and signal generators
@@ -97,8 +99,9 @@ images remain gated until exact-image presence is established.
 
 App build 64 also adds the dedicated SA53 C3 workspace and ABI v11 fused-motion
 path, including quaternion 3D visualization and low-rate vibration/RMS export.
-SA53 read-only telemetry is hardware-validated. Motion hardware validation
-awaits the approved driver-replacement restart; oscillator writes, other
+SA53 read-only telemetry and BNO08x motion are hardware-validated on the Mac
+Pro with build 65 / driver 27. Live 3D, vibration/RMS, CSV export and Stop were
+also checked through the remote desktop. Oscillator writes, BNO055, other
 variants and high-rate vibration measurement remain unvalidated or pending.
 See [PERIPHERALS.md](PERIPHERALS.md) for exact scope and limitations.
 

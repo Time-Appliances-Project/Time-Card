@@ -1,6 +1,6 @@
 # macOS and Windows Control Center parity
 
-This comparison covers macOS app build 64, DriverKit ABI v11, against the
+This comparison covers macOS app build 65, driver 27 / DriverKit ABI v11, against the
 Windows Control Center in the same repository (Windows driver ABI 15).
 An implemented screen does not imply that every supported board has been
 physically validated.
@@ -11,22 +11,29 @@ physically validated.
 | GNSS | Bounded UBX polls, mixed UBX/NMEA/RTCM3 decoding, receiver summary, sky map, satellite table | Persistent receiver configuration, survey-in/fixed-position controls, direct receiver session management |
 | Serial laboratory | Hardware capture, native serial preview, protocol/search/error filters, display pause, raw views, offline replay, TXT/CSV/JSON/binary export | Persistent generic serial sessions, full line/flow-control settings, arbitrary send workflow, TX/RX session timeline, interrupt-backed capture |
 | SMA and LEDs | Capability-aware routes, guarded setters, GNSS/SMA LED policies, readback | ART peripheral path, exhaustive board-specific validation |
-| Sensors | LM75B, SHT3x, compensated ICP-10100, temperature charts, BNO055/BNO08x fusion, 3D orientation, calibration, low-rate vibration/RMS and motion exports | Live motion validation after driver upgrade, BME/BMP280, INA219 rail measurements, other board routes |
+| Sensors | LM75B, SHT3x, compensated ICP-10100, temperature charts, BNO055/BNO08x fusion, 3D orientation, calibration, low-rate vibration/RMS and motion exports; live BNO08x verified | Physical BNO055 validation, BME/BMP280, INA219 rail measurements, other board routes |
 | Telemetry Studio | Sampling histogram, median/p95/p99, one-hour history, GNSS/temperature plots, low-rate vibration trend, point inspection, pause, six-hour bounded recording, CSV/JSON | Trusted PHC offset series, high-rate vibration measurement and spectral analysis |
 | Timing and FPGA engines | Core-readiness catalog, four frequency counters and integration controls on revision-02 LitePCIe, status/error/overrun states, timing JSON export | Classic/ART/ADVA counter-presence contracts, generator/timestamp-channel ABI and controls, PPS/IRIG/DCF/ToD settings |
 | Atomic clock | Dedicated SA53 identity/telemetry/alarms, checksummed C3 transport, 15 bounded setters, mode checks, confirmed JamSync/load/store/acknowledge, readback and JSON export | Physical validation of clock-changing operations; ART mRO-50; persistent sessions |
-| Profiles | Native versioned JSON capture/import/edit/export, live preview, confirmed apply, per-setting verification, guarded rollback and recovery reports; built-in readiness planner | Windows XML migration, GNSS/oscillator/generator/ToD settings as typed APIs become available, persistent profile library |
+| Profiles | Native versioned JSON capture/import/edit/export, persistent immutable profile library, live preview, confirmed apply, per-setting verification, guarded rollback and recovery reports; built-in readiness planner | Windows XML migration, GNSS/oscillator/generator/ToD settings as typed APIs become available |
 | Diagnostics | Read-only self-test including clock-source and gated frequency APIs, session log, structured exports, support ZIP with profile evidence | Extended tests for future FPGA/peripheral APIs |
 | Maintenance | Driver lifecycle, exact PCI matching, multi-card app selection | Protected SPI flash update, EEPROM identity, notarized release packaging |
 
 ## Validation scope
 
-- Build 64 adds protocol/model tests and read-only SA53 hardware validation.
+- Build 65 completes live BNO08x validation on the actual bound driver 27:
+  39/40 polls contained quaternion and linear acceleration, with one startup
+  sample lacking those components. Remote GUI checks verified the 3D model,
+  vibration chart/RMS, populated CSV export, and Stop. Low fusion calibration
+  remains explicitly marked unreliable. No oscillator settings were changed.
+  Saved profiles were captured, saved, reloaded, staged and previewed with
+  zero changes; apply and removal confirmations were checked and cancelled.
+  See [BUILD65-VALIDATION.md](BUILD65-VALIDATION.md).
+- Build 64 added protocol/model tests and read-only SA53 hardware validation.
   The installed SA53 returned atomic lock, but no PPS input or disciplining
   lock. Older firmware rejects eight optional queries, which remain unavailable.
-  Driver 26 is staged on `.141`, but the PCI service remains bound to ABI v10
-  until restart. Live motion and populated remote UI checks are pending;
-  no reboot or clock-changing test was performed. See [PERIPHERALS.md](PERIPHERALS.md).
+  Its pending driver replacement was resolved during build 65 validation.
+  See [PERIPHERALS.md](PERIPHERALS.md).
 - Host tests cover register layouts, driver safety, Swift ABI models, mixed
   protocol framing, corruption and truncation, replay size limits, export
   encoding, statistics, GSV epoch replacement, and recording boundaries.
@@ -57,15 +64,15 @@ physically validated.
 - Build 61 local GUI checks exercised replay, checksum filtering, display pause/resume,
   and saving a filtered JSON file, then verified that file's contents. The
   Telemetry Studio layout and unavailable-data states were also inspected.
-- The Intel Mac Pro's installed build and signature, active driver, PHC access,
+- During build 61 validation, the Intel Mac Pro's installed build and signature, active driver, PHC access,
   and five environmental readings were verified over SSH. Live remote chart
-  and recording UI checks remain pending because the Mac was at its login
+  and recording UI checks were deferred because the Mac was at its login
   screen during deployment.
 - Build 62 and CLI build 21 were installed on `.141`, with recoverable backups
   of build 61 and CLI 20. macOS initially left build 24 bound to the PCI card,
   listed as `terminating for upgrade via delegate`. The authorized restart on
   September 4, 2026 completed the replacement: the bound service now reports
-  ABI v10, with build 25 activated and enabled.
+  ABI v10, with build 25 activated and enabled at that stage.
 - Live ABI v10 checks returned configured and active PPS source `0x03`, source
   mask `0xc000003f`, core version `0x01020000`, and enabled clock control `0x01`.
   Reapplying the existing PPS source succeeded through the no-write path. A
@@ -81,8 +88,8 @@ physically validated.
 - Clock status was initially not synchronized after restart, then reported
   `0x01` (in sync) within approximately four minutes, with PPS still configured
   and active. The raw PHC remains boot-relative with a 1970-looking epoch; lock
-  does not establish UTC validity. Live GUI validation on `.141` remains
-  pending a logged-in desktop session.
+  does not establish UTC validity. The logged-in GUI checks followed in builds
+  63 and 65, as recorded here.
 - Local build 62 GUI checks verified the Generators and Precision Clock layout,
   unavailable-data messaging, and disabled export without a connected card.
 - Build 63's signed profile hardware smoke test captured five settings on the
@@ -106,8 +113,8 @@ physically validated.
 
 Build 63 package SHA-256:
 `c118974b3c64907230ffeb496e86b09d29695aef4dd08e2c74c4cccc60ac30c0`.
-The previous build 62 app remains recoverable in the deployment backup on the
-test Mac. Profile changes, rollback conflicts, and disconnect recovery are
+Historical deployment backups in `/tmp` do not survive every reboot; retain
+local release archives. Profile changes, rollback conflicts, and disconnect recovery are
 covered by host fault-injection tests; physical writes remain untested by this
 profile validation run.
 
@@ -119,11 +126,11 @@ profile validation run.
    validate the LitePCIe counter path before claiming production support.
 2. Add persistent UART transport and receiver/mRO-50 sessions,
    preserving each board's baud and peripheral access rules.
-3. Complete live fused-IMU validation after the approved driver restart,
-   then extend board-specific sensors and physically validate Celestica,
+3. Extend the validated BNO08x path to physical BNO055 validation and
+   board-specific sensors; physically validate Celestica,
    ART, ADVA, and ADVA X1 cards.
 4. Extend the implemented profile capture/apply/rollback workflow to new typed
-   APIs, add a persistent profile library, and migrate Windows XML settings
+   APIs and migrate Windows XML settings
    only where an equivalent hardware contract is available.
 5. Validate sleep/wake, disconnect/reconnect, multi-card operation, long
    recordings, clock recovery, and signed/notarized release installation.

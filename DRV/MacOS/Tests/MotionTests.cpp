@@ -35,7 +35,8 @@ int main() {
     assert(!TimeCardMotionReadCargo(io, cargo, length, channel, &resync) && resync);
     io.index = 0; io.reads[1][1] = 1; resync = false;
     assert(!TimeCardMotionReadCargo(io, cargo, length, channel, &resync) && resync);
-    MockIO empty{{{0,0,0,0}}}; assert(!TimeCardMotionReadCargo(empty, cargo, length, channel));
+    MockIO empty{{{0,0,0,0}}}; assert(TimeCardMotionReadCargo(empty, cargo, length, channel) && length == 0);
+    MockIO invalid{{{0,0,3,1}}}; assert(!TimeCardMotionReadCargo(invalid, cargo, length, channel));
     MockIO oversized{{{1,4,3,0}}}; assert(!TimeCardMotionReadCargo(oversized, cargo, length, channel));
     TimeCardIMUTelemetry out = {}; out.size = sizeof(out);
     uint8_t report[29] = {0xfb,0,0,0,0, 5,0,3,0};

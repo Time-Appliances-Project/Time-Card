@@ -2356,6 +2356,9 @@ static bool TimeCardMotionSubscribe(TimeCardMotionIO &io, uint32_t interval) {
         TimeCardMotionFeature(packet, report, io.state->imuControlSequence++,
             report == 0x0e && interval ? 1000000 : interval);
         if (!io.write(packet, sizeof(packet))) { io.state->imuConfigured = false; return false; }
+        // Match the Windows sensor bring-up spacing; allow SH-2 to consume
+        // each feature command before issuing the next one.
+        IODelay(1000);
     }
     io.state->imuConfigured = interval != 0;
     return true;

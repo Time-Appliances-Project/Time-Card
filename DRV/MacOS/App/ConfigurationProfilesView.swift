@@ -7,6 +7,9 @@ struct ConfigurationProfilesView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
     @State private var fileMessage = ""
     @State private var confirmApply = false
+    @StateObject private var library = ProfileLibrary()
+    @State private var selectedEntry: UUID?
+    @State private var pendingRemoval: ProfileLibraryEntry?
 
     var body: some View {
         ControlCenterPanel(title: "Configuration profiles", subtitle: "Capture, review, apply, and recover supported hardware settings") {
@@ -22,6 +25,7 @@ struct ConfigurationProfilesView: View {
             }
             Text("Importing and editing never write to the card. Profiles match PCI identity, revision, layout, and clock version, not a unique board serial number. Review the selected card before applying.")
                 .font(.caption).foregroundStyle(.secondary)
+            libraryPanel
 
             if let profile = monitor.configurationProfile {
                 TextField("Profile name", text: Binding(get: { profile.name }, set: { name in
@@ -105,6 +109,51 @@ struct ConfigurationProfilesView: View {
         }
         .onChange(of: monitor.selectedServiceID) { _, _ in confirmApply = false }
         .onChange(of: monitor.configurationProfile) { _, _ in confirmApply = false }
+        .onAppear { library.reload() }
+        .confirmationDialog("Move this saved profile to Trash?", isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }), titleVisibility: .visible) {
+            Button("Move to Trash", role: .destructive) {
+                if let entry = pendingRemoval { library.remove(entry); selectedEntry = nil }
+                pendingRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRemoval = nil }
+        } message: { Text(pendingRemoval?.profile.name ?? "") }
+    }
+
+    private var libraryPanel: some View {
+        DisclosureGroup("Saved profile library (\(library.entries.count))") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Button("Save New Snapshot", systemImage: "square.stack.3d.up.badge.plus") {
+                        if let profile = monitor.configurationProfile { library.save(profile) }
+                    }.disabled(monitor.configurationProfile == nil)
+                    Button("Reload", systemImage: "arrow.clockwise") { library.reload() }
+                    Spacer()
+                    if let entry = library.entries.first(where: { $0.id == selectedEntry }) {
+                        Button("Stage for Review") {
+                            if let profile = library.read(entry) { monitor.stageProfile(profile) }
+                        }.buttonStyle(.borderedProminent)
+                        Button("Move to Trash…", role: .destructive) { pendingRemoval = entry }
+                    }
+                }
+                if !library.entries.isEmpty {
+                    List(library.entries, selection: $selectedEntry) { entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(entry.profile.name).font(.headline)
+                                Spacer()
+                                Text(entry.savedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption)
+                            }
+                            Text(entry.profile.target.summary + " · \(entry.profile.settings.count) settings")
+                                .font(.caption.monospaced()).foregroundStyle(.secondary)
+                        }.tag(entry.id).padding(.vertical, 3)
+                    }.frame(height: min(230, CGFloat(library.entries.count) * 58 + 10))
+                }
+                Text(library.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                ForEach(library.warnings, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
+                Text("Stored in your Application Support folder. Every save creates a separate snapshot. Staging never applies settings, and removal is recoverable from Trash.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(.vertical, 10)
+        }
     }
 
     private func importProfile() {

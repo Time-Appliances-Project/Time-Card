@@ -8,6 +8,12 @@ app, and provides a small command-line diagnostic client.
 
 Representative macOS Control Center screenshots:
 
+Build 65 on the Intel Mac Pro, with real SA53 and BNO08x telemetry:
+
+| SA53 atomic clock | Live 3D orientation and vibration |
+| --- | --- |
+| ![SA53 lock, telemetry, alarms and guarded controls](docs/screenshots/control-center-atomic-clock-build65.png) | ![Live BNO08x orientation and low-rate vibration on the Mac Pro](docs/screenshots/control-center-live-motion-build65.png) |
+
 | Overview | GNSS and UART |
 | --- | --- |
 | ![TimeCardMacOS overview dashboard](docs/screenshots/control-center-overview.png) | ![TimeCardMacOS GNSS and UART workbench](docs/screenshots/control-center-gnss-uart.png) |
@@ -173,8 +179,16 @@ Tests/     Register-map, safety, bundle, and Swift model tests
 App build 63 adds **Configuration profiles** in **Profiles and Self-Test**.
 Capture Current reads the selected card twice, then stages supported clock-source,
 SMA-route, and frequency-integration settings. Import JSON and editing only alter
-the draft. Save JSON keeps it across app restarts; drafts and reports otherwise
-remain in memory. The version-1 macOS JSON format is not Windows XML compatible.
+the draft. Save JSON keeps it across app restarts; unsaved drafts and reports
+otherwise remain in memory. The version-1 macOS JSON format is not Windows XML compatible.
+
+Build 65 adds a persistent **Saved profile library**. Save New Snapshot stores
+an immutable copy in `~/Library/Application Support/org.opentimeserver.timecard.macos/Profiles`.
+Duplicate names create separate snapshots, not overwrites. Select an entry and
+Stage for Review, then preview against the connected card before applying.
+Loading never changes hardware. Removal requires confirmation and moves the
+entry to Finder Trash. The library supports up to 200 bounded JSON files and
+isolates corrupt entries without hiding valid profiles.
 
 Preview Changes checks the current card's PCI identity, revision, board profile,
 register layout, clock version, and advertised capabilities. Fixed routes and
@@ -200,7 +214,7 @@ the last apply report, or validation diagnostics for an invalid draft.
 
 ## SA53 atomic clock and IMU motion
 
-App build 64 bundles driver 26 (ABI v11) and CLI 22. **Atomic Clock** works
+App build 65 bundles driver 27 (ABI v11) and CLI 22. **Atomic Clock** works
 with ABI v9 or later on the Meta/Celestica MAC UART at 57,600 baud. Refresh
 identifies the oscillator before exposing settings. Unsupported firmware
 fields remain unavailable. Clock-changing actions require confirmation,
@@ -224,9 +238,14 @@ The SA53 fitted in `.141` returned valid identity and telemetry during read-only
 hardware testing. It reported atomic lock but no PPS input or disciplining
 lock, with alarm `0x00020000`. No oscillator settings were changed. Its older
 firmware rejected eight optional queries, which are shown as unavailable.
-Driver 26 was accepted for upgrade, but the card still returned ABI v10 during
-this deployment. A restart is pending approval before live IMU validation.
-See [validation and protocol details](docs/PERIPHERALS.md).
+The approved restarts completed driver replacement on `.141`; the bound driver
+27 now returns ABI v11 and matches the bundled executable. Live BNO08x tests
+returned full quaternion and linear acceleration in 39 of 40 polls, with one
+startup sample lacking those components. The 3D view, vibration chart, Stop,
+and a populated CSV export were verified on the remote desktop. Calibration
+quality remains low, so orientation is explicitly marked unreliable.
+See [validation and protocol details](docs/PERIPHERALS.md) and the
+[build 65 validation record](docs/BUILD65-VALIDATION.md).
 
 ## Clock sources and frequency counters
 
@@ -454,7 +473,8 @@ and it does not yet apply a UTC/TAI correction.
   profiles, paging rules, and write-safety warnings.
 - Sensor support reports LM75B, SHT3x, ICP-10100 telemetry with compensated
   pressure when OTP calibration is available, plus BNO08x/BNO055 motion with
-  ABI v11. Physical motion validation is pending driver activation on `.141`.
+  ABI v11. BNO08x motion is physically validated on `.141`; BNO055 and other
+  board variants still require hardware validation.
   BME/BMP280 and INA219 rail telemetry remain planned. ART/ADVA IMU routes
   and ART mRO-50 oscillator support remain gated.
 - SMA routing is implemented for the classic, shifted LitePCIe, ART, and ADVA

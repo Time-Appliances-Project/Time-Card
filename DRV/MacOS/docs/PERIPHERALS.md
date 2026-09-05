@@ -1,4 +1,4 @@
-# Atomic clock and motion, build 64
+# Atomic clock and motion, build 65
 
 ## SA53
 
@@ -43,6 +43,9 @@ rates are 4 Hz for vectors/quaternion and 1 Hz for temperature. BNO055 reads
 NDOF fusion only with valid system status and converts its configured units.
 The output includes quaternion, raw and linear acceleration, gravity, gyro,
 magnetic field, temperature, per-component validity, and calibration quality.
+Driver 27 treats an all-zero SHTP header as an empty queue, not an incomplete
+packet. Seven feature commands are paced one millisecond apart, matching the
+Windows implementation. Other malformed headers remain rejected.
 
 Swift validates response layout and quaternion norm. Orientation expires after
 two seconds. Vibration requires a real linear-acceleration report, not raw
@@ -54,7 +57,7 @@ not an assertion about sensor-to-chassis mounting orientation.
 
 ## Verification and deployment
 
-`make check` passes six CMake/CTest suites and four Swift executable suites.
+`make check` passes six CMake/CTest suites and five Swift executable suites.
 New tests cover SHTP fragmentation, sequence wrap, corruption, transactional
 report decoding, BNO055 units, C3 framing/checksums/sequence/quoting, parameter
 bounds, unknown data, quaternion normalization, RMS and CSV behavior.
@@ -62,31 +65,32 @@ Universal Intel/Apple Silicon app and driver builds and bundle checks pass.
 Local interface checks confirm the dedicated Atomic Clock page and motion
 workspace, unavailable-state messaging, and disabled controls without hardware.
 
-Signed app 64 and CLI 22 are installed on `.141`. The upgrade request for driver
-26 succeeded, but driver 25 remained bound to the PCI card, reporting ABI v10
-and `terminating for upgrade via delegate`. A reboot requires fresh approval.
-Live BNO08x/BNO055 motion, populated remote UI, sleep/wake, and other board
-variants therefore remain unverified. No reboot or clock-changing test was
-performed. Screen Sharing and remote screen capture currently return no usable
-desktop image. Existing PPS source and clock-sync status remained unchanged.
-Previous app 63 and CLI 21 are recoverable in `/tmp/timecard-build64.fKPG8c`.
+Signed app 65, driver 27 and CLI 22 are deployed on the Intel Mac Pro `.141`.
+The approved restarts completed the formerly pending driver replacement.
+The actual PCI-bound driver reports ABI v11 and its executable hash matches
+the final bundled driver. Do not infer this from activation-list status alone.
 
-The final app and driver executable hashes match the local signed build, and
-both provisioning profiles are present. Final package SHA-256:
-`2b30d3e53fae1638940fe70f3207787f8d528cda7127c9f18b3fbfff791c03fe`.
-An additional activation request for the final driver refinements was rejected
-while the initial upgrade was pending: sysextd reported two entries, one
-terminating and one activated. Do not edit `/Library/SystemExtensions` or kill
-the driver to work around this. After the approved restart, activate the final
-bundled driver if its executable differs from the bound extension, and follow
-any further system-requested restart before claiming validation of that binary.
-Final bundled driver executable SHA-256:
-`2b2f86022f11571c4fb99a3342ca11df27938c8772af70878a49c128cbdb0c15`.
+The signed `Tests/PeripheralHardwareSmoke.swift --motion` run collected 40
+polls from the fitted BNO08x at mux 0x08/address 0x4a. Thirty-nine included valid
+quaternion and linear acceleration; the initial poll contained magnetic data
+only. No empty-queue incomplete errors or reset flags occurred. Stop disabled
+the subscriptions, and every returned mux selection was restored to zero.
+Five environmental blocks remained valid and the configured/active source
+remained PPS (3). Clock status returned to in-sync after startup. This does not
+establish PHC UTC validity.
 
-After the approved restart, check `timecardctl status` for ABI 11, then run the
-signed `Tests/PeripheralHardwareSmoke.swift` helper with `--motion` or use the
-Sensors and IMU Start/Stop controls. Verify fresh quaternion and linear values,
-valid mux restoration, environmental sensors, and unchanged PPS source.
+Screen Sharing works after login. Remote GUI checks verified live quaternion
+geometry, vibration history/RMS, populated CSV export, and Stop returning the
+3D model to its unavailable state. The sensor's fusion accuracy reports zero
+(unreliable); this is shown explicitly, not treated as calibrated orientation.
+Final SA53 read-only telemetry returned atomic lock, no PPS/disciplining lock,
+50.239 C and 4.968 V, with the same eight unsupported optional fields.
+No oscillator settings, clock source, flash, or PHC epoch were changed.
+
+BNO055, other board variants, sleep/wake, and high-rate vibration remain
+unvalidated. See [BUILD65-VALIDATION.md](BUILD65-VALIDATION.md) for hashes and
+the GUI and profile-library test record. The prior build 64 archive is retained
+locally; deployment backups in `/tmp` must not be relied on across reboots.
 
 ## Primary protocol references
 

@@ -22,6 +22,12 @@ check:
 	.build/cmake/timecard-profile-tests
 	xcrun swiftc -parse-as-library -swift-version 5 \
 		-module-cache-path .build/cmake/swift-module-cache \
+		App/TimeCardClient.swift App/MotionModels.swift App/ConfigurationProfiles.swift App/ProfileLibrary.swift \
+		Tests/ProfileLibraryTests.swift -framework IOKit -framework CoreFoundation \
+		-o .build/cmake/timecard-profile-library-tests
+	.build/cmake/timecard-profile-library-tests
+	xcrun swiftc -parse-as-library -swift-version 5 \
+		-module-cache-path .build/cmake/swift-module-cache \
 		App/TimeCardClient.swift App/MotionModels.swift App/AtomicClockModels.swift App/AtomicClockClient.swift \
 		Tests/PeripheralTests.swift -framework IOKit -framework CoreFoundation \
 		-o .build/cmake/timecard-peripheral-tests

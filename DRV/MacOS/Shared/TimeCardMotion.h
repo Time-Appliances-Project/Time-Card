@@ -23,6 +23,11 @@ bool TimeCardMotionReadCargo(IO &io, uint8_t *cargo, uint32_t &length, uint8_t &
     uint8_t header[4] = {};
     length = 0;
     if (!io.read(header, 4)) return false;
+    // An all-zero SHTP header is an empty queue, not a malformed cargo.
+    if (header[0] == 0 && header[1] == 0 && header[2] == 0 && header[3] == 0) {
+        channel = 0;
+        return true;
+    }
     const uint32_t total = TimeCardMotionLength(header);
     if (total < 4 || total > 1024 || header[2] > 5) return false;
     channel = header[2];
