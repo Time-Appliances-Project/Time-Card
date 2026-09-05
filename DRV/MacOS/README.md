@@ -84,6 +84,9 @@ The current implementation provides:
   - a read-only Windows built-in profile planner for GNSS disciplined,
     External PPS, PTP disciplined, NMEA service, and lab timing output profiles,
     with live macOS readiness and support-bundle export
+  - editable, versioned JSON configuration profiles with capture, import/export,
+    live change preview, confirmed apply, per-setting readback, guarded rollback,
+    recovery profiles, and machine-readable apply reports
   - a native SwiftUI subsystem topology diagram that maps PCIe, DriverKit, PHC,
     macOS service, GNSS, ToD, SMA, I2C, sensors, LEDs, and FPGA cores against
     live capabilities
@@ -161,9 +164,39 @@ Shared/    Stable C ABI and hardware register definitions
 Tests/     Register-map, safety, bundle, and Swift model tests
 ```
 
+## Configuration profiles
+
+App build 63 adds **Configuration profiles** in **Profiles and Self-Test**.
+Capture Current reads the selected card twice, then stages supported clock-source,
+SMA-route, and frequency-integration settings. Import JSON and editing only alter
+the draft. Save JSON keeps it across app restarts; drafts and reports otherwise
+remain in memory. The version-1 macOS JSON format is not Windows XML compatible.
+
+Preview Changes checks the current card's PCI identity, revision, board profile,
+register layout, clock version, and advertised capabilities. Fixed routes and
+unsupported sources are blocked. Profiles are reusable across matching cards,
+not bound to a unique serial number or exact bitstream hash. Files are limited
+to 64 KiB and reject unknown fields, duplicate settings, and out-of-range values.
+
+Apply Reviewed Profile requires confirmation and a matching preview less than
+two minutes old. It rechecks live state before and after each change, applies SMA
+and frequency settings before the clock source, and records attempted and verified
+settings separately. On failure, it restores only identifiable changes in reverse
+order. Unknown or externally changed state is preserved and reported as requiring
+manual recovery. Save Report and Save Recovery Profile retain recovery evidence;
+Review Recovery stages the saved baseline for a new preview, never an automatic write.
+
+Close other card-control applications before applying. This is a recoverable
+sequence, not a hardware-atomic transaction. Clock and frequency setters use
+driver-level expected-state checks; SMA has app-side checks and readback only.
+ART routes remain capture-only until its route capability mask is exposed by
+the ABI. Profiles do not set PHC epoch, macOS time, GNSS configuration, LEDs,
+oscillator settings, or flash. Support bundles include valid staged profiles and
+the last apply report, or validation diagnostics for an invalid draft.
+
 ## Clock sources and frequency counters
 
-App build 62 bundles driver build 25 (ABI v10). Activate the bundled driver
+App build 63 bundles driver build 25 (ABI v10). Activate the bundled driver
 update before using the new controls. Older ABI v7-v9 drivers remain usable
 for their existing features; the new controls stay disabled.
 

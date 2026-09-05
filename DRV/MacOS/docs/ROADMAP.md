@@ -81,6 +81,11 @@ restricted to the Meta/Celestica revision-02 LitePCIe layout; classic/ART/ADVA
 images remain gated until exact-image presence is established.
 
 - Clock-source selection, implemented with supported-source masks and confirmation
+- Versioned JSON configuration profiles, implemented in app build 63 for
+  supported SMA routes, clock sources, and frequency integration. Includes
+  capture/import/edit/export, capability-aware preview, confirmed apply with
+  readback, conservative rollback, recovery profiles, and exported reports.
+  Windows XML migration and settings for future typed APIs remain pending.
 - IRIG-B and DCF configuration
 - Periodic outputs and signal generators
 - Frequency counters, implemented for the validated LitePCIe contract

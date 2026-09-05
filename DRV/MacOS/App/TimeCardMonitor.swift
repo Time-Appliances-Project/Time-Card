@@ -185,6 +185,12 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var telemetryRecording: TimeCardTelemetryRecording?
     @Published private(set) var commandInProgress = false
     @Published private(set) var commandMessage = ""
+    @Published private(set) var configurationProfile: TimeCardConfigurationProfile?
+    @Published private(set) var profileState: TimeCardProfileState?
+    @Published private(set) var profilePlan: TimeCardProfilePlan?
+    @Published private(set) var profileReport: TimeCardProfileApplyReport?
+    @Published private(set) var profileOperationInProgress = false
+    @Published private(set) var profileMessage = ""
     @Published private(set) var clockControl: TimeCardClockControlState?
     @Published private(set) var frequencyStates: [TimeCardFrequencyState] = []
     @Published private(set) var timingRefreshInProgress = false
@@ -251,7 +257,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func selectService(_ serviceID: UInt64) {
-        guard services.contains(where: { $0.id == serviceID }),
+        guard !profileOperationInProgress, services.contains(where: { $0.id == serviceID }),
               selectedServiceID != serviceID else {
             return
         }
@@ -925,6 +931,8 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     private func clearTimingState() {
+        profilePlan = nil
+        profileState = nil
         clockControl = nil
         frequencyStates = []
         clockControlError = ""
@@ -1010,6 +1018,116 @@ final class TimeCardMonitor: ObservableObject {
             }
             self.refreshTiming()
             self.refresh()
+        }
+    }
+
+    func stageProfile(_ profile: TimeCardConfigurationProfile) {
+        guard !profileOperationInProgress else { return }
+        do {
+            try profile.validate()
+            configurationProfile = profile
+            profilePlan = nil
+            profileMessage = "Profile staged. Preview against the selected card before applying."
+        } catch { profileMessage = error.localizedDescription }
+    }
+
+    func editProfile(_ profile: TimeCardConfigurationProfile) {
+        guard !profileOperationInProgress else { return }
+        configurationProfile = profile
+        profilePlan = nil
+        do {
+            try profile.validate()
+            profileMessage = "Profile edited. Preview again before applying."
+        } catch { profileMessage = error.localizedDescription }
+    }
+
+    func captureProfile() {
+        runProfileOperation("Capture current configuration") { backend in
+            let (profile, state) = try backend.capture(name: "Time Card configuration")
+            return .capture(profile, state)
+        }
+    }
+
+    func previewProfile() {
+        guard let profile = configurationProfile else { return }
+        profilePlan = nil
+        runProfileOperation("Preview profile") { backend in
+            .preview(try TimeCardProfilePlan.create(profile: profile, state: backend.read()))
+        }
+    }
+
+    func applyProfile() {
+        guard let plan = profilePlan, plan.canApply, plan.baseline.serviceID == selectedServiceID else { return }
+        runProfileOperation("Apply profile: " + plan.profile.name) { backend in
+            .applied(TimeCardProfileEngine.apply(plan, backend: backend))
+        }
+    }
+
+    private enum ProfileOperationResult: Sendable {
+        case capture(TimeCardConfigurationProfile, TimeCardProfileState)
+        case preview(TimeCardProfilePlan)
+        case applied(TimeCardProfileApplyReport)
+    }
+
+    private func runProfileOperation(_ description: String,
+        operation: @escaping @Sendable (TimeCardLiveProfileBackend) throws -> ProfileOperationResult) {
+        guard !profileOperationInProgress, !commandInProgress, !i2cOperationInProgress,
+              !selfTestInProgress, !uartOperationInProgress, !uartCaptureInProgress,
+              !serialCaptureInProgress, !timingRefreshInProgress else {
+            profileMessage = "Wait for the current operation or stop capture before working with profiles."
+            return
+        }
+        guard state == .connected, let descriptor = selectedDescriptor else {
+            profileMessage = "Connect a Time Card before capturing, previewing, or applying."
+            return
+        }
+        let generation = selectionGeneration
+        profileOperationInProgress = true
+        commandInProgress = true
+        profileMessage = description + "..."
+        appendSessionLog(severity: .info, category: "Profiles", message: profileMessage)
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try operation(TimeCardLiveProfileBackend(descriptor: descriptor)) }
+            }.value
+            guard let self else { return }
+            self.profileOperationInProgress = false
+            self.commandInProgress = false
+            // Preserve recovery evidence even if the card disconnected while applying.
+            if case .success(.applied(let report)) = result {
+                self.profileReport = report
+                for event in report.events {
+                    self.appendSessionLog(severity: report.successful ? .success : .error, category: "Profiles", message: event)
+                }
+            }
+            guard generation == self.selectionGeneration, self.selectedServiceID == descriptor.id else {
+                self.profilePlan = nil
+                self.profileMessage = "The selected card changed during the operation. Any apply report has been preserved. Review it and preview again."
+                self.appendSessionLog(severity: .warning, category: "Profiles", message: self.profileMessage)
+                return
+            }
+            switch result {
+            case .success(.capture(let profile, let state)):
+                self.configurationProfile = profile
+                self.profileState = state
+                self.profilePlan = nil
+                self.profileMessage = "Captured \(profile.settings.count) settings with two matching readbacks. Save JSON to keep this profile."
+            case .success(.preview(let plan)):
+                self.profilePlan = plan
+                self.profileState = plan.baseline
+                self.profileMessage = plan.canApply
+                    ? "Preview ready: \(plan.changes.count) change(s). Valid for two minutes."
+                    : "Preview blocked: " + plan.blockers.joined(separator: " ")
+            case .success(.applied(let report)):
+                self.profilePlan = nil
+                self.profileMessage = "Profile result: " + report.outcome.rawValue + ". " + (report.events.last ?? "")
+            case .failure(let error):
+                self.profilePlan = nil
+                self.profileMessage = description + " failed: " + error.localizedDescription
+            }
+            self.appendSessionLog(severity: .info, category: "Profiles", message: self.profileMessage)
+            self.refresh()
+            self.refreshTiming()
         }
     }
 
@@ -1344,7 +1462,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func runReadOnlySelfTest() {
-        guard !selfTestInProgress else { return }
+        guard !selfTestInProgress, !profileOperationInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             selfTestMessage = "No Time Card is selected."
             selfTestReport = TimeCardSelfTestReport(
@@ -1451,7 +1569,7 @@ final class TimeCardMonitor: ObservableObject {
 
                     let i2cError = i2cErrors.isEmpty
                         ? nil : i2cErrors.joined(separator: "; ")
-                    let report = TimeCardMonitor.buildSelfTestReport(
+                    let baseReport = TimeCardMonitor.buildSelfTestReport(
                         snapshot: currentSnapshot,
                         sensors: sensors,
                         sensorError: sensorError,
@@ -1464,6 +1582,33 @@ final class TimeCardMonitor: ObservableObject {
                         uartObservation: uartObservation,
                         uartError: uartError
                     )
+                    var timingChecks: [TimeCardSelfTestItem] = []
+                    if currentSnapshot.supportsClockSource {
+                        do {
+                            let clock = try TimeCardClient.queryClockControl(for: descriptor)
+                            timingChecks.append(.init("Clock-source API", severity: .pass,
+                                detail: "Configured \(TimeCardClockControlState.name(clock.source)); active \(TimeCardClockControlState.name(clock.activeSource)); \(clock.availableSources.count) supported selections. Read-only check; no setter called."))
+                        } catch {
+                            timingChecks.append(.init("Clock-source API", severity: .fail, detail: error.localizedDescription))
+                        }
+                    } else {
+                        timingChecks.append(.init("Clock-source API", severity: .gated,
+                            detail: "Requires ABI v10 and a supported clock-core contract."))
+                    }
+                    if currentSnapshot.supportsFrequency {
+                        do {
+                            let counters = try TimeCardClient.queryFrequencies(for: descriptor)
+                            let issues = counters.contains { $0.hasError || $0.hasOverrun }
+                            timingChecks.append(.init("Frequency-counter API", severity: issues ? .warning : .pass,
+                                detail: "\(counters.count) channels read; \(counters.filter { $0.measurementHz != nil }.count) valid measurements. No configuration changed."))
+                        } catch {
+                            timingChecks.append(.init("Frequency-counter API", severity: .fail, detail: error.localizedDescription))
+                        }
+                    } else {
+                        timingChecks.append(.init("Frequency-counter API", severity: .gated,
+                            detail: "Counter presence is not verified for this image. No optional timing addresses were probed."))
+                    }
+                    let report = TimeCardSelfTestReport(runAt: baseReport.runAt, items: baseReport.items + timingChecks)
                     return .success(
                         snapshot: currentSnapshot,
                         sensors: sensors,
@@ -2208,6 +2353,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     private func startRefresh(queueIfBusy: Bool) {
+        guard !profileOperationInProgress else { return }
         if refreshInProgress {
             if queueIfBusy {
                 manualRefreshPending = true

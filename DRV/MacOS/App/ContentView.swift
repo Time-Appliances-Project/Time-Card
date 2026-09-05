@@ -108,6 +108,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle(selectedPage.rawValue)
+            .disabled(monitor.profileOperationInProgress)
             .background(ControlCenterBackground())
             .toolbar {
                 ToolbarItemGroup {
@@ -5639,6 +5640,8 @@ private struct OperationsView: View {
                     }
                 }
 
+                ConfigurationProfilesView()
+
                 ControlCenterPanel(
                     title: "Configuration profile planner",
                     subtitle: "Windows built-in profiles mapped to macOS readiness"
@@ -6043,6 +6046,19 @@ private struct OperationsView: View {
         try writeSupportText(sessionLogJSONText, named: "session-log.json", into: stagingURL)
         try writeSupportText(liveSnapshotText, named: "live-snapshot.json", into: stagingURL)
         try writeSupportText(selfTestText, named: "self-test.txt", into: stagingURL)
+        if let profile = monitor.configurationProfile {
+            if let data = try? profile.encoded() {
+                try writeSupportData(data, named: "staged-profile.json", into: stagingURL)
+            } else {
+                try writeSupportText(monitor.profileMessage, named: "profile-validation.txt", into: stagingURL)
+            }
+        }
+        if let report = monitor.profileReport {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            try writeSupportData(encoder.encode(report), named: "profile-last-apply.json", into: stagingURL)
+        }
         try writeSupportText(
             configurationProfilesText,
             named: "configuration-profiles.txt",
@@ -6121,7 +6137,7 @@ private struct OperationsView: View {
     }
 
     private var supportBundleManifestText: String {
-        let files = [
+        var files = [
             "diagnostics.txt",
             "session-log.txt",
             "session-log.json",
@@ -6143,6 +6159,10 @@ private struct OperationsView: View {
             "i2c.txt",
             "leds.csv",
         ]
+        if let profile = monitor.configurationProfile {
+            files.append((try? profile.encoded()) == nil ? "profile-validation.txt" : "staged-profile.json")
+        }
+        if monitor.profileReport != nil { files.append("profile-last-apply.json") }
         let object: [String: Any] = [
             "generatedAt": TimeCardFormatting.date(Date()),
             "app": "TimeCardMacOS",
@@ -7957,7 +7977,7 @@ private struct TimeCardConfigurationProfilePlan: Identifiable {
                 state: hasSMA ? "Manual-ready" :
                     (connected ? "Backend pending" : "Waiting"),
                 detail: hasSMA
-                    ? "The SMA page can inspect and apply routes individually; this planner preserves the Windows one-click profile as an explicit checklist."
+                    ? "Capture a profile above, edit supported routes, and preview before applying. Fixed routes remain blocked; this built-in plan is still a checklist."
                     : "Needs the SMA route ABI for this board profile.",
                 actions: [
                     "SMA 1 output: GNSS PPS.",
@@ -7966,7 +7986,7 @@ private struct TimeCardConfigurationProfilePlan: Identifiable {
                     "SMA 4 output: 10 MHz reference.",
                 ],
                 blockers: hasSMA
-                    ? ["One-click profile apply and rollback workflow"]
+                    ? ["Validate requested output routes against the active FPGA image"]
                     : ["SMA routing capability"]
             ),
         ]

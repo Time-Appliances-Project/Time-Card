@@ -15,6 +15,13 @@ check:
 	.build/cmake/timecard-control-center-model-tests
 	xcrun swiftc -parse-as-library -swift-version 5 \
 		-module-cache-path .build/cmake/swift-module-cache \
+		App/TimeCardClient.swift App/ConfigurationProfiles.swift App/ConfigurationProfileClient.swift \
+		Tests/ConfigurationProfileTests.swift \
+		-framework IOKit -framework CoreFoundation \
+		-o .build/cmake/timecard-profile-tests
+	.build/cmake/timecard-profile-tests
+	xcrun swiftc -parse-as-library -swift-version 5 \
+		-module-cache-path .build/cmake/swift-module-cache \
 		App/ReceiverModels.swift App/ReceiverCapture.swift App/TelemetryModels.swift \
 		Tests/ReceiverTelemetryTests.swift \
 		-o .build/cmake/timecard-receiver-telemetry-tests

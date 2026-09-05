@@ -1,6 +1,6 @@
 # macOS and Windows Control Center parity
 
-This comparison covers macOS app build 62, DriverKit ABI v10, against the
+This comparison covers macOS app build 63, DriverKit ABI v10, against the
 Windows Control Center in the same repository (Windows driver ABI 15).
 An implemented screen does not imply that every supported board has been
 physically validated.
@@ -15,8 +15,8 @@ physically validated.
 | Telemetry Studio | Sampling histogram, median/p95/p99, one-hour history, GNSS/temperature plots, point inspection, pause, six-hour bounded recording, CSV/JSON | PHC offset and vibration series when validated data is available |
 | Timing and FPGA engines | Core-readiness catalog, four frequency counters and integration controls on revision-02 LitePCIe, status/error/overrun states, timing JSON export | Classic/ART/ADVA counter-presence contracts, generator/timestamp-channel ABI and controls, PPS/IRIG/DCF/ToD settings |
 | Atomic clock | Bounded MAC UART access | Dedicated SA53 and ART mRO-50 telemetry and configuration |
-| Profiles | Built-in profile readiness planner | Capture/import/apply/rollback through typed, verified driver setters |
-| Diagnostics | Read-only self-test, session log, structured exports, support ZIP | Extended tests for new FPGA/peripheral APIs |
+| Profiles | Native versioned JSON capture/import/edit/export, live preview, confirmed apply, per-setting verification, guarded rollback and recovery reports; built-in readiness planner | Windows XML migration, GNSS/oscillator/generator/ToD settings as typed APIs become available, persistent profile library |
+| Diagnostics | Read-only self-test including clock-source and gated frequency APIs, session log, structured exports, support ZIP with profile evidence | Extended tests for future FPGA/peripheral APIs |
 | Maintenance | Driver lifecycle, exact PCI matching, multi-card app selection | Protected SPI flash update, EEPROM identity, notarized release packaging |
 
 ## Validation scope
@@ -35,6 +35,11 @@ physically validated.
 - GNSS chart data requires valid ToD satellite fields. Missing or invalid
   satellite counts are not rendered as zero. A raw running PHC does not prove
   that its epoch or UTC/TAI interpretation is valid.
+- Profile tests cover strict JSON validation, unavailable and fixed settings,
+  identity mismatches, stale/expired previews, zero-write idempotence, dependency
+  order, readback failures, rollback success/failure, and external changes during
+  apply. Rollback never overwrites an unknown state. The capture format is
+  separate from Windows XML, and profiles exclude clock epoch and system time.
 - Build 62 requires driver build 25 activation for the new timing features.
   Existing features remain compatible with ABI v7-v9. Driver activation may
   require macOS approval or restart depending on system policy.
@@ -74,6 +79,31 @@ physically validated.
   pending a logged-in desktop session.
 - Local build 62 GUI checks verified the Generators and Precision Clock layout,
   unavailable-data messaging, and disabled export without a connected card.
+- Build 63's signed profile hardware smoke test captured five settings on the
+  Mac Pro: PPS clock source and four fixed SMA routes. JSON round-trip, matching
+  preview, and unchanged apply passed through a wrapper that rejects every write
+  call, with zero write attempts. Full multi-setting changes and rollback remain
+  mock-tested, not fault-injected on live timing hardware.
+- In the logged-in Mac Pro desktop, build 63 GUI checks exercised capture,
+  zero-change preview, confirmation, unchanged apply, JSON save/import, and
+  apply-report export. Exported JSON was checked independently over SSH.
+  Editing SMA 1 from input to output was blocked as a fixed route, with Apply
+  disabled and the live input route preserved. The draft was then recaptured.
+  PPS remained configured and active, clock status stayed in sync, and all five
+  environmental readings remained valid. This does not establish PHC UTC validity.
+- The final signed build 63 was installed and launched without replacing the
+  active build 25 driver or rebooting. Intel and Apple Silicon slices and both
+  bundle signatures were verified; the installed executable matched the local
+  build's SHA-256. Its exported hardware self-test reported 13 passing checks
+  and one gated frequency-counter check. The final signed no-write profile
+  smoke test passed again after the recovery-safety refinements.
+
+Build 63 package SHA-256:
+`c118974b3c64907230ffeb496e86b09d29695aef4dd08e2c74c4cccc60ac30c0`.
+The previous build 62 app remains recoverable in the deployment backup on the
+test Mac. Profile changes, rollback conflicts, and disconnect recovery are
+covered by host fault-injection tests; physical writes remain untested by this
+profile validation run.
 
 ## Next engineering priorities
 
@@ -85,7 +115,9 @@ physically validated.
    preserving each board's baud and peripheral access rules.
 3. Complete fused IMU and board-specific sensor support, followed by physical
    validation on Celestica, ART, ADVA, and ADVA X1 cards.
-4. Implement versioned profile capture/apply/rollback on those typed APIs.
+4. Extend the implemented profile capture/apply/rollback workflow to new typed
+   APIs, add a persistent profile library, and migrate Windows XML settings
+   only where an equivalent hardware contract is available.
 5. Validate sleep/wake, disconnect/reconnect, multi-card operation, long
    recordings, clock recovery, and signed/notarized release installation.
 
