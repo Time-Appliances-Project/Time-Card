@@ -766,6 +766,8 @@ private struct UARTWorkspaceView: View {
                     }
                 }
 
+                SerialSessionView()
+
                 Picker("Receiver console source", selection: $receiverSource) {
                     ForEach(["Automatic", "Hardware capture", "Hardware read", "Serial preview", "UBX input", "NMEA input"], id: \.self) {
                         Text($0).tag($0)
@@ -1218,7 +1220,7 @@ private struct UARTWorkspaceView: View {
                             .buttonStyle(.borderedProminent)
                             .disabled(
                                 selectedSerialPortPath == nil ||
-                                    monitor.serialCaptureInProgress
+                                    monitor.serialCaptureInProgress || monitor.nativeSerialSessionInProgress
                             )
 
                             if monitor.serialCaptureInProgress {

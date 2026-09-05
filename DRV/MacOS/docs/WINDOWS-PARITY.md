@@ -1,11 +1,11 @@
 # macOS and Windows Control Center parity
 
-This comparison covers macOS app build 73, bundled driver 28 / DriverKit ABI v12, against the
+This comparison covers macOS app build 74, bundled driver 28 / DriverKit ABI v12, against the
 Windows Control Center in the same repository (Windows driver ABI 15).
 An implemented screen does not imply that every supported board has been
 physically validated.
 
-The [build 73, 70 and 67 screenshot gallery](screenshots/README.md) shows the installed
+The [build 74, 73, 70 and 67 screenshot gallery](screenshots/README.md) shows the installed
 app's actual hardware state and remaining safety gates.
 
 | Workspace | macOS implementation | Remaining Windows capabilities |
@@ -13,7 +13,7 @@ app's actual hardware state and remaining safety gates.
 | Precision Clock | PHC read/set, cross timestamps, synchronization status, guarded source selection, active/configured input, supported-source mask | Trusted time-domain conversion, NTP/SyncE/Dynamic synthesis contracts, smooth/advanced adjustment, system discipline |
 | Time Synchronization | Continuous bounded GNSS observation, validated receiver UTC/GPS/leap agreement and integer UTC/TAI epochs, freshness and leap guards, evidence export, read-only time-service diagnostics, tested pure slew controller | Verified PHC epoch association and precision offset series, actual privileged clock writer, exclusive ownership transfer and production discipline |
 | GNSS | Bounded UBX polls, mixed UBX/NMEA/RTCM3 decoding, receiver summary, sky map, satellite table | Persistent receiver configuration, survey-in/fixed-position controls, direct receiver session management |
-| Serial laboratory | Hardware capture, native serial preview, protocol/search/error filters, display pause, raw views, offline replay, TXT/CSV/JSON/binary export | Persistent generic serial sessions, full line/flow-control settings, arbitrary send workflow, TX/RX session timeline, interrupt-backed capture |
+| Serial laboratory | Hardware capture and native preview; persistent macOS serial sessions with framing/flow control, reviewed text/hex TX, RX/TX timeline, display pause, bounded retention and JSON/CSV/RX-binary export; existing protocol filters and replay | Physical serial-adapter validation; manual DTR/RTS and modem status, mark/space parity, 1.5 stop bits, live reconfiguration, send-file/macros, streaming protocol integration, interrupt-backed FPGA capture |
 | SMA and LEDs | Capability-aware routes, guarded setters, GNSS/SMA LED policies, readback | ART peripheral path, exhaustive board-specific validation |
 | Sensors | LM75B, SHT3x, compensated ICP-10100, temperature charts, BNO055/BNO08x fusion, 3D orientation, calibration, low-rate vibration/RMS and motion exports; live BNO08x verified | Physical BNO055 validation, BME/BMP280, INA219 rail measurements, other board routes |
 | Telemetry Studio | Sampling histogram, median/p95/p99, one-hour history, GNSS/temperature plots, low-rate vibration trend, point inspection, pause, six-hour bounded recording, CSV/JSON | Trusted PHC offset series, high-rate vibration measurement and spectral analysis |
@@ -26,6 +26,16 @@ app's actual hardware state and remaining safety gates.
 
 ## Validation scope
 
+- Build 74 adds persistent native serial sessions and a ninth Swift suite.
+  Virtual-port tests pass on Apple Silicon and Intel for RX/TX, cleanup,
+  restoration, cancellation, unplug, one-use/expired reviews, reconnect
+  isolation and bounded backpressure failure. Physical serial settings remain
+  unverified. No receiver, oscillator or clock settings were changed.
+  The same signed universal app is installed and running on the laptop and
+  Mac Pro. Driver 28 remains active and byte-identical; PHC reads still work,
+  with UTC metadata invalid. Light/dark layouts and Connect cancellation were
+  checked without opening a physical serial endpoint.
+  See [SERIAL-SESSIONS.md](SERIAL-SESSIONS.md).
 - Build 73 uses the Time Card Control Center app name and the monochrome
   menu-bar icon on both the Apple Silicon laptop and Intel Mac Pro. The same
   signed universal binary is running on both; the active Mac Pro driver 28

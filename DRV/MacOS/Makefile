@@ -54,6 +54,11 @@ check:
 		App/ReceiverModels.swift App/TimeTrustModels.swift Tests/TimeTrustTests.swift \
 		-o .build/cmake/timecard-time-trust-tests
 	.build/cmake/timecard-time-trust-tests
+	xcrun swiftc -parse-as-library -swift-version 5 \
+		-module-cache-path .build/cmake/swift-module-cache \
+		App/SerialSessionModels.swift App/SerialSessionTransport.swift App/SerialSessionController.swift \
+		Tests/SerialSessionTests.swift -o .build/cmake/timecard-serial-session-tests
+	.build/cmake/timecard-serial-session-tests
 
 build-app:
 	cmake -E remove_directory \

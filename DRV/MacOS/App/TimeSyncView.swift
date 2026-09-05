@@ -38,12 +38,13 @@ struct TimeSyncView: View {
                     HStack {
                         Button("Start Session") { timeSync.start(port: port, baud: baud, poll: sendPolls) }
                             .buttonStyle(.borderedProminent)
-                            .disabled(timeSync.running || timeSync.stopping || monitor.state != .connected || monitor.timeReferenceSessionInProgress)
+                            .disabled(timeSync.running || timeSync.stopping || monitor.state != .connected || monitor.timeReferenceSessionInProgress || monitor.nativeSerialSessionInProgress)
                         Button(timeSync.stopping ? "Stopping…" : "Stop") { timeSync.stop() }.disabled(!timeSync.running || timeSync.stopping)
                         Spacer()
                         Text("RX \(timeSync.receivedBytes) B · TX polls \(timeSync.transmittedBytes) B · bad checksums \(timeSync.badFrames)")
                             .font(.caption.monospaced()).foregroundStyle(.secondary)
                     }
+                    if monitor.nativeSerialSessionInProgress { Text("Disconnect the native serial session in UART and NMEA before starting receiver-time qualification.").foregroundStyle(.orange) }
                     Text(timeSync.message).textSelection(.enabled)
                     Text("Start configures only the selected host UART baud. Polls request MON-VER, NAV-TIMEGPS, NAV-TIMEUTC and NAV-TIMELS; they do not persist receiver settings. Other hardware operations in this app are blocked while the session owns the UART. Close external card-control clients. Sessions stop on card change or after 24 hours; only the latest 200 messages are retained.")
                         .font(.caption).foregroundStyle(.secondary)

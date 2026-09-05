@@ -6,12 +6,18 @@ app, and provides a small command-line diagnostic client.
 
 ## Latest validated deployment
 
-**App 73 · Driver 28 / ABI v12 · CLI 24**, validated September 5, 2026.
+**App 74 · Driver 28 / ABI v12 · CLI 24**, validated September 5, 2026.
 The signed universal app is named **Time Card Control Center** and is installed
 at `/Applications/Time Card Control Center.app` on the Apple Silicon laptop
 and Intel Mac Pro test system. CLI 24 remains installed on the Mac Pro.
-Seven CTest and eight Swift suites pass. This update preserves the existing
+Seven CTest and nine Swift suites pass. This update preserves the existing
 driver and does not require a reboot.
+
+Build 74 adds persistent native serial sessions: configurable framing and flow
+control, continuous RX, a TX/RX timeline, reviewed text/hex sends and session
+exports. Virtual-port tests pass on Apple Silicon and Intel. These are native
+macOS serial endpoints, not a new FPGA UART or trusted-time implementation.
+See [serial controls, safety limits and validation](docs/SERIAL-SESSIONS.md).
 
 Build 73 applies the new name consistently to the app bundle, Dock, menu bar,
 header and splash. Its bundle identifier and internal executable name stay
@@ -39,8 +45,10 @@ and the [Windows parity matrix](docs/WINDOWS-PARITY.md).
 
 ## Screenshots
 
-Actual build 73, 70 and 67 captures from the Intel Mac Pro, at 2560 × 1440. These show
+Actual build 74, 73, 70 and 67 captures from the Intel Mac Pro, at 2560 × 1440. These show
 real hardware states, including unavailable data and safety gates.
+
+![Build 74 persistent native serial sessions, reviewed sends and RX/TX timeline, shown disconnected](docs/screenshots/control-center-serial-session-build74.png)
 
 ![Build 73 Time Card Control Center name, monochrome menu-bar icon and live Overview](docs/screenshots/control-center-renamed-build73.png)
 

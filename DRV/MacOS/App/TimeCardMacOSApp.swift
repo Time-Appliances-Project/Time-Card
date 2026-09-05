@@ -74,10 +74,26 @@ private final class ActivationRequestDelegate: NSObject,
     }
 }
 
+@MainActor private final class TimeCardApplicationDelegate: NSObject, NSApplicationDelegate {
+    weak var serialSession: SerialSessionController?
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let serialSession, serialSession.active else { return .terminateNow }
+        serialSession.disconnect(reason: "Application is quitting.")
+        guard serialSession.active else { return .terminateNow }
+        Task {
+            while serialSession.active { try? await Task.sleep(for: .milliseconds(10)) }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+}
+
 @main
 struct TimeCardMacOSApp: App {
+    @NSApplicationDelegateAdaptor(TimeCardApplicationDelegate.self) private var applicationDelegate
     @StateObject private var driverManager = DriverManager()
     @StateObject private var monitor = TimeCardMonitor()
+    @StateObject private var serialSession = SerialSessionController()
     @State private var handledLaunchArguments = false
     @State private var showingSplash = !ProcessInfo.processInfo.arguments.contains("--activate-driver")
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -104,8 +120,13 @@ struct TimeCardMacOSApp: App {
             }
                 .environmentObject(driverManager)
                 .environmentObject(monitor)
+                .environmentObject(serialSession)
                 .frame(minWidth: 920, minHeight: 640)
+                .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)) { _ in
+                    serialSession.disconnect(reason: "Mac is sleeping. Reconnect explicitly after wake.")
+                }
                 .task {
+                    applicationDelegate.serialSession = serialSession
                     guard !handledLaunchArguments else { return }
                     handledLaunchArguments = true
                     if ProcessInfo.processInfo.arguments
@@ -132,7 +153,7 @@ struct TimeCardMacOSApp: App {
         .defaultPosition(.center)
 
         MenuBarExtra {
-            TimeCardStatusMenu().environmentObject(monitor)
+            TimeCardStatusMenu().environmentObject(monitor).environmentObject(serialSession)
         } label: {
             Image(nsImage: Self.menuBarIcon)
                 .accessibilityLabel("Time Card")
@@ -262,6 +283,7 @@ private struct TimeCardAboutButton: View {
 
 private struct TimeCardStatusMenu: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
+    @EnvironmentObject private var serialSession: SerialSessionController
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -282,6 +304,11 @@ private struct TimeCardStatusMenu: View {
             Text(connectionStatus)
         }
         Text("macOS clock discipline is not enabled")
+        if serialSession.active {
+            Divider()
+            Text("Serial: \(serialSession.record?.port ?? "opening")")
+            Button("Disconnect Serial Session") { serialSession.disconnect() }
+        }
         Divider()
         Button("Open Control Center") {
             openWindow(id: "control-center")

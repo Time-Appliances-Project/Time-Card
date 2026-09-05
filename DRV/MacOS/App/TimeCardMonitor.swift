@@ -222,6 +222,7 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var serialMessage = ""
     @Published private(set) var serialCapture: TimeCardSerialCapture?
     @Published private(set) var serialCaptureInProgress = false
+    @Published private(set) var nativeSerialSessionInProgress = false
     @Published private(set) var timeReferenceSessionInProgress = false
     @Published private(set) var uartObservation: TimeCardUARTObservation?
     @Published private(set) var uartReadResult: TimeCardUARTReadResult?
@@ -331,7 +332,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func captureSerialPreview(portPath: String, baudRate: UInt32) {
-        guard !serialCaptureInProgress, !timeReferenceSessionInProgress else { return }
+        guard !serialCaptureInProgress, !nativeSerialSessionInProgress, !timeReferenceSessionInProgress else { return }
         serialCaptureInProgress = true
         serialCapture = nil
         serialMessage = "Capturing serial preview from \(portPath)..."
@@ -378,6 +379,14 @@ final class TimeCardMonitor: ObservableObject {
             }
         }
     }
+
+    func beginNativeSerialSession() -> Bool {
+        guard !nativeSerialSessionInProgress, !serialCaptureInProgress, !timeReferenceSessionInProgress else { return false }
+        nativeSerialSessionInProgress = true
+        return true
+    }
+
+    func endNativeSerialSession() { nativeSerialSessionInProgress = false }
 
     func configureUART(port: TimeCardUARTPort, baudRate: UInt32) {
         guard !timeReferenceSessionInProgress, !uartOperationInProgress && !uartCaptureInProgress else { return }
@@ -1053,7 +1062,7 @@ final class TimeCardMonitor: ObservableObject {
         return true
     }
     func beginTimeReferenceSession() -> Bool {
-        guard !timeReferenceSessionInProgress, state == .connected, !commandInProgress,
+        guard !timeReferenceSessionInProgress, !nativeSerialSessionInProgress, state == .connected, !commandInProgress,
               !profileOperationInProgress, !peripheralOperationInProgress, !selfTestInProgress,
               !i2cOperationInProgress, !uartOperationInProgress, !uartCaptureInProgress,
               !serialCaptureInProgress else { return false }

@@ -1,7 +1,7 @@
 # macOS Control Center screenshots
 
 These are unretouched, full-resolution captures of the installed SwiftUI app,
-not mockups. Builds 73, 72, 71, 70 and 67 were captured on September 5, 2026, on an Intel Mac Pro
+not mockups. Builds 74, 73, 72, 71, 70 and 67 were captured on September 5, 2026, on an Intel Mac Pro
 with a classic Meta/Facebook Time Card, driver 28 / ABI v12, and CLI 24.
 Each current PNG is 2560 × 1440 pixels. Open an image to inspect the full size.
 
@@ -10,6 +10,18 @@ PPS frequency lock does not establish UTC validity, and an implemented control
 does not prove that every hardware variant or physical setting change has
 been validated. See the [parity matrix](../WINDOWS-PARITY.md) and
 [trusted-time validation record](../TRUSTED-TIME.md).
+
+## Persistent native serial sessions
+
+Build 74 adds configurable native serial sessions, reviewed UTF-8/hex sends,
+and a bounded RX/TX timeline with JSON, CSV and retained-RX binary exports.
+This capture shows the disconnected state, not fabricated traffic. The card
+is available, but no native serial endpoint is open and no commands were sent.
+Virtual-port tests cover RX/TX and failure cleanup on both architectures;
+physical adapter validation remains pending. See the
+[serial-session contract and validation](../SERIAL-SESSIONS.md).
+
+![Build 74 native serial controls, shown disconnected](control-center-serial-session-build74.png)
 
 ## Time Card Control Center and native menu-bar icon
 
