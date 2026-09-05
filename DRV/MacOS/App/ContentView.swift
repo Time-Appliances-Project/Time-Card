@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 private enum ControlCenterPage: String, CaseIterable, Identifiable {
     case overview = "Overview"
     case clock = "Precision Clock"
+    case timeSync = "Time Synchronization"
     case atomic = "Atomic Clock"
     case gnss = "GNSS"
     case uart = "UART and NMEA"
@@ -42,6 +43,7 @@ private enum ControlCenterPage: String, CaseIterable, Identifiable {
         switch self {
         case .overview: "gauge.with.dots.needle.67percent"
         case .clock: "clock.badge.checkmark"
+        case .timeSync: "clock.arrow.2.circlepath"
         case .atomic: "atom"
         case .gnss: "location.north.line"
         case .uart: "terminal"
@@ -65,6 +67,7 @@ struct ContentView: View {
     @EnvironmentObject private var monitor: TimeCardMonitor
     @State private var selectedPage: ControlCenterPage = .initialPage
     @StateObject private var deviceLab = DeviceLabMonitor()
+    @StateObject private var timeSync = TimeSyncMonitor()
 
     var body: some View {
         NavigationSplitView {
@@ -82,6 +85,8 @@ struct ContentView: View {
                     OverviewView()
                 case .clock:
                     PrecisionClockView()
+                case .timeSync:
+                    TimeSyncView()
                 case .atomic:
                     AtomicClockView()
                 case .gnss:
@@ -113,7 +118,8 @@ struct ContentView: View {
                 }
             }
             .navigationTitle(selectedPage.rawValue)
-            .disabled(monitor.profileOperationInProgress || monitor.peripheralOperationInProgress)
+            .disabled(monitor.profileOperationInProgress || monitor.peripheralOperationInProgress ||
+                      (monitor.timeReferenceSessionInProgress && selectedPage != .timeSync))
             .background(ControlCenterBackground())
             .toolbar {
                 ToolbarItemGroup {
@@ -143,6 +149,10 @@ struct ContentView: View {
             }
         }
         .environmentObject(deviceLab)
+        .environmentObject(timeSync)
+        .onReceive(monitor.$snapshot) { _ in timeSync.bind(monitor) }
+        .onChange(of: monitor.state) { _, _ in timeSync.bind(monitor) }
+        .onChange(of: monitor.selectedServiceID) { _, _ in timeSync.bind(monitor) }
         .onReceive(monitor.$snapshot) { _ in deviceLab.bind(monitor) }
         .onChange(of: monitor.state) { _, _ in deviceLab.bind(monitor) }
         .onChange(of: monitor.selectedServiceID) { _, _ in deviceLab.bind(monitor) }
@@ -4317,6 +4327,9 @@ private struct CapabilityWorkspaceView: View {
     }
 
     private func state(for name: String) -> String {
+        if workspace == .fpga && name == "PPS master/slave" {
+            return monitor.snapshot?.supportsPPS == true ? "Available" : "ABI needed"
+        }
         if workspace == .gnss && name == "ToD core status" {
             return monitor.snapshot?.capabilityNames.contains("ToD") == true
                 ? "Live" : "Unavailable"

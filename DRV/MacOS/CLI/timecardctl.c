@@ -224,13 +224,15 @@ print_card_time(const TimeCardTime *cardTime)
     struct tm utc;
 
     if (gmtime_r(&seconds, &utc) != NULL) {
-        printf("%04d-%02d-%02d %02d:%02d:%02d.%09u UTC",
+        printf("%04d-%02d-%02d %02d:%02d:%02d.%09u",
                utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday,
                utc.tm_hour, utc.tm_min, utc.tm_sec, cardTime->nanoseconds);
     } else {
         printf("%" PRIu64 ".%09u", cardTime->seconds,
                cardTime->nanoseconds);
     }
+    /* A zero-offset calendar rendering is not evidence of a UTC epoch. */
+    printf(" (raw PHC; UTC/TAI epoch unqualified)");
 }
 
 static const char *

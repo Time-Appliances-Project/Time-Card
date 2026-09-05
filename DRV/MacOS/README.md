@@ -68,6 +68,11 @@ The current implementation provides:
   for GNSS, GNSS2, MAC/atomic-clock, and NMEA ports on profiles that expose the
   UART register bank
 - A native SwiftUI Control Center with:
+  - a Time Synchronization workspace with continuous bounded GNSS observation,
+    UTC/GPS/leap-second consistency checks, exact UTC/TAI epochs, monotonic
+    freshness and evidence export. System-clock steering remains disabled
+    until PHC epoch association and exclusive ownership are implemented and
+    validated; see [Trusted time](docs/TRUSTED-TIME.md)
   - driver activation, update, and removal
   - live card discovery and explicit multi-card selection
   - PCI identity, board profile, register-map, BAR, and capability views

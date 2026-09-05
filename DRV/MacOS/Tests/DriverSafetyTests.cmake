@@ -102,6 +102,7 @@ foreach(required_cli_sma IN ITEMS
         "print_sensor_capabilities("
         "print_imu_probe_detail("
         "UTC status:"
+        "raw PHC; UTC/TAI epoch unqualified"
         "GNSS status:"
         "Satellites:"
         "SHTP header"

@@ -103,6 +103,13 @@ images remain gated until exact-image presence is established.
 
 ## Milestone 4: system integration
 
+Build 67 implements receiver UTC/GPS/leap qualification, continuous bounded
+GNSS observation, evidence export, time-service conflict diagnostics and a
+tested pure slew controller. It does not install a privileged clock writer or
+establish PHC epoch provenance. The Mac Pro still has invalid PHC UTC metadata
+and no GNSS UART responses. See [TRUSTED-TIME.md](TRUSTED-TIME.md) for the
+hardware evidence and the ordered dependencies for the requested parity work.
+
 App build 64 also adds the dedicated SA53 C3 workspace and ABI v11 fused-motion
 path, including quaternion 3D visualization and low-rate vibration/RMS export.
 SA53 read-only telemetry and BNO08x motion are hardware-validated on the Mac

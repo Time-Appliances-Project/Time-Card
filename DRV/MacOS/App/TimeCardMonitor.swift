@@ -221,6 +221,7 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var serialMessage = ""
     @Published private(set) var serialCapture: TimeCardSerialCapture?
     @Published private(set) var serialCaptureInProgress = false
+    @Published private(set) var timeReferenceSessionInProgress = false
     @Published private(set) var uartObservation: TimeCardUARTObservation?
     @Published private(set) var uartReadResult: TimeCardUARTReadResult?
     @Published private(set) var uartWriteResult: TimeCardUARTWriteResult?
@@ -329,7 +330,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func captureSerialPreview(portPath: String, baudRate: UInt32) {
-        guard !serialCaptureInProgress else { return }
+        guard !serialCaptureInProgress, !timeReferenceSessionInProgress else { return }
         serialCaptureInProgress = true
         serialCapture = nil
         serialMessage = "Capturing serial preview from \(portPath)..."
@@ -378,7 +379,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func configureUART(port: TimeCardUARTPort, baudRate: UInt32) {
-        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
+        guard !timeReferenceSessionInProgress, !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -433,7 +434,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func observeUART(port: TimeCardUARTPort) {
-        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
+        guard !timeReferenceSessionInProgress, !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -494,7 +495,7 @@ final class TimeCardMonitor: ObservableObject {
         maximumBytes: UInt32 = 256,
         timeoutMilliseconds: UInt32 = 500
     ) {
-        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
+        guard !timeReferenceSessionInProgress, !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -558,7 +559,7 @@ final class TimeCardMonitor: ObservableObject {
         label: String = "UART bytes",
         timeoutMilliseconds: UInt32 = 500
     ) {
-        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
+        guard !timeReferenceSessionInProgress, !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -624,7 +625,7 @@ final class TimeCardMonitor: ObservableObject {
         readAttempts: Int = 6,
         readTimeoutMilliseconds: UInt32 = 250
     ) {
-        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
+        guard !timeReferenceSessionInProgress, !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -709,7 +710,7 @@ final class TimeCardMonitor: ObservableObject {
         baudRate: UInt32,
         durationSeconds: Double
     ) {
-        guard !uartOperationInProgress && !uartCaptureInProgress else { return }
+        guard !timeReferenceSessionInProgress, !uartOperationInProgress && !uartCaptureInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             uartMessage = "No Time Card is selected."
             return
@@ -883,7 +884,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func setCardFromSystem() {
-        guard !commandInProgress else { return }
+        guard !commandInProgress, !timeReferenceSessionInProgress else { return }
         guard let selectedServiceID else {
             commandMessage = "No Time Card is selected."
             return
@@ -1003,7 +1004,7 @@ final class TimeCardMonitor: ObservableObject {
                                        operation: @escaping @Sendable (TimeCardServiceDescriptor) throws -> Void) {
         // A read that started while confirmation was open must not silently
         // discard the confirmed command. The driver serializes both operations.
-        guard !commandInProgress, state == .connected,
+        guard !commandInProgress, !timeReferenceSessionInProgress, state == .connected,
               selectedServiceID == serviceID,
               let descriptor = services.first(where: { $0.id == serviceID }) else { return }
         let generation = selectionGeneration
@@ -1042,12 +1043,25 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func beginPeripheralOperation() -> Bool {
-        guard state == .connected, !commandInProgress, !profileOperationInProgress,
+        guard state == .connected, !timeReferenceSessionInProgress, !commandInProgress, !profileOperationInProgress,
               !peripheralOperationInProgress, !selfTestInProgress, !i2cOperationInProgress,
               !uartOperationInProgress, !uartCaptureInProgress, !serialCaptureInProgress else { return false }
         peripheralOperationInProgress = true
         commandInProgress = true
         return true
+    }
+    func beginTimeReferenceSession() -> Bool {
+        guard !timeReferenceSessionInProgress, state == .connected, !commandInProgress,
+              !profileOperationInProgress, !peripheralOperationInProgress, !selfTestInProgress,
+              !i2cOperationInProgress, !uartOperationInProgress, !uartCaptureInProgress,
+              !serialCaptureInProgress else { return false }
+        timeReferenceSessionInProgress = true
+        appendSessionLog(severity: .info, category: "Time", message: "Live GNSS time qualification started. System-clock writes are disabled.")
+        return true
+    }
+    func endTimeReferenceSession() {
+        timeReferenceSessionInProgress = false
+        appendSessionLog(severity: .info, category: "Time", message: "GNSS time qualification stopped; live evidence invalidated.")
     }
     func endPeripheralOperation(_ message: String, failed: Bool) {
         peripheralOperationInProgress = false
@@ -1105,7 +1119,7 @@ final class TimeCardMonitor: ObservableObject {
 
     private func runProfileOperation(_ description: String,
         operation: @escaping @Sendable (TimeCardLiveProfileBackend) throws -> ProfileOperationResult) {
-        guard !profileOperationInProgress, !commandInProgress, !i2cOperationInProgress,
+        guard !timeReferenceSessionInProgress, !profileOperationInProgress, !commandInProgress, !i2cOperationInProgress,
               !selfTestInProgress, !uartOperationInProgress, !uartCaptureInProgress,
               !serialCaptureInProgress, !timingRefreshInProgress else {
             profileMessage = "Wait for the current operation or stop capture before working with profiles."
@@ -1213,7 +1227,7 @@ final class TimeCardMonitor: ObservableObject {
         direction: TimeCardSMADirection,
         function: UInt32
     ) {
-        guard !commandInProgress else { return }
+        guard !commandInProgress, !timeReferenceSessionInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             smaMessage = "No Time Card is selected."
             return
@@ -1274,7 +1288,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func scanI2CBus() {
-        guard !i2cOperationInProgress else { return }
+        guard !i2cOperationInProgress, !timeReferenceSessionInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             i2cOperationMessage = "No Time Card is selected."
             return
@@ -1339,7 +1353,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func setI2CMux(channelMask: UInt32) {
-        guard !i2cOperationInProgress else { return }
+        guard !i2cOperationInProgress, !timeReferenceSessionInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             i2cOperationMessage = "No Time Card is selected."
             return
@@ -1410,7 +1424,7 @@ final class TimeCardMonitor: ObservableObject {
         blue: UInt32,
         globalCurrent: UInt32
     ) {
-        guard !i2cOperationInProgress else { return }
+        guard !i2cOperationInProgress, !timeReferenceSessionInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             i2cOperationMessage = "No Time Card is selected."
             return
@@ -1496,7 +1510,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     func runReadOnlySelfTest() {
-        guard !selfTestInProgress, !profileOperationInProgress, !peripheralOperationInProgress else { return }
+        guard !timeReferenceSessionInProgress, !selfTestInProgress, !profileOperationInProgress, !peripheralOperationInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             selfTestMessage = "No Time Card is selected."
             selfTestReport = TimeCardSelfTestReport(
@@ -1693,7 +1707,7 @@ final class TimeCardMonitor: ObservableObject {
         includeGNSS: Bool,
         includeSMA: Bool
     ) {
-        guard !i2cOperationInProgress else { return }
+        guard !i2cOperationInProgress, !timeReferenceSessionInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             i2cOperationMessage = "No Time Card is selected."
             return
@@ -2323,7 +2337,7 @@ final class TimeCardMonitor: ObservableObject {
         subaddressLength: UInt32,
         length: UInt32
     ) {
-        guard !i2cOperationInProgress else { return }
+        guard !i2cOperationInProgress, !timeReferenceSessionInProgress else { return }
         guard let descriptor = selectedDescriptor else {
             i2cOperationMessage = "No Time Card is selected."
             return

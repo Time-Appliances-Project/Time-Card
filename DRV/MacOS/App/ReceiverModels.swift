@@ -345,13 +345,13 @@ struct TimeCardUBXFrame: Identifiable, Equatable, Sendable {
         guard payload.count >= 24 else {
             return "NAV-TIMELS payload is shorter than expected."
         }
-        let currentLeapSeconds = Int(Int8(bitPattern: payload[8]))
-        let leapChange = Int(Int8(bitPattern: payload[10]))
+        let currentLeapSeconds = Int(Int8(bitPattern: payload[9]))
+        let leapChange = Int(Int8(bitPattern: payload[11]))
         let timeToEvent = Self.readInt32(payload, at: 12)
         let eventWeek = Self.readUInt16(payload, at: 16)
         let eventDay = Self.readUInt16(payload, at: 18)
         let valid = payload[23]
-        return "Current leap seconds \(currentLeapSeconds), next change \(leapChange), event in \(timeToEvent) s at GPS week \(eventWeek) day \(eventDay), valid flags 0x\(String(format: "%02x", valid))."
+        return "GPS-UTC \(currentLeapSeconds) s (source \(payload[8])), next change \(leapChange) s (source \(payload[10])), event in \(timeToEvent) s at GPS week \(eventWeek) day \(eventDay), valid flags 0x\(String(format: "%02x", valid))."
     }
 
     private var navSATSummary: String {

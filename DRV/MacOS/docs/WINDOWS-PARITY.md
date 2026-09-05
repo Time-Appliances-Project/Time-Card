@@ -1,6 +1,6 @@
 # macOS and Windows Control Center parity
 
-This comparison covers macOS app build 66, bundled driver 28 / DriverKit ABI v12, against the
+This comparison covers macOS app build 67, bundled driver 28 / DriverKit ABI v12, against the
 Windows Control Center in the same repository (Windows driver ABI 15).
 An implemented screen does not imply that every supported board has been
 physically validated.
@@ -8,6 +8,7 @@ physically validated.
 | Workspace | macOS implementation | Remaining Windows capabilities |
 | --- | --- | --- |
 | Precision Clock | PHC read/set, cross timestamps, synchronization status, guarded source selection, active/configured input, supported-source mask | Trusted time-domain conversion, NTP/SyncE/Dynamic synthesis contracts, smooth/advanced adjustment, system discipline |
+| Time Synchronization | Continuous bounded GNSS observation, validated receiver UTC/GPS/leap agreement and integer UTC/TAI epochs, freshness and leap guards, evidence export, read-only time-service diagnostics, tested pure slew controller | Verified PHC epoch association and precision offset series, actual privileged clock writer, exclusive ownership transfer and production discipline |
 | GNSS | Bounded UBX polls, mixed UBX/NMEA/RTCM3 decoding, receiver summary, sky map, satellite table | Persistent receiver configuration, survey-in/fixed-position controls, direct receiver session management |
 | Serial laboratory | Hardware capture, native serial preview, protocol/search/error filters, display pause, raw views, offline replay, TXT/CSV/JSON/binary export | Persistent generic serial sessions, full line/flow-control settings, arbitrary send workflow, TX/RX session timeline, interrupt-backed capture |
 | SMA and LEDs | Capability-aware routes, guarded setters, GNSS/SMA LED policies, readback | ART peripheral path, exhaustive board-specific validation |
@@ -21,6 +22,16 @@ physically validated.
 
 ## Validation scope
 
+- Build 67 adds seven Swift-suite coverage alongside seven CTest suites and
+  a universal signed app build. App 67 and CLI 24 are installed and verified
+  on `.141`, with driver 28 unchanged. Live session start, evidence export,
+  competing-operation blocking and Stop were checked; SA53 polling worked
+  again after Stop. CLI 24 no longer labels raw PHC reads as UTC.
+  Time qualification remains blocked on `.141`:
+  both GNSS UARTs returned no identity data at five baud rates, and PHC UTC
+  metadata remains invalid. Apple Network Time was left on. No clock steering,
+  SA53, PHC epoch, PPS or persistent receiver changes were made.
+  See [TRUSTED-TIME.md](TRUSTED-TIME.md).
 - Build 66 adds PPS transaction and Swift model tests. Seven CTest and six
   Swift suites pass, with universal app/driver builds and strict signatures.
   App 66 and CLI 23 are installed on `.141`; the approved restart activated
