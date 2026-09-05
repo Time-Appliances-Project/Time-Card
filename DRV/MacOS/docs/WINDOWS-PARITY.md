@@ -1,11 +1,11 @@
 # macOS and Windows Control Center parity
 
-This comparison covers macOS app build 70, bundled driver 28 / DriverKit ABI v12, against the
+This comparison covers macOS app build 73, bundled driver 28 / DriverKit ABI v12, against the
 Windows Control Center in the same repository (Windows driver ABI 15).
 An implemented screen does not imply that every supported board has been
 physically validated.
 
-The [build 70 and build 67 screenshot gallery](screenshots/README.md) shows the installed
+The [build 73, 70 and 67 screenshot gallery](screenshots/README.md) shows the installed
 app's actual hardware state and remaining safety gates.
 
 | Workspace | macOS implementation | Remaining Windows capabilities |
@@ -20,12 +20,17 @@ app's actual hardware state and remaining safety gates.
 | Timing and FPGA engines | Version-gated PPS input/output state and confirmed enable/width/polarity/delay controls with stale-state checks and verified recovery; live PPS 1.2 readouts on `.141`; four frequency counters on revision-02 LitePCIe; timing export and readiness catalog | Physical PPS setting-change and recovery validation, PPS error acknowledgement, classic/ART/ADVA counter contracts, signal-generator/timestamp-channel ABI and controls, IRIG/DCF/ToD settings |
 | Atomic clock | Dedicated SA53 identity/telemetry/alarms, checksummed C3 transport, 15 bounded setters, mode checks, confirmed JamSync/load/store/acknowledge, readback and JSON export | Physical validation of clock-changing operations; ART mRO-50; persistent sessions |
 | Profiles | Native versioned JSON including PPS configuration, immutable profile library, guarded Windows XML single/library migration for clock/SMA/PPS, live preview, confirmed apply, verification, rollback and recovery reports; built-in readiness planner | Migration of image-bound profiles, GNSS/oscillator/generator/ToD settings as typed APIs become available |
-| macOS shell | Transparent menu-bar logo and status menu, reopen after window close, adaptive startup splash and About view | Additional preferences and release polish |
+| macOS shell | Abstract monochrome menu-bar template icon and status menu, reopen after window close, adaptive startup splash and About view | Additional preferences and release polish |
 | Diagnostics | Read-only self-test including clock-source and gated frequency APIs, session log, structured exports, support ZIP with profile evidence | Extended tests for future FPGA/peripheral APIs |
 | Maintenance | Driver lifecycle, exact PCI matching, multi-card app selection | Protected SPI flash update, EEPROM identity, notarized release packaging |
 
 ## Validation scope
 
+- Build 73 uses the Time Card Control Center app name and the monochrome
+  menu-bar icon on both the Apple Silicon laptop and Intel Mac Pro. The same
+  signed universal binary is running on both; the active Mac Pro driver 28
+  is unchanged. Seven CTest and eight Swift suites pass, together with bundle
+  name, executable identity and template-icon checks.
 - Build 70 adds PPS profile and Windows XML coverage, with eight Swift suites
   alongside seven CTest suites. The write-prohibiting hardware profile test
   captured seven settings and passed JSON round-trip, preview and unchanged

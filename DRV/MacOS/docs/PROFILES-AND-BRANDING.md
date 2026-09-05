@@ -8,10 +8,24 @@ release.
 
 ## Menu bar and startup
 
-The 22-point menu-bar image uses a regular transparent artwork asset, not the
-application icon. This avoids the square backing macOS applies to Dock icons.
-The existing Dock icon is unchanged. Both standard and Retina image assets
-retain alpha transparency.
+Build 73 names the app **Time Card Control Center** in Finder, the Dock,
+the menu bar, header and splash. The installed bundle is
+`/Applications/Time Card Control Center.app`. The bundle identifier
+`org.opentimeserver.timecard.macos`, internal executable `TimeCardMacOS`,
+Swift module, Xcode target and scheme remain unchanged to preserve existing
+preferences, UI restoration and DriverKit client identity.
+
+Build 72 refines the monochrome menu-bar icon using a solid card silhouette,
+clock cutouts, a PCI bracket and rounded trailing bars, following the supplied
+design reference. Small details are simplified for menu-bar legibility.
+The 26 × 18-point SVG has no lettering, shading, colored pixels or background.
+Asset-catalog template rendering and
+`NSImage.isTemplate` let macOS supply the same monochrome tint as neighboring
+status icons, including light/dark menu bars and selected states. The vector
+representation is retained for sharp scaling.
+
+The full-color Dock icon, startup splash and About artwork are unchanged;
+build 73 removes the OCP prefix from the displayed app name.
 
 The menu shows the selected card, clock-core synchronization, UTC metadata
 availability, last update, and the disabled state of system-clock discipline.
@@ -86,7 +100,42 @@ overwritten during migration.
 
 ## Validation
 
-- Build 70 is installed in `/Applications/TimeCardMacOS.app` on the Intel Mac
+- Build 73 is installed and running as
+  `/Applications/Time Card Control Center.app` on both the Apple Silicon laptop
+  and Intel Mac Pro. Both executable SHA-256 values match
+  `a6cca11651815a72fe9c7afa33ba2a293ad9a18b8c8201286a9d12fea95fceb6`.
+  The signed archive SHA-256 is
+  `317429732921ef57ee7f274028e951f3e6d9609344099a5799d4dcd2eb562290`.
+  Xcode refreshed the host development profile to include the laptop while
+  retaining previously covered Macs. The same signing identity, bundle ID
+  and managed client entitlements are retained. The laptop's old build 64
+  preview remains available for recovery; build 72 was backed up on the Mac Pro.
+  Seven CTest and eight Swift suites pass. The bundle tests verify the new
+  display name, menu-bar name, application filename and stable executable name,
+  as well as the monochrome template asset. Strict signature verification
+  passes on both Macs. The Mac Pro shows live PHC telemetry through the exact
+  unchanged signed driver 28. No driver activation or hardware writes were made.
+- Build 72 was previously installed in `/Applications/TimeCardMacOS.app` on the Intel Mac
+  Pro. Its executable SHA-256 is
+  `57f6c8b8bc0ccc7d33da63fe85f3afb0aef70652f99b19c4182683778b8f358d`;
+  the signed archive SHA-256 is
+  `75e2f18afbb38c9ee936c23f232ddae0f931e21e0fe9c7adbafcbf5bb7f8d13b`.
+  Seven CTest and eight Swift suites pass, along with the app bundle checks
+  for template rendering, transparency, vector preservation and 26 × 18-point
+  dimensions at standard and Retina scales. Strict signature verification
+  passes locally and on the Mac Pro. The live icon and its status menu were
+  checked on the desktop. The exact signed driver 28 is unchanged, and build
+  71 was backed up before replacement. No hardware settings were changed.
+- Build 71 was previously installed in `/Applications/TimeCardMacOS.app` on the Intel Mac
+  Pro. Its executable SHA-256 is
+  `651b7486fdc5b8ad816b8dad8e2dae6bb6cbb486ccdddc8dd87d10c976a06973`;
+  the signed archive SHA-256 is
+  `b3014e9eb78410f4d729a6b6f4dc332676b7d068b85aaebcb8179eddd1b7d5fd`.
+  Seven CTest and eight Swift suites pass. The app bundle test additionally
+  verifies monochrome, transparent, template-rendered, vector-preserving
+  standard and Retina renditions. The live icon was checked alongside the
+  other macOS status icons. Build 70 was backed up before replacement.
+- Build 70 was previously installed on the Intel Mac
   Pro. Its executable SHA-256 is
   `1c8ca77108f8b8ae4984ceb339745329a483a1e7b475bd2400a47dd768886b5f`.
   The signed archive SHA-256 is

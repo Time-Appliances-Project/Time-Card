@@ -8002,7 +8002,7 @@ struct ControlCenterHeader: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("OCP Time Card Control Center")
+                Text("Time Card Control Center")
                     .font(.system(.caption, design: .rounded).weight(.bold))
                     .foregroundStyle(.secondary)
                     .textCase(.uppercase)

@@ -1,7 +1,7 @@
 # macOS Control Center screenshots
 
 These are unretouched, full-resolution captures of the installed SwiftUI app,
-not mockups. Builds 70 and 67 were captured on September 5, 2026, on an Intel Mac Pro
+not mockups. Builds 73, 72, 71, 70 and 67 were captured on September 5, 2026, on an Intel Mac Pro
 with a classic Meta/Facebook Time Card, driver 28 / ABI v12, and CLI 24.
 Each current PNG is 2560 × 1440 pixels. Open an image to inspect the full size.
 
@@ -11,12 +11,24 @@ does not prove that every hardware variant or physical setting change has
 been validated. See the [parity matrix](../WINDOWS-PARITY.md) and
 [trusted-time validation record](../TRUSTED-TIME.md).
 
+## Time Card Control Center and native menu-bar icon
+
+Build 73 displays the Time Card Control Center name in the menu bar and app
+header. It retains build 72's solid card silhouette with clock cutouts and rounded trailing
+bars, following the supplied design reference. The template uses the same
+monochrome tint as the other macOS status icons and has no square backing.
+The Dock icon, splash and About artwork remain full color. This capture shows
+the unselected icon alongside the neighboring status icons and live Overview.
+
+![Build 73 Time Card Control Center name, monochrome menu-bar icon and live Overview](control-center-renamed-build73.png)
+
 ## Welcome and About
 
 Build 70's startup artwork is also available from About. This is the persistent
 About window, showing the same design with version/build and live connection
-status. The startup splash itself dismisses after about 2.4 seconds. The tiny
-menu-bar logo uses the same transparent artwork without macOS's app-icon square.
+status. The startup splash itself dismisses after about 2.4 seconds. The full-color
+menu-bar logo in this older capture was replaced by the template above. Build 73
+also removes the OCP prefix from the splash title.
 
 ![Build 70 welcome design shown in About](control-center-welcome-build70.png)
 
@@ -79,6 +91,8 @@ stopped after capturing the image.
 
 Retained for historical comparison, not presented as the current build:
 
+- [Build 71 outline menu-bar icon](control-center-template-icon-build71.png)
+- [Build 72 silhouette menu-bar icon before the app rename](control-center-silhouette-icon-build72.png)
 - [Build 65 SA53 workspace](control-center-atomic-clock-build65.png)
 - [Build 65 live BNO08x motion](control-center-live-motion-build65.png)
 - [Earlier overview](control-center-overview.png)

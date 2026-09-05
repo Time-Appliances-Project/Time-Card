@@ -145,13 +145,14 @@ struct TimeCardMacOSApp: App {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { showingSplash = false }
     }
 
-    // Use a regular transparent image asset, not NSApplicationIcon. macOS may
-    // add its own rounded backing to an application icon (including in menus).
+    // A solid card-and-clock silhouette, not the full-color app artwork.
+    // Template rendering lets macOS match the other status icons in every
+    // menu-bar appearance, including selection and increased contrast.
     private static let menuBarIcon: NSImage = {
-        let icon = (NSImage(named: "TimeCardArtwork")?.copy() as? NSImage)
+        let icon = (NSImage(named: "TimeCardMenuBar")?.copy() as? NSImage)
             ?? NSImage(systemSymbolName: "pcicard", accessibilityDescription: "Time Card")!
-        icon.size = NSSize(width: 22, height: 22)
-        icon.isTemplate = false
+        icon.size = NSSize(width: 26, height: 18)
+        icon.isTemplate = true
         return icon
     }()
 
@@ -196,7 +197,7 @@ private struct TimeCardLaunchSplash: View {
                     .frame(width: 240, height: 210)
                     .shadow(color: .blue.opacity(0.12), radius: 24, y: 8)
                     .accessibilityHidden(true)
-                Text("OCP TIME CARD")
+                Text("TIME CARD")
                     .font(.system(size: 11, weight: .semibold)).tracking(4)
                     .foregroundStyle(.secondary).padding(.top, 4)
                 Text("Control Center")

@@ -57,12 +57,12 @@ check:
 
 build-app:
 	cmake -E remove_directory \
-		"$(CURDIR)/.build/xcode-app/Build/Products/Debug/TimeCardMacOS.app"
+		"$(CURDIR)/.build/xcode-app/Build/Products/Debug/Time Card Control Center.app"
 	xcodebuild -project TimeCardMacOS.xcodeproj -scheme TimeCardMacOS \
 		-configuration Debug -derivedDataPath .build/xcode-app \
 		ARCHS="$(ARCHS)" ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
 	cmake \
-		-DTIMECARD_APP_BUNDLE="$(CURDIR)/.build/xcode-app/Build/Products/Debug/TimeCardMacOS.app" \
+		-DTIMECARD_APP_BUNDLE="$(CURDIR)/.build/xcode-app/Build/Products/Debug/Time Card Control Center.app" \
 		-P Tests/AppBundleTests.cmake
 
 build-cli-app:

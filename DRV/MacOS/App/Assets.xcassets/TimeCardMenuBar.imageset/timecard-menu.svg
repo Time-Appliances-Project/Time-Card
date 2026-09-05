@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="26" height="18" viewBox="0 0 26 18">
+  <!-- Solid card and trailing bars. The clock ring and hands are transparent
+       cutouts, so the complete mark follows macOS template tinting. -->
+  <path fill="#000000" fill-rule="evenodd" d="
+    M4.4 2.5H17.8a.85.85 0 0 1 0 1.7H16.5a.7.7 0 0 0 0 1.4
+    H23.8a.85.85 0 0 1 0 1.7H19.9a.7.7 0 0 0 0 1.4
+    H21.2a.85.85 0 0 1 0 1.7H18.8a.7.7 0 0 0 0 1.4
+    H20a.85.85 0 0 1 0 1.7H12.2v1H8.8v-1H7.5v.75H6.2v-.75
+    H4.4a.4.4 0 0 1-.4-.4V2.9a.4.4 0 0 1 .4-.4Z
+    M14.15 8a4.15 4.15 0 1 0-8.3 0 4.15 4.15 0 1 0 8.3 0Z
+    M13.2 8a3.2 3.2 0 1 0-6.4 0 3.2 3.2 0 1 0 6.4 0Z
+    M9.45 5.7a.55.55 0 0 1 1.1 0V8a.55.55 0 0 1-.16.39
+    L8.54 10.24a.55.55 0 0 1-.78-.78l1.69-1.69Z"/>
+  <path fill="none" stroke="#000000" stroke-width="1.15" stroke-linecap="round"
+        stroke-linejoin="round" d="M1.25 2.5H2.75V15.5M2.25 5.5H4.5M2.25 9H4.5M2.25 12.5H4.5"/>
+  <rect fill="#000000" x="20" y="2.5" width="2.5" height="1.7" rx=".85"/>
+  <circle fill="#000000" cx="23.8" cy="9.55" r=".85"/>
+</svg>

@@ -6,12 +6,22 @@ app, and provides a small command-line diagnostic client.
 
 ## Latest validated deployment
 
-**App 70 · Driver 28 / ABI v12 · CLI 24**, validated September 5, 2026.
-The signed universal app and CLI are installed on the Intel Mac Pro test system.
+**App 73 · Driver 28 / ABI v12 · CLI 24**, validated September 5, 2026.
+The signed universal app is named **Time Card Control Center** and is installed
+at `/Applications/Time Card Control Center.app` on the Apple Silicon laptop
+and Intel Mac Pro test system. CLI 24 remains installed on the Mac Pro.
 Seven CTest and eight Swift suites pass. This update preserves the existing
 driver and does not require a reboot.
 
-The latest additions are a transparent Time Card menu-bar logo and status menu,
+Build 73 applies the new name consistently to the app bundle, Dock, menu bar,
+header and splash. Its bundle identifier and internal executable name stay
+unchanged, preserving preferences and DriverKit client identity.
+
+Build 72 refines the menu-bar icon into a solid card silhouette with clock cutouts
+and rounded trailing bars. The monochrome template matches the system's other
+status icons. The Dock icon and splash remain full color.
+
+Recent additions include the Time Card menu-bar status menu,
 a native startup splash and About view, PPS configuration profiles, and guarded
 Windows XML migration for clock-source, SMA and PPS settings. Unsupported
 controls and unverified FPGA image constraints block an import rather than
@@ -29,12 +39,14 @@ and the [Windows parity matrix](docs/WINDOWS-PARITY.md).
 
 ## Screenshots
 
-Actual build 70 and build 67 captures from the Intel Mac Pro, at 2560 × 1440. These show
+Actual build 73, 70 and 67 captures from the Intel Mac Pro, at 2560 × 1440. These show
 real hardware states, including unavailable data and safety gates.
+
+![Build 73 Time Card Control Center name, monochrome menu-bar icon and live Overview](docs/screenshots/control-center-renamed-build73.png)
 
 ![Build 70 welcome artwork, shown in the About window](docs/screenshots/control-center-welcome-build70.png)
 
-![Build 70 borderless menu-bar logo and PPS profile preview](docs/screenshots/control-center-menu-profiles-build70.png)
+![Earlier build 70 menu-bar logo and PPS profile preview](docs/screenshots/control-center-menu-profiles-build70.png)
 
 ![Time Synchronization with unqualified UTC and system-clock steering disabled](docs/screenshots/control-center-time-sync-build67.png)
 
@@ -372,8 +384,8 @@ No UTC/TAI offset is inferred from raw card time.
 Direct workspace launch:
 
 ```sh
-open -a TimeCardMacOS --args --page=telemetry
-open -a TimeCardMacOS --args --page=uart
+open -a "Time Card Control Center" --args --page=telemetry
+open -a "Time Card Control Center" --args --page=uart
 ```
 
 Launch arguments apply when the application starts. Use the sidebar to switch
@@ -428,7 +440,10 @@ xcodebuild \
 ```
 
 The equivalent convenience command for the Intel Mac Pro build is
-`make build-app ARCHS=x86_64`. It also checks that the embedded extension is
+`make build-app ARCHS=x86_64`. The app output is
+`.build/xcode-app/Build/Products/Debug/Time Card Control Center.app`.
+The Xcode project, scheme and internal executable retain the `TimeCardMacOS`
+name. The bundle check also verifies that the embedded extension is
 named `org.opentimeserver.timecard.macos.driver.dext`. DriverKit requires the
 DEXT filename, without the `.dext` suffix, to exactly match its bundle
 identifier.
@@ -493,7 +508,7 @@ development provisioning profile at
 `timecardctl.app/Contents/embedded.provisionprofile` before signing.
 
 For repeatable development installs, the host app accepts
-`--activate-driver`. Launching `/Applications/TimeCardMacOS.app` with this
+`--activate-driver`. Launching `/Applications/Time Card Control Center.app` with this
 argument submits the DriverKit activation or replacement request for the
 embedded `org.opentimeserver.timecard.macos.driver` extension. macOS may still
 require approval in System Settings or a reboot before the PCI service binds to
