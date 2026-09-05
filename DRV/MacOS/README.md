@@ -93,6 +93,21 @@ The current implementation provides:
   - a board-variant compatibility matrix for Meta/Facebook, Celestica R4006,
     Orolia/Safran ART, ADVA, and ADVA X1 profiles, also exported in support ZIPs
   - a rolling bracketed sampling-window chart
+  - an interactive Telemetry Studio with one-hour bounded history, selectable
+    time ranges, sampling-window median/p95/p99 and histogram, valid ToD GNSS
+    satellite history, per-sensor temperature charts, point inspection, and
+    display pause that leaves collection running
+  - session recording of up to 21,600 observations, independent of the visible
+    chart range, with CSV/JSON export and explicit stop on card changes
+  - a serial receiver console with protocol/search/checksum filters, display
+    pause, selectable capture source, ASCII/hex/decimal/binary inspection,
+    offline binary/NMEA replay up to 16 MiB, and TXT/CSV/JSON message exports
+    plus complete raw binary export
+  - receiver summary and satellite sky-map inspection for replay files, bounded
+    decoding (20,000 messages), and GSV epoch replacement to prevent duplicate
+    satellite markers in longer captures
+  - remembered workspace selection, Command-R refresh, and direct workspace
+    launch using `--page=uart`, `--page=telemetry`, or another workspace name
   - native save dialogs for telemetry JSON/CSV, diagnostics, self-test
     reports, and session-log text/JSON, plus support ZIP session-log JSON
   - clear user-client entitlement and restart diagnostics
@@ -137,6 +152,40 @@ Driver/    PCIDriverKit extension and user client
 Shared/    Stable C ABI and hardware register definitions
 Tests/     Register-map, safety, bundle, and Swift model tests
 ```
+
+## Receiver console and telemetry sessions
+
+Open **UART and NMEA** to use the receiver console. Select a hardware capture,
+hardware read, macOS serial preview, or decoder input as the source. **Replay
+File** loads raw binary or NMEA text without transmitting it. Replay has its
+own source label; **Return to Live** resumes inspection of the selected live
+source. **Pause Display** freezes the console while an active bounded capture
+continues. Protocol, checksum, and search filters affect the table and decoded
+exports. Binary export always preserves the full retained capture, including
+noise and incomplete frames. The table shows up to 500 matching messages and
+the raw preview shows up to 4 KiB; decoded exports include all matching messages
+up to the 20,000-message decoding limit.
+
+In **Telemetry Studio**, select a one-minute to one-hour view and click or drag
+on a chart to inspect a sample. Pausing charts does not stop collection or
+recording. **Start Recording** retains up to 21,600 observations independently
+of the chart window. Recordings remain in memory until exported and stop when
+the active card changes. CSV uses UTC host timestamps and blank cells for
+missing readings; JSON preserves the measurement types and recording metadata.
+No UTC/TAI offset is inferred from raw card time.
+
+Direct workspace launch:
+
+```sh
+open -a TimeCardMacOS --args --page=telemetry
+open -a TimeCardMacOS --args --page=uart
+```
+
+Launch arguments apply when the application starts. Use the sidebar to switch
+workspaces when the app is already running.
+
+See [Windows parity status](docs/WINDOWS-PARITY.md) for implemented features
+and the remaining driver and hardware milestones.
 
 ## Build and test without signing
 

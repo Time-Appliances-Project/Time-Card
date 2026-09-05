@@ -59,6 +59,11 @@ the bounded ABI v8 read path.
 - Receiver stream summary dashboard for decoded UBX and NMEA captures
 - Receiver satellite signal table and support-bundle CSV export
 - Receiver satellite sky map from UBX NAV-SAT and NMEA GSV records
+- Receiver console with filtering, display pause, raw byte formats, bounded
+  offline replay, full binary preservation, and TXT/CSV/JSON message exports
+- Sampling-window histogram and percentiles, selectable history ranges,
+  valid GNSS satellite and temperature charts, sample inspection, and
+  independent bounded session recording with CSV/JSON export
 - Native macOS file exports for telemetry JSON/CSV, diagnostics, self-test
   reports, and session-log text/JSON
 - Interrupt-backed stream capture
@@ -94,3 +99,6 @@ the bounded ABI v8 read path.
 - Physical Celestica, Orolia ART, ADVA, and ADVA X1 validation
 - Board-specific R4006, ART, and ADVA peripheral support
 - Signed, notarized release packaging
+
+The current application comparison and next implementation priorities are
+tracked in [WINDOWS-PARITY.md](WINDOWS-PARITY.md).

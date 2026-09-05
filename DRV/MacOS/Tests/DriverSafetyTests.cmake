@@ -247,6 +247,8 @@ if(NOT EXISTS "${control_center_view_source}")
         "Control Center SwiftUI view not found: ${control_center_view_source}")
 endif()
 file(READ "${control_center_view_source}" control_center_view)
+file(READ "${TIMECARD_SOURCE_DIR}/App/ReceiverModels.swift" receiver_models)
+string(APPEND control_center_view "\n${receiver_models}")
 foreach(required_screenshot IN ITEMS
         "docs/screenshots/control-center-overview.png"
         "docs/screenshots/control-center-gnss-uart.png"
@@ -411,7 +413,7 @@ foreach(required_control_center_view IN ITEMS
     string(FIND "${control_center_view}" "${required_control_center_view}" view_offset)
     if(view_offset EQUAL -1)
         message(FATAL_ERROR
-            "Control Center must expose the GNSS summary workspace")
+            "Control Center must expose the GNSS summary workspace: ${required_control_center_view}")
     endif()
 endforeach()
 

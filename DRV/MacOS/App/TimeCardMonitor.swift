@@ -181,6 +181,8 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var recoverySuggestion = ""
     @Published private(set) var lastUpdated: Date?
     @Published private(set) var samplingWindowHistory: [SamplingWindowPoint] = []
+    @Published private(set) var telemetryHistory: [TimeCardTelemetrySample] = []
+    @Published private(set) var telemetryRecording: TimeCardTelemetryRecording?
     @Published private(set) var commandInProgress = false
     @Published private(set) var commandMessage = ""
     @Published private(set) var smaRoutes: [TimeCardSMARoute] = []
@@ -249,6 +251,8 @@ final class TimeCardMonitor: ObservableObject {
         }
         selectedServiceID = serviceID
         selectionGeneration &+= 1
+        stopTelemetryRecording(reason: "Active Time Card changed")
+        telemetryHistory.removeAll(keepingCapacity: true)
         snapshot = nil
         samplingWindowHistory.removeAll(keepingCapacity: true)
         smaRoutes.removeAll(keepingCapacity: true)
@@ -813,6 +817,48 @@ final class TimeCardMonitor: ObservableObject {
             category: "App",
             message: "Session log cleared."
         )
+    }
+
+    func startTelemetryRecording() {
+        guard snapshot != nil, telemetryRecording == nil else { return }
+        telemetryRecording = TimeCardTelemetryRecording(startedAt: Date())
+        appendSessionLog(severity: .info, category: "Telemetry", message: "Session recording started.")
+    }
+
+    func stopTelemetryRecording(reason: String = "Stopped by operator") {
+        guard telemetryRecording?.isRecording == true else { return }
+        telemetryRecording?.stop(reason: reason)
+        appendSessionLog(severity: .info, category: "Telemetry", message: "Recording stopped: \(reason).")
+    }
+
+    func clearTelemetryRecording() {
+        guard telemetryRecording?.isRecording != true else { return }
+        telemetryRecording = nil
+    }
+
+    private func appendTelemetry(_ current: TimeCardDeviceSnapshot, sensors: TimeCardSensorSnapshot?) {
+        var temperatures: [String: Double] = [:]
+        for reading in sensors?.validReadings ?? [] {
+            if let temperature = reading.temperatureCelsius {
+                temperatures[String(format: "%@ 0x%02x", reading.kind.label, reading.address)] = temperature
+            }
+        }
+        let sample = TimeCardTelemetrySample(
+            timestamp: Date(), serviceID: String(current.service.id),
+            samplingWindowNanoseconds: Double(current.sampleWindowNanoseconds),
+            clockInSync: current.clockInSync,
+            seenSatellites: current.satelliteDataValid == true ? current.seenSatellites.map(Int.init) : nil,
+            lockedSatellites: current.satelliteDataValid == true ? current.lockedSatellites.map(Int.init) : nil,
+            temperaturesCelsius: temperatures
+        )
+        telemetryHistory.append(sample)
+        if telemetryHistory.count > 3600 { telemetryHistory.removeFirst(telemetryHistory.count - 3600) }
+        let wasRecording = telemetryRecording?.isRecording == true
+        telemetryRecording?.append(sample)
+        if wasRecording && telemetryRecording?.isRecording == false {
+            appendSessionLog(severity: .info, category: "Telemetry",
+                             message: telemetryRecording?.stopReason ?? "Recording stopped.")
+        }
     }
 
     func refresh() {
@@ -2197,6 +2243,7 @@ final class TimeCardMonitor: ObservableObject {
             recoverySuggestion = ""
             lastUpdated = Date()
             appendSamplingWindow(current.sampleWindowNanoseconds)
+            appendTelemetry(current, sensors: sensors)
             logRefreshStateIfNeeded(current)
             sensorTelemetry = sensors
             if let sensors {
@@ -2321,6 +2368,8 @@ final class TimeCardMonitor: ObservableObject {
     ) {
         let newServiceID = descriptor?.id
         if selectedServiceID != newServiceID {
+            stopTelemetryRecording(reason: "Time Card disconnected or selection changed")
+            telemetryHistory.removeAll(keepingCapacity: true)
             selectedServiceID = newServiceID
             samplingWindowHistory.removeAll(keepingCapacity: true)
             sensorHistory.removeAll(keepingCapacity: true)
