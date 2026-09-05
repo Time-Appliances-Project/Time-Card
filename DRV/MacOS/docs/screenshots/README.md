@@ -1,7 +1,7 @@
 # macOS Control Center screenshots
 
 These are unretouched, full-resolution captures of the installed SwiftUI app,
-not mockups. Build 67 was captured on September 5, 2026, on an Intel Mac Pro
+not mockups. Builds 70 and 67 were captured on September 5, 2026, on an Intel Mac Pro
 with a classic Meta/Facebook Time Card, driver 28 / ABI v12, and CLI 24.
 Each current PNG is 2560 × 1440 pixels. Open an image to inspect the full size.
 
@@ -10,6 +10,24 @@ PPS frequency lock does not establish UTC validity, and an implemented control
 does not prove that every hardware variant or physical setting change has
 been validated. See the [parity matrix](../WINDOWS-PARITY.md) and
 [trusted-time validation record](../TRUSTED-TIME.md).
+
+## Welcome and About
+
+Build 70's startup artwork is also available from About. This is the persistent
+About window, showing the same design with version/build and live connection
+status. The startup splash itself dismisses after about 2.4 seconds. The tiny
+menu-bar logo uses the same transparent artwork without macOS's app-icon square.
+
+![Build 70 welcome design shown in About](control-center-welcome-build70.png)
+
+## Menu-bar status and PPS profiles
+
+Build 70 shows the borderless Time Card mark and its native status menu above
+a seven-setting profile preview. Both PPS cores are included; the preview has
+zero changes. The menu explicitly distinguishes clock-core lock from invalid
+UTC and states that macOS clock discipline is disabled.
+
+![Build 70 menu-bar status and unchanged PPS profile preview](control-center-menu-profiles-build70.png)
 
 ## Time Synchronization
 

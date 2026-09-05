@@ -45,7 +45,7 @@ if(NOT app_marketing_version STREQUAL "0.2.0")
     message(FATAL_ERROR
         "unexpected Control Center version: ${app_marketing_version}")
 endif()
-if(NOT app_build_version STREQUAL "67")
+if(NOT app_build_version STREQUAL "70")
     message(FATAL_ERROR
         "unexpected Control Center build: ${app_build_version}")
 endif()
@@ -55,6 +55,12 @@ if(NOT app_icon_name STREQUAL "AppIcon")
 endif()
 if(NOT EXISTS "${TIMECARD_APP_BUNDLE}/Contents/Resources/Assets.car")
     message(FATAL_ERROR "Control Center asset catalog was not compiled")
+endif()
+execute_process(COMMAND /usr/bin/xcrun assetutil --info
+    "${TIMECARD_APP_BUNDLE}/Contents/Resources/Assets.car"
+    RESULT_VARIABLE branding_status OUTPUT_VARIABLE branding_assets ERROR_VARIABLE branding_error)
+if(NOT branding_status EQUAL 0 OR NOT branding_assets MATCHES "TimeCardArtwork")
+    message(FATAL_ERROR "Transparent menu-bar and splash artwork is missing: ${branding_error}")
 endif()
 
 set(extensions_dir

@@ -15,7 +15,7 @@ struct TimeCardProfileTarget: Codable, Equatable, Sendable {
 }
 
 struct TimeCardProfileSetting: Codable, Equatable, Identifiable, Sendable {
-    enum Kind: String, Codable, CaseIterable, Sendable { case smaRoute, frequency, clockSource }
+    enum Kind: String, Codable, CaseIterable, Sendable { case smaRoute, frequency, pps, clockSource }
     let kind: Kind
     let channel: UInt32
     var values: [UInt32]
@@ -25,6 +25,7 @@ struct TimeCardProfileSetting: Codable, Equatable, Identifiable, Sendable {
         case .clockSource: return "Clock source"
         case .smaRoute: return "SMA \(channel)"
         case .frequency: return "Counter \(channel)"
+        case .pps: return channel == 1 ? "PPS output" : "PPS input"
         }
     }
     var summary: String {
@@ -32,6 +33,13 @@ struct TimeCardProfileSetting: Codable, Equatable, Identifiable, Sendable {
         switch kind {
         case .clockSource: return TimeCardClockControlState.name(values[0])
         case .frequency: return values[0] == 0 ? "Disabled" : "\(values[0]) s integration"
+        case .pps:
+            guard values.count == 6 else { return "Invalid PPS setting" }
+            var parts = [values[2] == 1 ? "Enabled" : "Disabled"]
+            if values[1] & 4 != 0 { parts.append(values[3] == 1 ? "Active high" : "Active low") }
+            if values[1] & 8 != 0 { parts.append("\(values[4]) ms") }
+            if values[1] & 16 != 0 { parts.append("\(Int32(bitPattern: values[5])) ns delay") }
+            return parts.joined(separator: " · ")
         case .smaRoute:
             guard values.count == 2, let direction = TimeCardSMADirection(rawValue: values[0]) else { return "Invalid route" }
             return direction == .disabled ? "Disabled" : direction.label + " / " +
@@ -54,7 +62,43 @@ struct TimeCardProfileSetting: Codable, Equatable, Identifiable, Sendable {
                   values[1] <= 0x7fff, values[0] != 2 || values[1] == 0 else {
                 throw TimeCardProfileError.invalid("Invalid SMA direction, function, or channel.")
             }
+        case .pps:
+            guard let state = ppsState, state.validLayout, state.writableFields != 0,
+                  values[2] <= 1, values[3] <= 1,
+                  state.canWrite(4) || values[3] == 0,
+                  state.canWrite(8) ? (1...999).contains(values[4]) : values[4] == 0,
+                  state.canWrite(16) ? abs(Int64(Int32(bitPattern: values[5]))) <= Int64(state.maximumDelay) : values[5] == 0 else {
+                throw TimeCardProfileError.invalid("Invalid PPS core version, writable fields, polarity, width, or delay.")
+            }
         }
+    }
+
+    // Only stable, writable configuration is persisted. Input pulse width and
+    // alarm/status registers are measurements, not settings or restore targets.
+    // Values: version, writable mask, enable, polarity, width, signed Int32 delay.
+    static func pps(_ state: TimeCardPPSState) throws -> Self {
+        guard state.validLayout, state.writableFields != 0 else {
+            throw TimeCardProfileError.invalid("Unrecognized or read-only PPS core.")
+        }
+        let setting = Self(kind: .pps, channel: state.core, values: [state.version,
+            state.writableFields, state.enabled ? 1 : 0, state.canWrite(4) ? state.polarity & 1 : 0,
+            state.canWrite(8) ? state.pulseWidth & 0x3ff : 0,
+            state.canWrite(16) ? UInt32(bitPattern: Int32(state.delayNanoseconds ?? 0)) : 0])
+        try setting.validate()
+        return setting
+    }
+
+    var ppsState: TimeCardPPSState? {
+        guard kind == .pps, values.count == 6 else { return nil }
+        var fields = values[1]
+        if channel == 2 { fields |= 8 }
+        if values[0] >= (channel == 1 ? 0x01020000 : 0x01030000) { fields |= 2 }
+        let signedDelay = Int64(Int32(bitPattern: values[5]))
+        return .init(core: channel, version: values[0], validFields: fields,
+            control: values[2], polarity: values[3], pulseWidth: values[4],
+            cableDelayRaw: UInt32(abs(signedDelay)) | (signedDelay < 0 ? 0x80000000 : 0),
+            maximumDelay: values[0] >= 0x01060000 ? 0x3fffffff : 0xffff,
+            writableFields: values[1])
     }
 }
 
@@ -68,17 +112,23 @@ struct TimeCardConfigurationProfile: Codable, Equatable, Sendable {
     let target: TimeCardProfileTarget
     var settings: [TimeCardProfileSetting]
 
+    init(name: String, capturedAt: Date, target: TimeCardProfileTarget, settings: [TimeCardProfileSetting]) {
+        self.name = name; self.capturedAt = capturedAt; self.target = target; self.settings = settings
+        schemaVersion = settings.contains(where: { $0.kind == .pps }) ? 2 : 1
+    }
+
     func validate() throws {
-        guard format == Self.formatIdentifier, schemaVersion == 1 else {
-            throw TimeCardProfileError.invalid("Unsupported profile format or schema. Windows XML profiles are not interchangeable with this JSON format.")
+        guard format == Self.formatIdentifier, (1...2).contains(schemaVersion),
+              schemaVersion >= 2 || !settings.contains(where: { $0.kind == .pps }) else {
+            throw TimeCardProfileError.invalid("Unsupported profile format or schema. Use Import Windows XML for Windows profiles.")
         }
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               name.utf8.count <= 160, !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
             throw TimeCardProfileError.invalid("Use a profile name of 1 to 160 UTF-8 bytes, without control characters.")
         }
-        guard !settings.isEmpty, settings.count <= 9,
+        guard !settings.isEmpty, settings.count <= (schemaVersion == 1 ? 9 : 11),
               Set(settings.map(\.id)).count == settings.count else {
-            throw TimeCardProfileError.invalid("Profiles require 1 to 9 unique settings; duplicate channels are rejected.")
+            throw TimeCardProfileError.invalid("Profiles require unique settings, up to 9 in schema 1 or 11 in schema 2; duplicate channels are rejected.")
         }
         guard (1...5).contains(target.boardProfile), (1...3).contains(target.layout),
               target.clockVersion != 0, target.clockVersion != UInt32.max else {
@@ -136,6 +186,9 @@ struct TimeCardProfileState: Equatable, Sendable {
         guard let existing = values[desired.id] else { return "Not available on this image." }
         if desired == existing { return nil }
         if immutableSettings.contains(desired.id) { return "Fixed or read-only route on this image." }
+        if desired.kind == .pps && Array(desired.values.prefix(2)) != Array(existing.values.prefix(2)) {
+            return "PPS core version or writable fields do not match this image."
+        }
         if desired.kind == .clockSource && !supportedClockSources.contains(desired.values[0]) {
             return "Source is not supported by the active clock core."
         }
@@ -177,7 +230,7 @@ struct TimeCardProfilePlan: Sendable {
         try profile.validate()
         var blockers = profile.target == state.target ? [] : ["PCI identity, revision, register layout, or clock version does not match this card."]
         let differences = profile.settings.sorted { a, b in
-            let order: [TimeCardProfileSetting.Kind: Int] = [.smaRoute: 0, .frequency: 1, .clockSource: 2]
+            let order: [TimeCardProfileSetting.Kind: Int] = [.smaRoute: 0, .frequency: 1, .pps: 2, .clockSource: 3]
             return order[a.kind]! == order[b.kind]! ? a.channel < b.channel : order[a.kind]! < order[b.kind]!
         }.map { setting in
             TimeCardProfileDiff(requested: setting, previous: state.values[setting.id], blocker: state.restriction(for: setting))
@@ -207,7 +260,7 @@ struct TimeCardProfileApplyReport: Codable, Sendable {
 
 enum TimeCardProfileEngine {
     // The sequence is recoverable, not hardware-atomic. Close other writers.
-    // Clock/frequency setters have driver CAS guards; SMA has app prechecks only.
+    // Clock/frequency/PPS setters have driver CAS guards; SMA has app prechecks only.
     static func apply(_ plan: TimeCardProfilePlan, backend: any TimeCardProfileBackend,
                       now: Date = Date()) -> TimeCardProfileApplyReport {
         var events: [String] = []

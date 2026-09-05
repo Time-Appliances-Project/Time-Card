@@ -69,7 +69,7 @@ private final class MockProfiles: TimeCardProfileBackend {
         root["flashWrite"] = true
         rejected { _ = try TimeCardConfigurationProfile.decode(JSONSerialization.data(withJSONObject: root)) }
         var invalid = profile
-        invalid.schemaVersion = 2
+        invalid.schemaVersion = 3
         rejected { try invalid.validate() }
         invalid = profile; invalid.name = ""
         rejected { try invalid.validate() }
@@ -176,6 +176,58 @@ private final class MockProfiles: TimeCardProfileBackend {
         let incompatible = TimeCardProfileState(serviceID: 123, target: wrongTarget, settings: original.settings,
             supportedClockSources: original.supportedClockSources, fixedDirections: [:], immutableSettings: [], notes: [])
         precondition(!(try! TimeCardProfilePlan.create(profile: desired, state: incompatible, now: date)).canApply)
-        print("Profile tests passed: strict import, bounds, hardware gates, ordering, no-op, stale/expired preview, rollback, and recovery conflicts.")
+        var output = TimeCardPPSState(core: 1, version: 0x01060000, validFields: 31, control: 1,
+            polarity: 1, pulseWidth: 100, cableDelayRaw: 0x80000019, maximumDelay: 0x3fffffff, writableFields: 29)
+        let outputSetting = try TimeCardProfileSetting.pps(output)
+        precondition(outputSetting.values == [0x01060000, 29, 1, 1, 100, UInt32(bitPattern: -25)])
+        precondition(outputSetting.ppsState?.delayNanoseconds == -25)
+        var input = TimeCardPPSState(core: 2, version: 0x01020000, validFields: 29, control: 1,
+            polarity: 1, pulseWidth: 80, maximumDelay: 65535, writableFields: 21)
+        let inputSetting = try TimeCardProfileSetting.pps(input)
+        input.pulseWidth = 999; input.status = UInt32.max
+        precondition(try! TimeCardProfileSetting.pps(input) == inputSetting, "Measurements must not make profiles stale")
+        output.status = 1
+        precondition(try! TimeCardProfileSetting.pps(output) == outputSetting, "Alarm state must never be serialized")
+        let ppsOriginal = TimeCardProfileState(serviceID: 123, target: target,
+            settings: original.settings + [outputSetting, inputSetting], supportedClockSources: original.supportedClockSources,
+            fixedDirections: [:], immutableSettings: [], notes: [])
+        let ppsProfile = ppsOriginal.profile(name: "PPS capture", date: date)
+        precondition(ppsProfile.schemaVersion == 2)
+        precondition(try! TimeCardConfigurationProfile.decode(ppsProfile.encoded()) == ppsProfile)
+        invalid = ppsProfile; invalid.schemaVersion = 1
+        rejected { try invalid.validate() }
+        for (index, bad) in [(0, UInt32(0x01070000)), (1, 31), (2, 2), (3, 2), (4, 0), (4, 1000), (5, UInt32(bitPattern: Int32.min))] {
+            var badSetting = outputSetting; badSetting.values[index] = bad
+            rejected { try badSetting.validate() }
+        }
+        var badInput = inputSetting; badInput.values[4] = 80
+        rejected { try badInput.validate() }
+        badInput = inputSetting; badInput.values[5] = 65536
+        rejected { try badInput.validate() }
+        var changedOutput = outputSetting; changedOutput.values[4] = 250
+        var changedInput = inputSetting; changedInput.values[5] = UInt32(bitPattern: -40)
+        let ppsDesired = TimeCardConfigurationProfile(name: "PPS changes", capturedAt: date, target: target,
+            settings: [changedInput, changedOutput, .init(kind: .clockSource, channel: 0, values: [1])])
+        let ppsPlan = try TimeCardProfilePlan.create(profile: ppsDesired, state: ppsOriginal, now: date)
+        precondition(ppsPlan.canApply && ppsPlan.changes.map(\.requested.kind) == [.pps, .pps, .clockSource])
+        let ppsSuccess = MockProfiles(ppsOriginal)
+        let ppsReport = TimeCardProfileEngine.apply(ppsPlan, backend: ppsSuccess, now: date)
+        precondition(ppsReport.successful && ppsReport.recoveryProfile?.schemaVersion == 2)
+        let restorePPS = try TimeCardProfilePlan.create(profile: ppsReport.recoveryProfile!, state: ppsSuccess.state, now: date)
+        precondition(TimeCardProfileEngine.apply(restorePPS, backend: ppsSuccess, now: date).successful && ppsSuccess.state == ppsOriginal)
+        for after in [true, false] {
+            let failure = MockProfiles(ppsOriginal); failure.failAtWrite = 2; failure.failAfterWrite = after
+            precondition(TimeCardProfileEngine.apply(ppsPlan, backend: failure, now: date).outcome == .rolledBack)
+            precondition(failure.state == ppsOriginal)
+        }
+        let ppsStale = MockProfiles(ppsOriginal); ppsStale.replacing(changedInput)
+        precondition(TimeCardProfileEngine.apply(ppsPlan, backend: ppsStale, now: date).outcome == .rejected && ppsStale.writes.isEmpty)
+        var wrongCore = ppsDesired; wrongCore.settings = [outputSetting]
+        wrongCore.settings[0].values[0] = 0x01050000
+        precondition(!(try! TimeCardProfilePlan.create(profile: wrongCore, state: ppsOriginal, now: date)).canApply)
+        let noopPPS = MockProfiles(ppsOriginal)
+        let noopPPSPlan = try TimeCardProfilePlan.create(profile: ppsProfile, state: ppsOriginal, now: date)
+        precondition(TimeCardProfileEngine.apply(noopPPSPlan, backend: noopPPS, now: date).outcome == .unchanged && noopPPS.writes.isEmpty)
+        print("Profile tests passed: schema 1/2, PPS writable-only capture, core gates, ordering, no-op, stale/expired preview, rollback, and recovery conflicts.")
     }
 }

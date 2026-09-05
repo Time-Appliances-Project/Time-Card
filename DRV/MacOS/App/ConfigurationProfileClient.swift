@@ -42,7 +42,14 @@ struct TimeCardLiveProfileBackend: TimeCardProfileBackend, Sendable {
                 settings.append(.init(kind: .frequency, channel: counter.counter, values: [counter.integrationSeconds]))
             }
         } else { notes.append("Frequency-counter presence is not verified; optional addresses are not probed.") }
-        notes.append("Profiles cover volatile clock source, SMA routes, and supported counters only. No PHC epoch, macOS clock, GNSS, flash, oscillator, or LED settings are changed.")
+        if snapshot.supportsPPS {
+            for core: UInt32 in 1...2 {
+                let pps = try TimeCardClient.queryPPS(for: descriptor, core: core)
+                if pps.writableFields != 0 { settings.append(try .pps(pps)) }
+                else { notes.append("PPS core \(core) is read-only or unrecognized; omitted from capture.") }
+            }
+        } else { notes.append("PPS configuration is not advertised by this driver; omitted from capture.") }
+        notes.append("Profiles cover volatile clock source, SMA routes, supported counters, and PPS configuration. No PHC epoch, macOS clock, GNSS, flash, oscillator, LED, or alarm-clear settings are changed.")
         return .init(serviceID: descriptor.id, target: target, settings: settings,
                      supportedClockSources: sources, fixedDirections: fixedDirections,
                      immutableSettings: immutable, notes: notes)
@@ -50,6 +57,7 @@ struct TimeCardLiveProfileBackend: TimeCardProfileBackend, Sendable {
 
     func write(_ setting: TimeCardProfileSetting, expected: TimeCardProfileSetting) throws {
         try setting.validate()
+        try expected.validate()
         guard setting.id == expected.id else { throw TimeCardProfileError.invalid("Mismatched expected setting.") }
         switch setting.kind {
         case .clockSource:
@@ -61,6 +69,17 @@ struct TimeCardLiveProfileBackend: TimeCardProfileBackend, Sendable {
             }
             _ = try TimeCardClient.setFrequency(for: descriptor, counter: setting.channel, seconds: setting.values[0],
                                                 expectedControl: current.control)
+        case .pps:
+            let current = try TimeCardClient.queryPPS(for: descriptor, core: setting.channel)
+            guard try TimeCardProfileSetting.pps(current) == expected,
+                  Array(setting.values.prefix(2)) == Array(expected.values.prefix(2)),
+                  let requested = setting.ppsState else {
+                throw TimeCardProfileError.invalid("PPS state, version, or writable fields changed before apply.")
+            }
+            let result = try TimeCardClient.setPPS(for: descriptor, baseline: current, settings: TimeCardPPSSettings(requested))
+            guard try TimeCardProfileSetting.pps(result) == setting else {
+                throw TimeCardProfileError.invalid("PPS readback did not match the requested settings.")
+            }
         case .smaRoute:
             // Existing SMA ABI has no compare-and-set selector. Recheck immediately
             // before writing, then let the engine verify the complete configuration.

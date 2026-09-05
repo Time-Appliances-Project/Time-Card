@@ -17,6 +17,8 @@ struct ConfigurationProfilesView: View {
                 Button("Capture Current", systemImage: "camera") { monitor.captureProfile() }
                     .disabled(monitor.state != .connected)
                 Button("Import JSON…", systemImage: "square.and.arrow.down") { importProfile() }
+                Button("Import Windows XML…") { importWindowsProfiles() }
+                    .disabled(monitor.state != .connected || monitor.profileOperationInProgress)
                 Button("Save JSON…", systemImage: "square.and.arrow.up") {
                     if let profile = monitor.configurationProfile { saveProfile(profile) }
                 }.disabled(monitor.configurationProfile == nil)
@@ -26,6 +28,7 @@ struct ConfigurationProfilesView: View {
             Text("Importing and editing never write to the card. Profiles match PCI identity, revision, layout, and clock version, not a unique board serial number. Review the selected card before applying.")
                 .font(.caption).foregroundStyle(.secondary)
             libraryPanel
+            windowsImportPanel
 
             if let profile = monitor.configurationProfile {
                 TextField("Profile name", text: Binding(get: { profile.name }, set: { name in
@@ -105,7 +108,7 @@ struct ConfigurationProfilesView: View {
             Button("Apply and Verify") { monitor.applyProfile() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("\(monitor.profilePlan?.changes.count ?? 0) setting(s) will change. Source and SMA changes can interrupt synchronization or drive connected equipment. The preview must still match the card and be less than two minutes old. PHC epoch and macOS time are not changed.")
+            Text("\(monitor.profilePlan?.changes.count ?? 0) setting(s) will change. Clock-source, SMA, and PPS changes can interrupt synchronization or drive connected equipment. The preview must still match the card and be less than two minutes old. PHC epoch and macOS time are not changed.")
         }
         .onChange(of: monitor.selectedServiceID) { _, _ in confirmApply = false }
         .onChange(of: monitor.configurationProfile) { _, _ in confirmApply = false }
@@ -170,6 +173,51 @@ struct ConfigurationProfilesView: View {
             fileMessage = "Imported " + url.lastPathComponent + ". No hardware writes were made."
         } catch { fileMessage = "Import failed: " + error.localizedDescription }
     }
+    @ViewBuilder private var windowsImportPanel: some View {
+        if !monitor.windowsProfileReviews.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Windows XML import review", systemImage: "doc.text.magnifyingglass").font(.headline)
+                Text("Each entry is imported in full or blocked. Unsupported settings and FPGA image constraints are never silently discarded.")
+                    .font(.caption).foregroundStyle(.secondary)
+                ForEach(monitor.windowsProfileReviews) { review in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Label(review.name, systemImage: review.profile == nil ? "exclamationmark.shield" : "checkmark.shield")
+                                .font(.headline)
+                            Spacer()
+                            Button("Stage Native Copy") { monitor.stageWindowsProfile(review) }
+                                .disabled(review.profile == nil || review.serviceID != monitor.selectedServiceID || monitor.profileOperationInProgress)
+                        }
+                        ForEach(Array(review.notes.enumerated()), id: \.offset) { _, note in
+                            Text(note).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let profile = review.profile {
+                            ForEach(profile.settings) { setting in
+                                Text(setting.title + ": " + setting.summary).font(.caption.monospaced())
+                            }
+                        }
+                        ForEach(Array(review.blockers.enumerated()), id: \.offset) { _, blocker in
+                            Text(blocker).font(.caption).foregroundStyle(.orange)
+                        }
+                    }.padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }.padding(.vertical, 8)
+        }
+    }
+
+    private func importWindowsProfiles() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.xml]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: TimeCardConfigurationProfile.maximumFileBytes + 1) ?? Data()
+            monitor.inspectWindowsProfiles(data)
+            fileMessage = "Inspecting " + url.lastPathComponent + ". Import never writes to hardware."
+        } catch { fileMessage = "Windows import failed: " + error.localizedDescription }
+    }
     private func saveProfile(_ profile: TimeCardConfigurationProfile) {
         do { try save(data: profile.encoded(), name: "timecard-profile.json") }
         catch { fileMessage = "Save failed: " + error.localizedDescription }
@@ -216,6 +264,27 @@ private struct ProfileSettingEditor: View {
                 Stepper(value: Binding(get: { Int(setting.values[0]) }, set: { value(0).wrappedValue = UInt32($0) }), in: 0...255) {
                     Text(setting.summary)
                 }.help("0 disables this counter; 1...255 sets integration seconds.")
+            case .pps:
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(setting.summary)
+                    HStack {
+                        Toggle("Enabled", isOn: Binding(get: { setting.values[2] == 1 }, set: { value(2).wrappedValue = $0 ? 1 : 0 }))
+                        if setting.values[1] & 4 != 0 {
+                            Toggle("Active high", isOn: Binding(get: { setting.values[3] == 1 }, set: { value(3).wrappedValue = $0 ? 1 : 0 }))
+                        }
+                        if setting.values[1] & 8 != 0 {
+                            TextField("Width (ms)", value: value(4), format: .number.grouping(.never)).frame(width: 90)
+                                .help("Output pulse width: 1...999 ms")
+                        }
+                        if setting.values[1] & 16 != 0 {
+                            TextField("Delay (ns)", value: Binding(get: { Int32(bitPattern: setting.values[5]) },
+                                set: { value(5).wrappedValue = UInt32(bitPattern: $0) }), format: .number.grouping(.never))
+                                .frame(width: 110).help("Signed cable delay in nanoseconds, limited by the PPS core version")
+                        }
+                    }.textFieldStyle(.roundedBorder)
+                    Text(String(format: "Core 0x%08x · writable mask 0x%02x", setting.values[0], setting.values[1]))
+                        .font(.caption.monospaced()).foregroundStyle(.secondary)
+                }
             case .smaRoute:
                 Picker("Direction", selection: value(0)) {
                     ForEach(TimeCardSMADirection.allCases) { Text($0.label).tag($0.rawValue) }

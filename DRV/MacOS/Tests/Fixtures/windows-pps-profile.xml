@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Representative Windows schema 2 fixture. Inspect and preview only. -->
+<ConfigurationProfile xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <SchemaVersion>2</SchemaVersion>
+  <CapturedAbiVersion>15</CapturedAbiVersion>
+  <RequiredAbiVersion>12</RequiredAbiVersion>
+  <RequiredFpgaCoreMask>3</RequiredFpgaCoreMask>
+  <Name>Windows PPS import example</Name>
+  <Description>Representative PPS 1.2 settings, not a user backup. Review against the destination before use.</Description>
+  <HasClockSource>true</HasClockSource>
+  <ClockSource>3</ClockSource>
+  <HasNmea>false</HasNmea>
+  <HasNmeaAdvanced>false</HasNmeaAdvanced>
+  <HasFpgaImageIdentity>false</HasFpgaImageIdentity>
+  <Sma />
+  <PpsEngines>
+    <PpsProfileSetting>
+      <Core>1</Core>
+      <CoreVersion>16908288</CoreVersion>
+      <Enabled>true</Enabled>
+      <ActiveHigh>true</ActiveHigh>
+      <HasPulseWidth>true</HasPulseWidth>
+      <PulseWidthMilliseconds>100</PulseWidthMilliseconds>
+      <CableDelayNanoseconds>0</CableDelayNanoseconds>
+    </PpsProfileSetting>
+    <PpsProfileSetting>
+      <Core>2</Core>
+      <CoreVersion>16908288</CoreVersion>
+      <Enabled>true</Enabled>
+      <ActiveHigh>true</ActiveHigh>
+      <HasPulseWidth>false</HasPulseWidth>
+      <PulseWidthMilliseconds>80</PulseWidthMilliseconds>
+      <CableDelayNanoseconds>0</CableDelayNanoseconds>
+    </PpsProfileSetting>
+  </PpsEngines>
+  <TimecodeEngines />
+  <SignalGenerators />
+  <IsBuiltIn>false</IsBuiltIn>
+</ConfigurationProfile>

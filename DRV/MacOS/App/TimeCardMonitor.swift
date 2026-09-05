@@ -192,6 +192,7 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var profileOperationInProgress = false
     @Published private(set) var peripheralOperationInProgress = false
     @Published private(set) var profileMessage = ""
+    @Published private(set) var windowsProfileReviews: [WindowsProfileReview] = []
     @Published private(set) var clockControl: TimeCardClockControlState?
     @Published private(set) var frequencyStates: [TimeCardFrequencyState] = []
     @Published private(set) var ppsStates: [TimeCardPPSState] = []
@@ -935,6 +936,7 @@ final class TimeCardMonitor: ObservableObject {
     }
 
     private func clearTimingState() {
+        windowsProfileReviews = []
         profilePlan = nil
         profileState = nil
         clockControl = nil
@@ -1096,6 +1098,24 @@ final class TimeCardMonitor: ObservableObject {
         }
     }
 
+    func inspectWindowsProfiles(_ data: Data) {
+        windowsProfileReviews = []
+        runProfileOperation("Inspect Windows profiles (read-only)") { backend in
+            let sources = try WindowsConfigurationProfile.decode(data)
+            let (_, state) = try backend.capture(name: "Windows import destination")
+            return .windowsImport(sources.map { $0.review(for: state) }, state)
+        }
+    }
+
+    func stageWindowsProfile(_ review: WindowsProfileReview) {
+        guard review.blockers.isEmpty, review.serviceID == selectedServiceID,
+              let profile = review.profile else {
+            profileMessage = "Import is blocked or the destination card changed. Inspect the XML again."
+            return
+        }
+        stageProfile(profile)
+    }
+
     func previewProfile() {
         guard let profile = configurationProfile else { return }
         profilePlan = nil
@@ -1115,6 +1135,7 @@ final class TimeCardMonitor: ObservableObject {
         case capture(TimeCardConfigurationProfile, TimeCardProfileState)
         case preview(TimeCardProfilePlan)
         case applied(TimeCardProfileApplyReport)
+        case windowsImport([WindowsProfileReview], TimeCardProfileState)
     }
 
     private func runProfileOperation(_ description: String,
@@ -1155,6 +1176,11 @@ final class TimeCardMonitor: ObservableObject {
                 return
             }
             switch result {
+            case .success(.windowsImport(let reviews, let state)):
+                self.windowsProfileReviews = reviews
+                self.profileState = state
+                self.profilePlan = nil
+                self.profileMessage = "Inspected \(reviews.count) Windows profile(s). No settings were staged or applied. Select a compatible entry below."
             case .success(.capture(let profile, let state)):
                 self.configurationProfile = profile
                 self.profileState = state

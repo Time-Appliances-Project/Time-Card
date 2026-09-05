@@ -1,11 +1,11 @@
 # macOS and Windows Control Center parity
 
-This comparison covers macOS app build 67, bundled driver 28 / DriverKit ABI v12, against the
+This comparison covers macOS app build 70, bundled driver 28 / DriverKit ABI v12, against the
 Windows Control Center in the same repository (Windows driver ABI 15).
 An implemented screen does not imply that every supported board has been
 physically validated.
 
-The [build 67 screenshot gallery](screenshots/README.md) shows the installed
+The [build 70 and build 67 screenshot gallery](screenshots/README.md) shows the installed
 app's actual hardware state and remaining safety gates.
 
 | Workspace | macOS implementation | Remaining Windows capabilities |
@@ -19,12 +19,18 @@ app's actual hardware state and remaining safety gates.
 | Telemetry Studio | Sampling histogram, median/p95/p99, one-hour history, GNSS/temperature plots, low-rate vibration trend, point inspection, pause, six-hour bounded recording, CSV/JSON | Trusted PHC offset series, high-rate vibration measurement and spectral analysis |
 | Timing and FPGA engines | Version-gated PPS input/output state and confirmed enable/width/polarity/delay controls with stale-state checks and verified recovery; live PPS 1.2 readouts on `.141`; four frequency counters on revision-02 LitePCIe; timing export and readiness catalog | Physical PPS setting-change and recovery validation, PPS error acknowledgement, classic/ART/ADVA counter contracts, signal-generator/timestamp-channel ABI and controls, IRIG/DCF/ToD settings |
 | Atomic clock | Dedicated SA53 identity/telemetry/alarms, checksummed C3 transport, 15 bounded setters, mode checks, confirmed JamSync/load/store/acknowledge, readback and JSON export | Physical validation of clock-changing operations; ART mRO-50; persistent sessions |
-| Profiles | Native versioned JSON capture/import/edit/export, persistent immutable profile library, live preview, confirmed apply, per-setting verification, guarded rollback and recovery reports; built-in readiness planner | Windows XML migration, GNSS/oscillator/generator/ToD settings as typed APIs become available |
+| Profiles | Native versioned JSON including PPS configuration, immutable profile library, guarded Windows XML single/library migration for clock/SMA/PPS, live preview, confirmed apply, verification, rollback and recovery reports; built-in readiness planner | Migration of image-bound profiles, GNSS/oscillator/generator/ToD settings as typed APIs become available |
+| macOS shell | Transparent menu-bar logo and status menu, reopen after window close, adaptive startup splash and About view | Additional preferences and release polish |
 | Diagnostics | Read-only self-test including clock-source and gated frequency APIs, session log, structured exports, support ZIP with profile evidence | Extended tests for future FPGA/peripheral APIs |
 | Maintenance | Driver lifecycle, exact PCI matching, multi-card app selection | Protected SPI flash update, EEPROM identity, notarized release packaging |
 
 ## Validation scope
 
+- Build 70 adds PPS profile and Windows XML coverage, with eight Swift suites
+  alongside seven CTest suites. The write-prohibiting hardware profile test
+  captured seven settings and passed JSON round-trip, preview and unchanged
+  apply with zero write attempts. Windows XML UI import staged and previewed
+  three unchanged settings. See [PROFILES-AND-BRANDING.md](PROFILES-AND-BRANDING.md).
 - Build 67 adds seven Swift-suite coverage alongside seven CTest suites and
   a universal signed app build. App 67 and CLI 24 are installed and verified
   on `.141`, with driver 28 unchanged. Live session start, evidence export,
@@ -152,9 +158,9 @@ profile validation run.
 3. Extend the validated BNO08x path to physical BNO055 validation and
    board-specific sensors; physically validate Celestica,
    ART, ADVA, and ADVA X1 cards.
-4. Extend the implemented profile capture/apply/rollback workflow to new typed
-   APIs and migrate Windows XML settings
-   only where an equivalent hardware contract is available.
+4. Extend the implemented profile capture/apply/rollback and Windows XML
+   migration workflow beyond clock/SMA/PPS when equivalent typed APIs and
+   exact FPGA image identity are available.
 5. Validate sleep/wake, disconnect/reconnect, multi-card operation, long
    recordings, clock recovery, and signed/notarized release installation.
 

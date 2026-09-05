@@ -6,12 +6,18 @@ app, and provides a small command-line diagnostic client.
 
 ## Latest validated deployment
 
-**App 67 · Driver 28 / ABI v12 · CLI 24**, validated September 5, 2026.
+**App 70 · Driver 28 / ABI v12 · CLI 24**, validated September 5, 2026.
 The signed universal app and CLI are installed on the Intel Mac Pro test system.
-Seven CTest and seven Swift suites pass. This update preserves the existing
+Seven CTest and eight Swift suites pass. This update preserves the existing
 driver and does not require a reboot.
 
-The latest addition is the Time Synchronization workspace: continuous bounded
+The latest additions are a transparent Time Card menu-bar logo and status menu,
+a native startup splash and About view, PPS configuration profiles, and guarded
+Windows XML migration for clock-source, SMA and PPS settings. Unsupported
+controls and unverified FPGA image constraints block an import rather than
+being silently discarded. See [details and validation](docs/PROFILES-AND-BRANDING.md).
+
+The Time Synchronization workspace provides continuous bounded
 GNSS observation, corrected leap-second decoding, exact receiver UTC/TAI epochs,
 UTC/GPS consistency and freshness checks, evidence export, and macOS time-service
 diagnostics. A tested slew controller is not yet connected to a clock writer.
@@ -23,8 +29,12 @@ and the [Windows parity matrix](docs/WINDOWS-PARITY.md).
 
 ## Screenshots
 
-Actual build 67 captures from the Intel Mac Pro, at 2560 × 1440. These show
+Actual build 70 and build 67 captures from the Intel Mac Pro, at 2560 × 1440. These show
 real hardware states, including unavailable data and safety gates.
+
+![Build 70 welcome artwork, shown in the About window](docs/screenshots/control-center-welcome-build70.png)
+
+![Build 70 borderless menu-bar logo and PPS profile preview](docs/screenshots/control-center-menu-profiles-build70.png)
 
 ![Time Synchronization with unqualified UTC and system-clock steering disabled](docs/screenshots/control-center-time-sync-build67.png)
 
@@ -205,7 +215,24 @@ App build 63 adds **Configuration profiles** in **Profiles and Self-Test**.
 Capture Current reads the selected card twice, then stages supported clock-source,
 SMA-route, and frequency-integration settings. Import JSON and editing only alter
 the draft. Save JSON keeps it across app restarts; unsaved drafts and reports
-otherwise remain in memory. The version-1 macOS JSON format is not Windows XML compatible.
+otherwise remain in memory. Native JSON and Windows XML have different formats;
+use the dedicated Windows importer described below.
+
+Build 70 extends native profiles with PPS input/output configuration. Schema 2
+stores the PPS core version, writable-field mask, enable, supported polarity,
+output width, and signed cable delay. Schema 1 files remain supported. Measured
+input pulse width and alarm/status registers are never saved as settings.
+
+**Import Windows XML** reads a Windows `ConfigurationProfile` or a
+`ConfigurationProfileList`, then compares each entry with a fresh, double-read
+capture of the selected card. Compatible clock-source, SMA and PPS settings can
+be staged as a native copy. Preview and confirmed Apply are still separate steps.
+Import does not write to hardware. Each entry is imported in full or blocked:
+unsupported NMEA/ToD, IRIG/DCF and generator settings, unverified FPGA image
+identity requirements, unknown fields and incompatible core versions are never
+silently dropped. The importer accepts UTF-8 schema 0...2 XML, up to 64 KiB and
+32 library entries, and rejects DTD/entity declarations. See
+[profile migration and validation](docs/PROFILES-AND-BRANDING.md).
 
 Build 65 adds a persistent **Saved profile library**. Save New Snapshot stores
 an immutable copy in `~/Library/Application Support/org.opentimeserver.timecard.macos/Profiles`.
@@ -223,14 +250,14 @@ to 64 KiB and reject unknown fields, duplicate settings, and out-of-range values
 
 Apply Reviewed Profile requires confirmation and a matching preview less than
 two minutes old. It rechecks live state before and after each change, applies SMA
-and frequency settings before the clock source, and records attempted and verified
+and frequency settings, then PPS, before the clock source, and records attempted and verified
 settings separately. On failure, it restores only identifiable changes in reverse
 order. Unknown or externally changed state is preserved and reported as requiring
 manual recovery. Save Report and Save Recovery Profile retain recovery evidence;
 Review Recovery stages the saved baseline for a new preview, never an automatic write.
 
 Close other card-control applications before applying. This is a recoverable
-sequence, not a hardware-atomic transaction. Clock and frequency setters use
+sequence, not a hardware-atomic transaction. Clock, frequency and PPS setters use
 driver-level expected-state checks; SMA has app-side checks and readback only.
 ART routes remain capture-only until its route capability mask is exposed by
 the ABI. Profiles do not set PHC epoch, macOS time, GNSS configuration, LEDs,

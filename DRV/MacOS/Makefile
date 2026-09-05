@@ -27,6 +27,12 @@ check:
 	.build/cmake/timecard-profile-tests
 	xcrun swiftc -parse-as-library -swift-version 5 \
 		-module-cache-path .build/cmake/swift-module-cache \
+		App/TimeCardClient.swift App/MotionModels.swift App/ConfigurationProfiles.swift App/WindowsProfileMigration.swift \
+		Tests/WindowsProfileMigrationTests.swift -framework IOKit -framework CoreFoundation \
+		-o .build/cmake/timecard-windows-profile-tests
+	.build/cmake/timecard-windows-profile-tests
+	xcrun swiftc -parse-as-library -swift-version 5 \
+		-module-cache-path .build/cmake/swift-module-cache \
 		App/TimeCardClient.swift App/MotionModels.swift App/ConfigurationProfiles.swift App/ProfileLibrary.swift \
 		Tests/ProfileLibraryTests.swift -framework IOKit -framework CoreFoundation \
 		-o .build/cmake/timecard-profile-library-tests

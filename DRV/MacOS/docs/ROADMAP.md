@@ -93,7 +93,10 @@ images remain gated until exact-image presence is established.
   readback, conservative rollback, recovery profiles, and exported reports.
   Build 65 adds a persistent, bounded profile library with immutable snapshots,
   review-only loading, corruption isolation, and confirmed removal to Trash.
-  Windows XML migration and settings for future typed APIs remain pending.
+  Build 70 adds PPS schema 2 capture/restore and all-or-blocked Windows XML
+  migration for clock source, SMA and PPS controls. Unsupported engine settings
+  and unverified exact-image requirements still block imports. See
+  [PROFILES-AND-BRANDING.md](PROFILES-AND-BRANDING.md).
 - IRIG-B and DCF configuration
 - Periodic outputs and signal generators
 - Frequency counters, implemented for the validated LitePCIe contract

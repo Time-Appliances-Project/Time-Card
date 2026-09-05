@@ -79,6 +79,8 @@ struct TimeCardMacOSApp: App {
     @StateObject private var driverManager = DriverManager()
     @StateObject private var monitor = TimeCardMonitor()
     @State private var handledLaunchArguments = false
+    @State private var showingSplash = !ProcessInfo.processInfo.arguments.contains("--activate-driver")
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init() {
         if ProcessInfo.processInfo.arguments.contains("--activate-driver") &&
@@ -91,8 +93,15 @@ struct TimeCardMacOSApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        Window("Time Card Control Center", id: "control-center") {
+            ZStack {
+                if showingSplash {
+                    TimeCardLaunchSplash(monitor: monitor, onContinue: dismissSplash)
+                        .transition(.opacity)
+                } else {
+                    ContentView()
+                }
+            }
                 .environmentObject(driverManager)
                 .environmentObject(monitor)
                 .frame(minWidth: 920, minHeight: 640)
@@ -103,11 +112,48 @@ struct TimeCardMacOSApp: App {
                         .contains("--activate-driver") {
                         driverManager.activate()
                         await reportActivationProgress()
+                    } else {
+                        // Discovery runs independently. Never wait for hardware
+                        // or imply a successful timing lock just to dismiss this.
+                        try? await Task.sleep(for: .milliseconds(2400))
+                        dismissSplash()
                     }
                 }
         }
         .defaultSize(width: 1120, height: 760)
+        .commands {
+            CommandGroup(replacing: .appInfo) { TimeCardAboutButton() }
+        }
+
+        Window("About Time Card Control Center", id: "welcome") {
+            TimeCardWelcomeWindow().environmentObject(monitor)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
+        MenuBarExtra {
+            TimeCardStatusMenu().environmentObject(monitor)
+        } label: {
+            Image(nsImage: Self.menuBarIcon)
+                .accessibilityLabel("Time Card")
+                .help("Time Card Control Center")
+        }
+        .menuBarExtraStyle(.menu)
     }
+
+    private func dismissSplash() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { showingSplash = false }
+    }
+
+    // Use a regular transparent image asset, not NSApplicationIcon. macOS may
+    // add its own rounded backing to an application icon (including in menus).
+    private static let menuBarIcon: NSImage = {
+        let icon = (NSImage(named: "TimeCardArtwork")?.copy() as? NSImage)
+            ?? NSImage(systemSymbolName: "pcicard", accessibilityDescription: "Time Card")!
+        icon.size = NSSize(width: 22, height: 22)
+        icon.isTemplate = false
+        return icon
+    }()
 
     @MainActor
     private func reportActivationProgress() async {
@@ -130,5 +176,132 @@ struct TimeCardMacOSApp: App {
             Data("TimeCardMacOS: activation request timed out\n".utf8)
         )
         NSApplication.shared.terminate(nil)
+    }
+}
+
+private struct TimeCardLaunchSplash: View {
+    @ObservedObject var monitor: TimeCardMonitor
+    let onContinue: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+            RadialGradient(colors: [.blue.opacity(colorScheme == .dark ? 0.2 : 0.09), .clear],
+                center: .center, startRadius: 20, endRadius: 380)
+            VStack(spacing: 0) {
+                Spacer()
+                Image("TimeCardArtwork")
+                    .resizable().interpolation(.high).scaledToFit()
+                    .frame(width: 240, height: 210)
+                    .shadow(color: .blue.opacity(0.12), radius: 24, y: 8)
+                    .accessibilityHidden(true)
+                Text("OCP TIME CARD")
+                    .font(.system(size: 11, weight: .semibold)).tracking(4)
+                    .foregroundStyle(.secondary).padding(.top, 4)
+                Text("Control Center")
+                    .font(.system(size: 36, weight: .semibold, design: .rounded))
+                    .padding(.top, 10)
+                Text("Precision timing. Native to your Mac.")
+                    .font(.system(size: 14)).foregroundStyle(.secondary).padding(.top, 12)
+                Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "") · Build \(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "")")
+                    .font(.caption.monospaced()).foregroundStyle(.tertiary).padding(.top, 8)
+                HStack(spacing: 8) {
+                    Circle().fill(monitor.state == .connected ? Color.green : .secondary)
+                        .frame(width: 6, height: 6)
+                    Text(connectionText).font(.system(size: 12))
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(.quaternary.opacity(0.5), in: Capsule())
+                .padding(.top, 28)
+                Spacer()
+                HStack {
+                    Text("Open Compute Project · Time Appliances")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Continue", action: onContinue).buttonStyle(.plain)
+                        .font(.caption).foregroundStyle(.secondary)
+                        .keyboardShortcut(.escape, modifiers: [])
+                }.padding(24)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Time Card Control Center startup")
+    }
+
+    private var connectionText: String {
+        switch monitor.state {
+        case .connected: "Connected to " + (monitor.snapshot?.boardName ?? "Time Card")
+        case .discovering: "Looking for your Time Card…"
+        case .noService: "Ready. Connect a Time Card to begin."
+        case .accessUnavailable: "Ready. Driver access needs attention."
+        case .failed: "Ready. Card communication needs attention."
+        }
+    }
+}
+
+private struct TimeCardWelcomeWindow: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        TimeCardLaunchSplash(monitor: monitor, onContinue: { dismiss() })
+            .frame(width: 560, height: 550)
+    }
+}
+
+private struct TimeCardAboutButton: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Button("About Time Card Control Center") {
+            openWindow(id: "welcome")
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+}
+
+private struct TimeCardStatusMenu: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Text("Time Card Control Center")
+        Divider()
+        if monitor.state == .connected, let snapshot = monitor.snapshot {
+            Text(snapshot.boardName)
+            if let updated = monitor.lastUpdated, Date().timeIntervalSince(updated) <= 5 {
+                Text(snapshot.clockInSync == true ? "Clock core: in sync" : "Clock core: not synchronized")
+                Text(snapshot.utcOffsetValid == true ? "UTC offset valid; epoch not qualified" : "UTC reference: not valid / unavailable")
+            } else {
+                Text("Telemetry stale. Refresh before relying on status.")
+            }
+            if let updated = monitor.lastUpdated {
+                Text("Updated " + updated.formatted(date: .omitted, time: .standard))
+            }
+        } else {
+            Text(connectionStatus)
+        }
+        Text("macOS clock discipline is not enabled")
+        Divider()
+        Button("Open Control Center") {
+            openWindow(id: "control-center")
+            NSApp.activate(ignoringOtherApps: true)
+            for window in NSApp.windows where window.canBecomeMain && window.isMiniaturized {
+                window.deminiaturize(nil)
+            }
+        }
+        Button("Refresh Status") { monitor.refresh() }
+        TimeCardAboutButton()
+        Divider()
+        Button("Quit Time Card Control Center") { NSApp.terminate(nil) }
+    }
+
+    private var connectionStatus: String {
+        switch monitor.state {
+        case .discovering: "Looking for a Time Card…"
+        case .noService: "No Time Card connected"
+        case .accessUnavailable: "Driver access unavailable"
+        case .failed: "Card communication failed"
+        case .connected: "Waiting for telemetry…"
+        }
     }
 }
