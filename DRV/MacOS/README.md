@@ -40,11 +40,14 @@ The current implementation provides:
 - Bracketed card/system cross timestamps
 - Version-gated clock and TOD status reads
 - Capability and field-validity reporting for absent or gated registers
-- A versioned, size-checked user-client ABI v11
+- A versioned, size-checked user-client ABI v12
 - Guarded clock-source query/set with supported-source masks, active-source
   readback, expected-state checks, and verified rollback on failed writes
 - Four frequency counters with integration controls and error/overrun states
   on the validated Meta/Celestica revision-02 LitePCIe register layout
+- Version-gated PPS input/output controls with reviewed enable, output width,
+  polarity and signed cable delay changes, stale-state checks and verified
+  recovery; physical validation remains pending driver activation
 - SMA connector query and guarded route setting through DriverKit, including
   Linux-compatible fixed-route handling for FPGA images without writable SMA
   routing GPIO
@@ -214,7 +217,7 @@ the last apply report, or validation diagnostics for an invalid draft.
 
 ## SA53 atomic clock and IMU motion
 
-App build 65 bundles driver 27 (ABI v11) and CLI 22. **Atomic Clock** works
+App build 65 introduced driver 27 (ABI v11) and CLI 22. **Atomic Clock** works
 with ABI v9 or later on the Meta/Celestica MAC UART at 57,600 baud. Refresh
 identifies the oscillator before exposing settings. Unsupported firmware
 fields remain unavailable. Clock-changing actions require confirmation,
@@ -248,6 +251,15 @@ See [validation and protocol details](docs/PERIPHERALS.md) and the
 [build 65 validation record](docs/BUILD65-VALIDATION.md).
 
 ## Clock sources and frequency counters
+
+Build 66 bundles driver 28 / ABI v12 and CLI 23. **Generators → PPS timing
+engines** adds version-aware input/output state, pulse width, polarity, signed
+cable delay, error status, a confirmed editor, and readback/rollback protection.
+`timecardctl pps [1|2]` queries the engines without changing settings. The new
+PPS path still awaits physical validation: on `.141`, driver 28 was accepted
+but driver 27 remains bound until an approved restart. Existing features work
+with the older driver. See [PPS-ENGINES.md](docs/PPS-ENGINES.md) for the exact
+version gates, safety behavior, test scope, and deployment state.
 
 Clock-source and frequency controls require driver build 25 (ABI v10) or
 later. Older ABI v7-v9 drivers remain usable for their existing features;

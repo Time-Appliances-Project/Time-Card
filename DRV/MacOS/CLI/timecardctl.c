@@ -30,6 +30,7 @@ print_usage(FILE *stream)
             "       timecardctl clock-control\n"
             "       timecardctl clock-source source [expected-source]\n"
             "       timecardctl frequency [counter]\n"
+            "       timecardctl pps [core: 1=output, 2=input]\n"
             "       timecardctl frequency-set counter seconds\n"
             "       timecardctl sma [connector]\n"
             "       timecardctl sma-set connector input|output function\n"
@@ -1624,8 +1625,9 @@ require_timing_capability(io_connect_t connection, uint64_t capability)
 {
     TimeCardInfo info = {0};
     if (call_output(connection, kTimeCardMethodGetInfo, &info, sizeof(info))) return 1;
-    if (!driver_abi_supported(info.abiVersion, 10u))
-        return report_unsupported_abi(info.abiVersion, 10u, "timing control");
+    const uint32_t minimumABI = capability == kTimeCardCapabilityPPS ? 12u : 10u;
+    if (!driver_abi_supported(info.abiVersion, minimumABI))
+        return report_unsupported_abi(info.abiVersion, minimumABI, "timing control");
     if ((info.capabilities & capability) == 0) {
         fprintf(stderr, "timecardctl: timing feature unavailable for this FPGA image. "
                 "No optional timing registers were probed.\n");
@@ -1706,6 +1708,35 @@ command_frequency(io_connect_t connection, int argc, char **argv, bool set)
     return 0;
 }
 
+static int command_pps(io_connect_t connection, int argc, char **argv)
+{
+    if (argc < 2 || argc > 3) return 2;
+    const unsigned long first = argc == 3 ? parse_ulong(argv[2], "PPS core") : 1;
+    const unsigned long last = argc == 3 ? first : 2;
+    if (first < 1 || last > 2) return 2;
+    if (require_timing_capability(connection, kTimeCardCapabilityPPS)) return 1;
+    for (unsigned long core = first; core <= last; ++core) {
+        TimeCardPPSQuery request = {.size = sizeof(request), .core = (uint32_t)core};
+        TimeCardPPSState out = {0};
+        if (call_inout(connection, kTimeCardMethodPPSQuery, &request, sizeof(request), &out, sizeof(out))) return 1;
+        if (out.size != sizeof(out) || out.core != core || out.reserved) return 1;
+        printf("PPS %lu (%s): version 0x%08x, valid fields 0x%02x, writable fields 0x%02x\n",
+               core, core == 1 ? "output" : "input", out.version, out.validFields, out.writableFields);
+        if (!out.validFields) { printf("  Core absent or version unrecognized; settings not probed.\n"); continue; }
+        printf("  Engine: %s, control 0x%08x\n", out.control & 1 ? "enabled" : "disabled", out.control);
+        if (out.validFields & kTimeCardPPSStatus) printf("  Status: 0x%08x\n", out.status);
+        if (out.validFields & kTimeCardPPSPolarity) printf("  Polarity: active %s\n", out.polarity & 1 ? "high" : "low");
+        const uint32_t width = out.pulseWidth & 0x3ff;
+        if ((out.validFields & kTimeCardPPSWidth) && width >= 1 && width <= 999) printf("  Pulse width: %u ms\n", width);
+        else printf("  Pulse width: unavailable\n");
+        if (out.validFields & kTimeCardPPSDelay) {
+            const int64_t magnitude = out.cableDelayRaw & out.maximumDelay;
+            printf("  Cable delay: %" PRId64 " ns (limit +/-%u)\n", out.cableDelayRaw & 0x80000000u ? -magnitude : magnitude, out.maximumDelay);
+        }
+    }
+    return 0;
+}
+
 static int command_imu(io_connect_t connection, int argc, char **argv)
 {
     TimeCardIMURequest request = { .size = sizeof(request) };
@@ -1757,6 +1788,8 @@ main(int argc, char **argv)
         status = command_clock_control(connection, argc, argv, true);
     else if (strcmp(argv[1], "frequency") == 0)
         status = command_frequency(connection, argc, argv, false);
+    else if (strcmp(argv[1], "pps") == 0)
+        status = command_pps(connection, argc, argv);
     else if (strcmp(argv[1], "frequency-set") == 0)
         status = command_frequency(connection, argc, argv, true);
     else if (strcmp(argv[1], "sma") == 0)

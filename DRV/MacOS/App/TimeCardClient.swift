@@ -175,6 +175,7 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
         if abiVersion >= 11 && (capabilities & (1 << 11)) != 0 { names.append("Fused IMU") }
         if supportsClockSource { names.append("Clock source") }
         if supportsFrequency { names.append("Frequency counters") }
+        if supportsPPS { names.append("PPS engines") }
         return names
     }
 
@@ -184,6 +185,7 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
 
     var supportsClockSource: Bool { abiVersion >= 10 && capabilities & (1 << 9) != 0 }
     var supportsFrequency: Bool { abiVersion >= 10 && capabilities & (1 << 10) != 0 }
+    var supportsPPS: Bool { abiVersion >= 12 && capabilities & (1 << 12) != 0 }
 
     var supportsUARTWrite: Bool {
         abiVersion >= 9 && supportsUART
@@ -233,6 +235,87 @@ struct TimeCardClockControlState: Equatable, Sendable, Codable {
         return supportedSources & bit != 0
     }
     var availableSources: [UInt32] { Self.knownSources.filter { supports($0) } }
+}
+
+struct TimeCardPPSState: Equatable, Sendable, Identifiable, Codable {
+    var size: UInt32 = 48
+    var core: UInt32 = 0, version: UInt32 = 0, validFields: UInt32 = 0
+    var control: UInt32 = 0, status: UInt32 = 0, polarity: UInt32 = 0, pulseWidth: UInt32 = 0
+    var cableDelayRaw: UInt32 = 0, maximumDelay: UInt32 = 0, writableFields: UInt32 = 0, reserved: UInt32 = 0
+    var id: UInt32 { core }
+    var title: String { core == 1 ? "PPS output / master" : "PPS input / slave" }
+    var enabled: Bool { control & 1 != 0 }
+    func has(_ field: UInt32) -> Bool { validFields & field != 0 }
+    func canWrite(_ field: UInt32) -> Bool { writableFields & field != 0 }
+    var measuredWidth: UInt32? { has(8) && (1...999).contains(pulseWidth & 0x3ff) ? pulseWidth & 0x3ff : nil }
+    var delayNanoseconds: Int64? {
+        guard has(16) else { return nil }
+        let magnitude = Int64(cableDelayRaw & maximumDelay)
+        return cableDelayRaw & 0x80000000 != 0 ? -magnitude : magnitude
+    }
+    var versionText: String { "\(version >> 24).\((version >> 16) & 255).\(version & 65535)" }
+    var errors: [String] {
+        guard has(2) else { return [] }
+        var result: [String] = []
+        if status & 1 != 0 { result.append(core == 1 ? "PPS generation error" : "PPS filter error") }
+        if core == 2 && status & 2 != 0 { result.append("PPS supervision error") }
+        let unknown = status & ~(core == 1 ? UInt32(1) : 3)
+        if unknown != 0 { result.append(String(format: "Unknown status bits 0x%08x", unknown)) }
+        return result
+    }
+    var validLayout: Bool {
+        guard size == 48, (1...2).contains(core), reserved == 0 else { return false }
+        var expected: UInt32 = 0
+        if version >= 0x01000000 && version < 0x01070000 {
+            expected = 9
+            if version >= (core == 1 ? 0x01010000 : 0x01020000) { expected |= 4 }
+            if version >= (core == 1 ? 0x01020000 : 0x01030000) { expected |= 2 }
+            if core == 2 || version >= 0x01040000 { expected |= 16 }
+        }
+        let writable = expected & ~(core == 1 ? UInt32(2) : 10)
+        return validFields == expected && writableFields == writable &&
+            maximumDelay == (expected == 0 ? 0 : (version >= 0x01060000 ? 0x3fffffff : 0xffff))
+    }
+}
+struct TimeCardPPSQueryRaw {
+    var size: UInt32 = 16, core: UInt32 = 0, reserved0: UInt32 = 0, reserved1: UInt32 = 0
+}
+struct TimeCardPPSRequestRaw {
+    var size: UInt32 = 64, core: UInt32 = 0, fields: UInt32 = 0, reserved0: UInt32 = 0
+    var expectedVersion: UInt32 = 0, expectedControl: UInt32 = 0, expectedPolarity: UInt32 = 0, expectedPulseWidth: UInt32 = 0
+    var expectedDelay: UInt32 = 0, enabled: UInt32 = 0, polarity: UInt32 = 0, pulseWidth: UInt32 = 0
+    var cableDelay: Int32 = 0
+    var reserved1: UInt32 = 0, reserved2: UInt32 = 0, reserved3: UInt32 = 0
+}
+struct TimeCardPPSSettings: Equatable, Sendable {
+    var enabled: Bool
+    var activeHigh: Bool
+    var width: String
+    var delay: String
+    init(_ state: TimeCardPPSState) {
+        enabled = state.enabled; activeHigh = state.polarity & 1 != 0
+        width = String(state.pulseWidth & 0x3ff); delay = String(state.delayNanoseconds ?? 0)
+    }
+    func request(baseline: TimeCardPPSState) throws -> TimeCardPPSRequestRaw {
+        guard baseline.validLayout, baseline.writableFields != 0 else {
+            throw TimeCardClientError.invalidTimingRequest("This PPS core version is read-only or unrecognized.")
+        }
+        let widthValue = baseline.canWrite(8) ? UInt32(width) : 0
+        let delayValue = baseline.canWrite(16) ? Int64(delay) : 0
+        guard let widthValue, !baseline.canWrite(8) || (1...999).contains(widthValue),
+              let delayValue, delayValue >= -Int64(baseline.maximumDelay), delayValue <= Int64(baseline.maximumDelay) else {
+            throw TimeCardClientError.invalidTimingRequest("Output width must be 1...999 ms and cable delay must fit this core's signed range.")
+        }
+        return .init(core: baseline.core, fields: baseline.writableFields, expectedVersion: baseline.version,
+                     expectedControl: baseline.control, expectedPolarity: baseline.polarity, expectedPulseWidth: baseline.pulseWidth,
+                     expectedDelay: baseline.cableDelayRaw, enabled: enabled ? 1 : 0, polarity: activeHigh ? 1 : 0,
+                     pulseWidth: widthValue, cableDelay: Int32(delayValue))
+    }
+    func matches(_ state: TimeCardPPSState) -> Bool {
+        state.enabled == enabled && (!state.canWrite(4) || (state.polarity & 1 != 0) == activeHigh) &&
+        (!state.canWrite(8) || UInt32(width) == (state.pulseWidth & 0x3ff)) &&
+        (!state.canWrite(16) || Int64(delay) == state.delayNanoseconds)
+    }
 }
 
 struct TimeCardFrequencyState: Equatable, Sendable, Identifiable, Codable {
@@ -1019,11 +1102,11 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
             "The selected Time Card disconnected before it could be opened."
         case .openFailed(let result):
             "The Time Card user client could not be opened (\(Self.hex(result)))."
-        case .methodFailed(let selector, let result) where (selector == 19 || selector == 21) && result == kIOReturnBusy:
+        case .methodFailed(let selector, let result) where (selector == 19 || selector == 21 || selector == 24) && result == kIOReturnBusy:
             "Timing state changed since it was read. Nothing was written. Refresh and try again."
-        case .methodFailed(let selector, let result) where (selector == 19 || selector == 21) && result == kIOReturnIOError:
+        case .methodFailed(let selector, let result) where (selector == 19 || selector == 21 || selector == 24) && result == kIOReturnIOError:
             "Timing readback failed. The previous setting was restored and verified."
-        case .methodFailed(let selector, let result) where (selector == 19 || selector == 21) && result == kIOReturnError:
+        case .methodFailed(let selector, let result) where (selector == 19 || selector == 21 || selector == 24) && result == kIOReturnError:
             "Timing readback and rollback verification failed. Check the card state before further changes."
         case .methodFailed(let selector, let result):
             "Driver method \(selector) failed (\(Self.hex(result)))."
@@ -1088,7 +1171,7 @@ enum TimeCardClient {
     private static let serviceClass = "IOUserService"
     private static let userClassValue = "TimeCardDriver"
     private static let minimumSupportedABIVersion: UInt32 = 7
-    private static let supportedABIVersion: UInt32 = 11
+    private static let supportedABIVersion: UInt32 = 12
 
     static var localABILayoutIsValid: Bool {
         MemoryLayout<TimeCardClockControlState>.size == 32
@@ -2078,11 +2161,37 @@ enum TimeCardClient {
         return output
     }
 
+    static func queryPPS(for descriptor: TimeCardServiceDescriptor, core: UInt32) throws -> TimeCardPPSState {
+        guard MemoryLayout<TimeCardPPSState>.size == 48, MemoryLayout<TimeCardPPSQueryRaw>.size == 16 else { throw TimeCardClientError.invalidClientLayout }
+        guard (1...2).contains(core) else { throw TimeCardClientError.invalidTimingRequest("PPS engine must be 1 or 2.") }
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+        try requireTimingCapability(connection: connection, bit: 12)
+        var input = TimeCardPPSQueryRaw(core: core), output = TimeCardPPSState()
+        try callInputOutput(connection: connection, selector: 23, input: &input, output: &output)
+        guard output.validLayout, output.core == core else { throw TimeCardClientError.invalidClientLayout }
+        return output
+    }
+
+    static func setPPS(for descriptor: TimeCardServiceDescriptor, baseline: TimeCardPPSState,
+                       settings: TimeCardPPSSettings) throws -> TimeCardPPSState {
+        guard MemoryLayout<TimeCardPPSState>.size == 48, MemoryLayout<TimeCardPPSRequestRaw>.size == 64 else { throw TimeCardClientError.invalidClientLayout }
+        var input = try settings.request(baseline: baseline)
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+        try requireTimingCapability(connection: connection, bit: 12)
+        var output = TimeCardPPSState()
+        try callInputOutput(connection: connection, selector: 24, input: &input, output: &output)
+        guard output.validLayout, output.core == baseline.core, output.version == baseline.version,
+              settings.matches(output) else { throw TimeCardClientError.invalidTimingRequest("PPS readback did not match. Inspect the engine before retrying.") }
+        return output
+    }
+
     private static func requireTimingCapability(connection: io_connect_t, bit: UInt64) throws {
         guard localABILayoutIsValid else { throw TimeCardClientError.invalidClientLayout }
         var info = TimeCardInfoRaw()
         try callOutput(connection: connection, selector: 0, output: &info)
-        guard info.abiVersion >= 10, info.abiVersion <= supportedABIVersion,
+        guard info.abiVersion >= (bit == 12 ? 12 : 10), info.abiVersion <= supportedABIVersion,
               info.capabilities & (1 << bit) != 0 else {
             throw TimeCardClientError.invalidTimingRequest("Unavailable for this driver or FPGA image. No timing registers were probed.")
         }

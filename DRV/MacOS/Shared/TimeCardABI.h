@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define TIMECARD_ABI_VERSION 11u
+#define TIMECARD_ABI_VERSION 12u
 #define TIMECARD_DRIVER_VERSION 0x00000002u
 #define TIMECARD_SERVICE_CLASS "TimeCardDriver"
 #define TIMECARD_DRIVER_BUNDLE_ID "org.opentimeserver.timecard.macos.driver"
@@ -38,6 +38,8 @@ enum TimeCardExternalMethod {
     kTimeCardMethodFrequencyQuery = 20,
     kTimeCardMethodFrequencySet = 21,
     kTimeCardMethodIMUQuery = 22,
+    kTimeCardMethodPPSQuery = 23,
+    kTimeCardMethodPPSSet = 24,
     kTimeCardMethodCount
 };
 
@@ -73,8 +75,32 @@ enum TimeCardCapability {
     kTimeCardCapabilityUART = 1u << 8,
     kTimeCardCapabilityClockSource = 1u << 9,
     kTimeCardCapabilityFrequency = 1u << 10,
-    kTimeCardCapabilityIMU = 1u << 11
+    kTimeCardCapabilityIMU = 1u << 11,
+    kTimeCardCapabilityPPS = 1u << 12
 };
+
+enum TimeCardPPSField {
+    kTimeCardPPSControl = 1u << 0,
+    kTimeCardPPSStatus = 1u << 1,
+    kTimeCardPPSPolarity = 1u << 2,
+    kTimeCardPPSWidth = 1u << 3,
+    kTimeCardPPSDelay = 1u << 4
+};
+typedef struct TimeCardPPSQuery {
+    uint32_t size, core, reserved[2]; /* 1: output/master, 2: input/slave */
+} TimeCardPPSQuery;
+typedef struct TimeCardPPSState {
+    uint32_t size, core, version, validFields;
+    uint32_t control, status, polarity, pulseWidth;
+    uint32_t cableDelayRaw, maximumDelay, writableFields, reserved;
+} TimeCardPPSState;
+typedef struct TimeCardPPSRequest {
+    uint32_t size, core, fields, reserved0;
+    uint32_t expectedVersion, expectedControl, expectedPolarity, expectedPulseWidth;
+    uint32_t expectedDelay, enabled, polarity, pulseWidth;
+    int32_t cableDelay;
+    uint32_t reserved[3];
+} TimeCardPPSRequest;
 
 enum TimeCardSMADirection {
     kTimeCardSMADirectionInput = 0,
@@ -468,6 +494,9 @@ typedef struct TimeCardSensorTelemetry {
 }
 
 static_assert(sizeof(TimeCardTime) == 16, "TimeCardTime ABI changed");
+static_assert(sizeof(TimeCardPPSQuery) == 16, "PPS query ABI changed");
+static_assert(sizeof(TimeCardPPSState) == 48, "PPS state ABI changed");
+static_assert(sizeof(TimeCardPPSRequest) == 64, "PPS request ABI changed");
 static_assert(sizeof(TimeCardIMURequest) == 16, "IMU request ABI changed");
 static_assert(sizeof(TimeCardIMUTelemetry) == 144, "IMU telemetry ABI changed");
 static_assert(sizeof(TimeCardClockControl) == 32, "Clock control ABI changed");

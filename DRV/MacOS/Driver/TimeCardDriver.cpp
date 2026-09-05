@@ -13,6 +13,7 @@
 #include "TimeCardUserClient.h"
 #include "TimeCardRegisters.h"
 #include "TimeCardTiming.h"
+#include "TimeCardPPS.h"
 #include "TimeCardMotion.h"
 
 struct TimeCardDriver_IVars {
@@ -532,6 +533,30 @@ TimeCardTimingStatus(TimeCardTimingResult result)
 }
 
 kern_return_t
+TimeCardDriver::QueryPPS(const TimeCardPPSQuery *request, TimeCardPPSState *response)
+{
+    if (!request || !response || request->size != sizeof(*request) || request->reserved[0] || request->reserved[1]) return kIOReturnBadArgument;
+    if (!ivars->deviceOpen) return kIOReturnNotReady;
+    IOLockLock(ivars->registerLock);
+    TimeCardTimingIO io{ivars};
+    const auto result = TimeCardQueryPPS(io, ivars->registers, ivars->barSize, request->core, *response);
+    IOLockUnlock(ivars->registerLock);
+    return TimeCardTimingStatus(result);
+}
+
+kern_return_t
+TimeCardDriver::SetPPS(const TimeCardPPSRequest *request, TimeCardPPSState *response)
+{
+    if (!request || !response) return kIOReturnBadArgument;
+    if (!ivars->deviceOpen) return kIOReturnNotReady;
+    IOLockLock(ivars->registerLock);
+    TimeCardTimingIO io{ivars};
+    const auto result = TimeCardApplyPPS(io, ivars->registers, ivars->barSize, *request, *response);
+    IOLockUnlock(ivars->registerLock);
+    return TimeCardTimingStatus(result);
+}
+
+kern_return_t
 TimeCardDriver::QueryClockControl(TimeCardClockControl *response)
 {
     if (response == nullptr) return kIOReturnBadArgument;
@@ -619,6 +644,8 @@ TimeCardDriver::GetInfo(TimeCardInfo *info)
         info->capabilities |= kTimeCardCapabilityClockSource;
     if (TimeCardFrequencyOffset(&ivars->registers, ivars->barSize, 4) != 0)
         info->capabilities |= kTimeCardCapabilityFrequency;
+    if (TimeCardPPSOffset(&ivars->registers, ivars->barSize, 2) != 0)
+        info->capabilities |= kTimeCardCapabilityPPS;
 
     if (info->clockVersion >= kTimeCardClockVersionStatus &&
         ReadRegister32(
@@ -3540,6 +3567,29 @@ static kern_return_t IMUQueryAction(OSObject *, void *reference, IOUserClientMet
     return result;
 }
 
+static kern_return_t PPSQueryAction(OSObject *, void *reference, IOUserClientMethodArguments *arguments) {
+    if (!arguments->structureInput) return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardPPSQuery *>(arguments->structureInput->getBytesNoCopy());
+    TimeCardPPSState response = {};
+    const auto result = static_cast<TimeCardDriver *>(reference)->QueryPPS(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput = OSData::withBytes(&response, sizeof(response));
+        if (!arguments->structureOutput) return kIOReturnNoMemory;
+    }
+    return result;
+}
+static kern_return_t PPSSetAction(OSObject *, void *reference, IOUserClientMethodArguments *arguments) {
+    if (!arguments->structureInput) return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardPPSRequest *>(arguments->structureInput->getBytesNoCopy());
+    TimeCardPPSState response = {};
+    const auto result = static_cast<TimeCardDriver *>(reference)->SetPPS(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput = OSData::withBytes(&response, sizeof(response));
+        if (!arguments->structureOutput) return kIOReturnNoMemory;
+    }
+    return result;
+}
+
 static const IOUserClientMethodDispatch kTimeCardDispatch[
     kTimeCardMethodCount] = {
     {GetInfoAction, false, 0, 0, 0, sizeof(TimeCardInfo)},
@@ -3579,6 +3629,8 @@ static const IOUserClientMethodDispatch kTimeCardDispatch[
     {FrequencySetAction, false, 0, sizeof(TimeCardFrequencyRequest), 0,
      sizeof(TimeCardFrequencyControl)},
     {IMUQueryAction, false, 0, sizeof(TimeCardIMURequest), 0, sizeof(TimeCardIMUTelemetry)},
+    {PPSQueryAction, false, 0, sizeof(TimeCardPPSQuery), 0, sizeof(TimeCardPPSState)},
+    {PPSSetAction, false, 0, sizeof(TimeCardPPSRequest), 0, sizeof(TimeCardPPSState)},
 };
 
 kern_return_t

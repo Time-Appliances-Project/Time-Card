@@ -194,6 +194,8 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var profileMessage = ""
     @Published private(set) var clockControl: TimeCardClockControlState?
     @Published private(set) var frequencyStates: [TimeCardFrequencyState] = []
+    @Published private(set) var ppsStates: [TimeCardPPSState] = []
+    @Published private(set) var ppsErrors: [String] = []
     @Published private(set) var timingRefreshInProgress = false
     @Published private(set) var timingMessage = ""
     @Published private(set) var clockControlError = ""
@@ -936,6 +938,7 @@ final class TimeCardMonitor: ObservableObject {
         profileState = nil
         clockControl = nil
         frequencyStates = []
+        ppsStates = []; ppsErrors = []
         clockControlError = ""
         frequencyError = ""
         timingMessage = ""
@@ -953,7 +956,9 @@ final class TimeCardMonitor: ObservableObject {
                     ? Result { try TimeCardClient.queryClockControl(for: descriptor) } : nil
                 let frequencies: Result<[TimeCardFrequencyState], Error>? = current.supportsFrequency
                     ? Result { try TimeCardClient.queryFrequencies(for: descriptor) } : nil
-                return (clock, frequencies)
+                let pps: [Result<TimeCardPPSState, Error>] = current.supportsPPS
+                    ? (1...2).map { core in Result { try TimeCardClient.queryPPS(for: descriptor, core: UInt32(core)) } } : []
+                return (clock, frequencies, pps)
             }.value
             guard let self else { return }
             self.timingRefreshInProgress = false
@@ -968,6 +973,13 @@ final class TimeCardMonitor: ObservableObject {
             case .success(let value): self.frequencyStates = value; self.frequencyError = ""
             case .failure(let error): self.frequencyStates = []; self.frequencyError = error.localizedDescription
             case nil: self.frequencyStates = []; self.frequencyError = ""
+            }
+            self.ppsStates = []; self.ppsErrors = []
+            for (index, entry) in result.2.enumerated() {
+                switch entry {
+                case .success(let value): self.ppsStates.append(value)
+                case .failure(let error): self.ppsErrors.append("PPS \(index + 1): " + error.localizedDescription)
+                }
             }
         }
     }
@@ -1019,6 +1031,13 @@ final class TimeCardMonitor: ObservableObject {
             }
             self.refreshTiming()
             self.refresh()
+        }
+    }
+
+    func setPPS(baseline: TimeCardPPSState, settings: TimeCardPPSSettings, serviceID: UInt64) {
+        guard snapshot?.supportsPPS == true else { return }
+        performTimingCommand(serviceID: serviceID, description: "Configure " + baseline.title) { descriptor in
+            _ = try TimeCardClient.setPPS(for: descriptor, baseline: baseline, settings: settings)
         }
     }
 
@@ -1622,6 +1641,20 @@ final class TimeCardMonitor: ObservableObject {
                     } else {
                         timingChecks.append(.init("Frequency-counter API", severity: .gated,
                             detail: "Counter presence is not verified for this image. No optional timing addresses were probed."))
+                    }
+                    if currentSnapshot.supportsPPS {
+                        for core in UInt32(1)...2 {
+                            do {
+                                let engine = try TimeCardClient.queryPPS(for: descriptor, core: core)
+                                timingChecks.append(.init(engine.title,
+                                    severity: engine.validFields == 0 ? .gated : (engine.errors.isEmpty ? .pass : .warning),
+                                    detail: "Core \(engine.versionText); valid fields \(engine.validFields); \(engine.enabled ? "enabled" : "disabled"). " +
+                                        (engine.validFields == 0 ? "Only version read; register contract unrecognized." : engine.errors.joined(separator: "; ")) +
+                                        " No PPS settings changed."))
+                            } catch { timingChecks.append(.init("PPS engine \(core)", severity: .fail, detail: error.localizedDescription)) }
+                        }
+                    } else {
+                        timingChecks.append(.init("PPS engines", severity: .gated, detail: "Requires ABI v12 and a supported Meta/Celestica register map."))
                     }
                     let report = TimeCardSelfTestReport(runAt: baseReport.runAt, items: baseReport.items + timingChecks)
                     return .success(

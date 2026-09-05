@@ -100,6 +100,7 @@ struct TimingControlsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 ClockSourceControlPanel()
+                PPSEnginesPanel()
                 ControlCenterPanel(title: "Frequency counters", subtitle: "Four FPGA measurement channels, 1 to 255 second integration") {
                     HStack {
                         Label("Readback-verified controls", systemImage: "checkmark.shield")
@@ -132,7 +133,7 @@ struct TimingControlsView: View {
                 }
                 ControlCenterPanel(title: "Signal generators and event timestamps", subtitle: "Additional Windows parity work") {
                     Label("Not yet enabled", systemImage: "lock.shield")
-                    Text("Pulse generation, programmable signal outputs, and timestamp interrupt capture still require their own validated register contracts and driver APIs. Frequency measurement does not enable those outputs.")
+                    Text("Programmable signal generators and timestamp interrupt capture still require their own validated register contracts and driver APIs. The PPS engine controls above do not enable those independent outputs.")
                         .foregroundStyle(.secondary)
                 }
             }.padding(24)
@@ -155,6 +156,8 @@ struct TimingControlsView: View {
             let registerLayout: String
             let clock: TimeCardClockControlState?
             let counters: [TimeCardFrequencyState]
+            let ppsEngines: [TimeCardPPSState]
+            let ppsErrors: [String]
             let counterAvailability: String
             let clockError: String
             let counterError: String
@@ -162,7 +165,8 @@ struct TimingControlsView: View {
         let record = Export(schemaVersion: 1, capturedAt: Date(), serviceID: String(snapshot.service.id),
                             pciIdentity: snapshot.pciIdentity, driverABI: snapshot.abiVersion,
                             registerLayout: snapshot.layoutName, clock: monitor.clockControl,
-                            counters: monitor.frequencyStates, counterAvailability: counterAvailability,
+                            counters: monitor.frequencyStates, ppsEngines: monitor.ppsStates, ppsErrors: monitor.ppsErrors,
+                            counterAvailability: counterAvailability,
                             clockError: monitor.clockControlError, counterError: monitor.frequencyError)
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.json]
@@ -175,6 +179,118 @@ struct TimingControlsView: View {
             try encoder.encode(record).write(to: url, options: .atomic)
             exportMessage = "Saved " + url.lastPathComponent
         } catch { exportMessage = "Export failed: " + error.localizedDescription }
+    }
+}
+
+struct PPSEnginesPanel: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+    @State private var editing: TimeCardPPSState?
+    @State private var editingService: UInt64 = 0
+    var body: some View {
+        ControlCenterPanel(title: "PPS timing engines", subtitle: "FPGA one-pulse-per-second output and input supervision") {
+            if monitor.snapshot?.supportsPPS != true {
+                Label("Requires active driver 28 / ABI v12 on a supported Meta or Celestica card.", systemImage: "lock.shield")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(monitor.ppsStates) { engine in
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Label(engine.title, systemImage: engine.core == 1 ? "waveform.path" : "waveform.path.ecg").font(.headline)
+                        Spacer()
+                        Text("Core " + engine.versionText).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        Button("Configure…") { editingService = monitor.selectedServiceID ?? 0; editing = engine }
+                            .disabled(engine.writableFields == 0 || monitor.commandInProgress || monitor.state != .connected)
+                    }
+                    if engine.validFields == 0 {
+                        Text("Core absent or register version unrecognized. Only the version was read; settings remain unavailable.")
+                            .foregroundStyle(.orange)
+                    } else {
+                        HStack(spacing: 32) {
+                            metric("ENGINE", engine.enabled ? "Enabled" : "Disabled")
+                            metric(engine.core == 1 ? "OUTPUT WIDTH" : "MEASURED WIDTH", engine.measuredWidth.map { "\($0) ms" } ?? "Unavailable")
+                            metric("ACTIVE LEVEL", engine.has(4) ? (engine.polarity & 1 == 1 ? "High" : "Low") : "Not exposed")
+                            metric("CABLE DELAY", engine.delayNanoseconds.map { "\($0) ns" } ?? "Not exposed")
+                        }
+                        if !engine.enabled { Text("The engine is disabled. Width and delay are register readbacks, not evidence of an active pulse.").font(.caption).foregroundStyle(.secondary) }
+                        if engine.has(2) {
+                            if engine.errors.isEmpty { Label("No latched PPS errors", systemImage: "checkmark.circle").foregroundStyle(.green) }
+                            ForEach(engine.errors, id: \.self) { Label($0, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
+                        } else { Text("Error status is not exposed by this core version.").foregroundStyle(.secondary) }
+                    }
+                }.padding(16).background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
+            }
+            ForEach(monitor.ppsErrors, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
+            Text("Changes may interrupt synchronization and connected equipment. The driver checks the previous configuration, disables the engine, and verifies settings before re-enabling. SMA routing, PHC epoch, macOS time and SA53 settings are not changed. Alarm clearing is not yet exposed.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .sheet(item: $editing) { engine in PPSEngineEditor(baseline: engine, serviceID: editingService) }
+        .onChange(of: monitor.selectedServiceID) { _, _ in editing = nil }
+    }
+    private func metric(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) { Text(title).font(.caption).foregroundStyle(.secondary); Text(value).font(.title3.monospacedDigit()) }
+    }
+}
+
+private struct PPSEngineEditor: View {
+    @EnvironmentObject private var monitor: TimeCardMonitor
+    @Environment(\.dismiss) private var dismiss
+    let baseline: TimeCardPPSState
+    let serviceID: UInt64
+    @State private var settings: TimeCardPPSSettings
+    @State private var confirm = false
+    @State private var openedAt = Date()
+    @State private var message = ""
+    init(baseline: TimeCardPPSState, serviceID: UInt64) {
+        self.baseline = baseline; self.serviceID = serviceID
+        _settings = State(initialValue: TimeCardPPSSettings(baseline))
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Configure " + baseline.title).font(.title2.bold())
+            Text("Captured core version " + baseline.versionText + ". Applying briefly disables this engine.")
+                .foregroundStyle(.secondary)
+            Toggle("Enable PPS engine", isOn: $settings.enabled)
+            if baseline.canWrite(4) { Toggle("Active-high pulse", isOn: $settings.activeHigh) }
+            if baseline.canWrite(8) { TextField("Output pulse width (1...999 ms)", text: $settings.width).textFieldStyle(.roundedBorder) }
+            if baseline.canWrite(16) {
+                TextField("Cable delay (ns)", text: $settings.delay).textFieldStyle(.roundedBorder)
+                Text("Allowed range: -\(baseline.maximumDelay)...\(baseline.maximumDelay) ns. Signed-magnitude hardware encoding.").font(.caption).foregroundStyle(.secondary)
+            }
+            if baseline.core == 2 { Text("Input pulse width is measured by the FPGA and cannot be written.").font(.caption).foregroundStyle(.secondary) }
+            if let failure = validationError { Text(failure).font(.caption).foregroundStyle(.orange) }
+            if !message.isEmpty { Text(message).foregroundStyle(.orange) }
+            Text("Close other card-control tools. Settings are checked against this captured baseline. A failed recovery may leave the engine disabled; inspect its state before another operation.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Review Change…") { confirm = true }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(validationError != nil || settings.matches(baseline) || monitor.commandInProgress || monitor.state != .connected)
+            }
+        }.padding(28).frame(width: 520)
+        .confirmationDialog("Apply this PPS configuration?", isPresented: $confirm, titleVisibility: .visible) {
+            Button("Apply and Verify") {
+                guard monitor.selectedServiceID == serviceID, Date().timeIntervalSince(openedAt) < 120 else {
+                    message = "The baseline expired or the card changed. Close this editor and refresh."; return
+                }
+                monitor.setPPS(baseline: baseline, settings: settings, serviceID: serviceID)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(reviewSummary + "\nThis can interrupt PPS synchronization or change signals supplied to connected equipment. PHC epoch and macOS time are unchanged.")
+        }
+    }
+    private var validationError: String? {
+        do { _ = try settings.request(baseline: baseline); return nil } catch { return error.localizedDescription }
+    }
+    private var reviewSummary: String {
+        var lines = [baseline.title, "Engine: \(baseline.enabled ? "enabled" : "disabled") → \(settings.enabled ? "enabled" : "disabled")"]
+        if baseline.canWrite(4) { lines.append("Active level: \(baseline.polarity & 1 != 0 ? "high" : "low") → \(settings.activeHigh ? "high" : "low")") }
+        if baseline.canWrite(8) { lines.append("Width: \(baseline.pulseWidth & 0x3ff) → \(settings.width) ms") }
+        if baseline.canWrite(16) { lines.append("Cable delay: \(baseline.delayNanoseconds ?? 0) → \(settings.delay) ns") }
+        return lines.joined(separator: "\n")
     }
 }
 

@@ -15,6 +15,11 @@ check:
 	.build/cmake/timecard-control-center-model-tests
 	xcrun swiftc -parse-as-library -swift-version 5 \
 		-module-cache-path .build/cmake/swift-module-cache \
+		App/TimeCardClient.swift App/MotionModels.swift Tests/PPSTests.swift \
+		-framework IOKit -framework CoreFoundation -o .build/cmake/timecard-pps-model-tests
+	.build/cmake/timecard-pps-model-tests
+	xcrun swiftc -parse-as-library -swift-version 5 \
+		-module-cache-path .build/cmake/swift-module-cache \
 		App/TimeCardClient.swift App/MotionModels.swift App/ConfigurationProfiles.swift App/ConfigurationProfileClient.swift \
 		Tests/ConfigurationProfileTests.swift \
 		-framework IOKit -framework CoreFoundation \

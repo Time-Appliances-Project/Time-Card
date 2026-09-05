@@ -452,7 +452,7 @@ endforeach()
 set(abi_source "${TIMECARD_SOURCE_DIR}/Shared/TimeCardABI.h")
 file(READ "${abi_source}" abi)
 foreach(required_uart_abi IN ITEMS
-        "TIMECARD_ABI_VERSION 11u"
+        "TIMECARD_ABI_VERSION 12u"
         "kTimeCardCapabilityUART"
         "TimeCardUARTObserve"
         "TimeCardUARTConfig"

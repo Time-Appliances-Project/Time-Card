@@ -48,6 +48,8 @@ public:
     kern_return_t WriteUART(const TimeCardUARTTransfer *request,
                             TimeCardUARTTransfer *response) LOCALONLY;
     kern_return_t QueryClockControl(TimeCardClockControl *response) LOCALONLY;
+    kern_return_t QueryPPS(const TimeCardPPSQuery *request, TimeCardPPSState *response) LOCALONLY;
+    kern_return_t SetPPS(const TimeCardPPSRequest *request, TimeCardPPSState *response) LOCALONLY;
     kern_return_t SetClockSource(const TimeCardClockSourceRequest *request,
                                  TimeCardClockControl *response) LOCALONLY;
     kern_return_t QueryFrequency(const TimeCardFrequencyRequest *request,

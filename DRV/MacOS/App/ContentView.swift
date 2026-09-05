@@ -4172,7 +4172,7 @@ private enum MacWorkspace: String {
             ]
         case .fpga:
             return [
-                ("PPS master/slave", "Needs versioned core query/control ABI"),
+                ("PPS master/slave", "ABI v12 version-gated controls in Generators"),
                 ("IRIG-B and DCF77", "Needs image contract and core masks"),
                 ("Timestamp laboratory", "Needs timestamp channel ABI"),
                 ("Advanced clock controls", "Needs read-back-verified setters"),
@@ -7259,11 +7259,11 @@ private struct TimeCardFPGACoreReadiness: Identifiable {
                 "Clock and time scale",
                 "PPS master/slave",
                 "PPS controls",
-                connected ? "ABI needed" : "Waiting",
-                has("SMA") && has("Clock set")
-                    ? "Route and clock-set primitives are present; PPS phase control is not exposed yet."
-                    : "Needs SMA route and PPS phase measurement exposure.",
-                "Add versioned PPS generator, capture, and phase selectors.",
+                snapshot?.supportsPPS == true ? "Ready" : (connected ? "ABI needed" : "Waiting"),
+                snapshot?.supportsPPS == true
+                    ? "ABI v12 queries PPS core versions and exposes only supported width, polarity, delay and status fields."
+                    : "Requires ABI v12 and the verified Meta/Celestica register map.",
+                "Configure in Generators. PPS edge timestamps and phase measurement remain separate work.",
                 "waveform.path.ecg"
             ),
             row(

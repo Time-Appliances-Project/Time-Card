@@ -81,6 +81,10 @@ restricted to the Meta/Celestica revision-02 LitePCIe layout; classic/ART/ADVA
 images remain gated until exact-image presence is established.
 
 - Clock-source selection, implemented with supported-source masks and confirmation
+- PPS input/output engines, implemented in build 66 / ABI v12 with versioned
+  field gates, signed delay, pulse width/polarity controls, stale-state checks,
+  disabled-before-write ordering, and verified recovery. Physical validation
+  awaits activation of driver 28 on the Mac Pro; see [PPS-ENGINES.md](PPS-ENGINES.md).
 - Versioned JSON configuration profiles, implemented in app build 63 for
   supported SMA routes, clock sources, and frequency integration. Includes
   capture/import/edit/export, capability-aware preview, confirmed apply with

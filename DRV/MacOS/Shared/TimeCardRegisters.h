@@ -338,6 +338,20 @@ TimeCardRegisterMapHasTOD(const TimeCardRegisterMap *map)
 }
 
 static inline uint64_t
+TimeCardPPSOffset(const TimeCardRegisterMap *map, uint64_t barSize, uint32_t core)
+{
+    /* PPS is a versioned core at these addresses in both published Meta/
+     * Celestica block designs. ART and ADVA contracts remain unverified.
+     * This permits a version query, not unconditional field reads or writes.
+     */
+    if (!map || core < 1 || core > 2 ||
+        (map->boardProfile != kTimeCardBoardFacebook && map->boardProfile != kTimeCardBoardCelestica) ||
+        (map->layout != kTimeCardLayoutClassic && map->layout != kTimeCardLayoutLitePCIe)) return 0;
+    const uint64_t offset = (map->layout == kTimeCardLayoutLitePCIe ? 0x03030000ull : 0x01030000ull) + (core - 1) * 0x10000ull;
+    return TimeCardRangeFits(barSize, offset, 0x24) ? offset : 0;
+}
+
+static inline uint64_t
 TimeCardFrequencyOffset(const TimeCardRegisterMap *map, uint64_t barSize,
                          uint32_t counter)
 {

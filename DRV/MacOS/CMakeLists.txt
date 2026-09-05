@@ -7,7 +7,7 @@ endif()
 
 project(TimeCardMacOS LANGUAGES C CXX)
 
-set(TIMECARDCTL_BUNDLE_VERSION "22")
+set(TIMECARDCTL_BUNDLE_VERSION "23")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED YES)
@@ -32,6 +32,10 @@ if(APPLE)
 endif()
 
 enable_testing()
+add_executable(timecard_pps_tests Tests/PPSTests.cpp)
+target_include_directories(timecard_pps_tests PRIVATE Shared)
+target_compile_options(timecard_pps_tests PRIVATE -Wall -Wextra -Werror)
+add_test(NAME pps_transactions COMMAND timecard_pps_tests)
 add_executable(timecard_motion_tests Tests/MotionTests.cpp)
 target_include_directories(timecard_motion_tests PRIVATE Shared)
 target_compile_options(timecard_motion_tests PRIVATE -Wall -Wextra -Werror)
