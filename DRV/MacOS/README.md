@@ -47,7 +47,8 @@ The current implementation provides:
   on the validated Meta/Celestica revision-02 LitePCIe register layout
 - Version-gated PPS input/output controls with reviewed enable, output width,
   polarity and signed cable delay changes, stale-state checks and verified
-  recovery; physical validation remains pending driver activation
+  recovery; live readouts are validated on `.141`, while hardware setting
+  changes and recovery remain unverified
 - SMA connector query and guarded route setting through DriverKit, including
   Linux-compatible fixed-route handling for FPGA images without writable SMA
   routing GPIO
@@ -256,9 +257,10 @@ Build 66 bundles driver 28 / ABI v12 and CLI 23. **Generators → PPS timing
 engines** adds version-aware input/output state, pulse width, polarity, signed
 cable delay, error status, a confirmed editor, and readback/rollback protection.
 `timecardctl pps [1|2]` queries the engines without changing settings. The new
-PPS path still awaits physical validation: on `.141`, driver 28 was accepted
-but driver 27 remains bound until an approved restart. Existing features work
-with the older driver. See [PPS-ENGINES.md](docs/PPS-ENGINES.md) for the exact
+PPS readout path is verified on `.141` with driver 28 actually bound after the
+approved restart: both cores report version 1.2.0, output width 100 ms, and input
+width 80 ms. Setting changes and physical pulse accuracy remain unverified.
+See [PPS-ENGINES.md](docs/PPS-ENGINES.md) for the exact
 version gates, safety behavior, test scope, and deployment state.
 
 Clock-source and frequency controls require driver build 25 (ABI v10) or

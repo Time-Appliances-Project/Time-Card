@@ -13,7 +13,7 @@ physically validated.
 | SMA and LEDs | Capability-aware routes, guarded setters, GNSS/SMA LED policies, readback | ART peripheral path, exhaustive board-specific validation |
 | Sensors | LM75B, SHT3x, compensated ICP-10100, temperature charts, BNO055/BNO08x fusion, 3D orientation, calibration, low-rate vibration/RMS and motion exports; live BNO08x verified | Physical BNO055 validation, BME/BMP280, INA219 rail measurements, other board routes |
 | Telemetry Studio | Sampling histogram, median/p95/p99, one-hour history, GNSS/temperature plots, low-rate vibration trend, point inspection, pause, six-hour bounded recording, CSV/JSON | Trusted PHC offset series, high-rate vibration measurement and spectral analysis |
-| Timing and FPGA engines | Version-gated PPS input/output state and confirmed enable/width/polarity/delay controls with stale-state checks and verified recovery; four frequency counters on revision-02 LitePCIe; timing export and readiness catalog | Physical PPS validation after driver activation, PPS error acknowledgement, classic/ART/ADVA counter contracts, signal-generator/timestamp-channel ABI and controls, IRIG/DCF/ToD settings |
+| Timing and FPGA engines | Version-gated PPS input/output state and confirmed enable/width/polarity/delay controls with stale-state checks and verified recovery; live PPS 1.2 readouts on `.141`; four frequency counters on revision-02 LitePCIe; timing export and readiness catalog | Physical PPS setting-change and recovery validation, PPS error acknowledgement, classic/ART/ADVA counter contracts, signal-generator/timestamp-channel ABI and controls, IRIG/DCF/ToD settings |
 | Atomic clock | Dedicated SA53 identity/telemetry/alarms, checksummed C3 transport, 15 bounded setters, mode checks, confirmed JamSync/load/store/acknowledge, readback and JSON export | Physical validation of clock-changing operations; ART mRO-50; persistent sessions |
 | Profiles | Native versioned JSON capture/import/edit/export, persistent immutable profile library, live preview, confirmed apply, per-setting verification, guarded rollback and recovery reports; built-in readiness planner | Windows XML migration, GNSS/oscillator/generator/ToD settings as typed APIs become available |
 | Diagnostics | Read-only self-test including clock-source and gated frequency APIs, session log, structured exports, support ZIP with profile evidence | Extended tests for future FPGA/peripheral APIs |
@@ -23,9 +23,12 @@ physically validated.
 
 - Build 66 adds PPS transaction and Swift model tests. Seven CTest and six
   Swift suites pass, with universal app/driver builds and strict signatures.
-  App 66 and CLI 23 are installed on `.141`; driver 28 was accepted but driver
-  27 / ABI v11 is still bound pending an approved restart. No physical PPS
-  settings were changed. See [PPS-ENGINES.md](PPS-ENGINES.md).
+  App 66 and CLI 23 are installed on `.141`; the approved restart activated
+  the hash-verified, actually bound driver 28 / ABI v12. Both PPS 1.2 cores
+  returned live data; the output editor's validation and confirmation were
+  checked without applying a change. Clock sync recovered, and sensor, SMA,
+  LED, UART, SA53, and motion checks passed within the documented limitations.
+  No physical PPS settings were changed. See [PPS-ENGINES.md](PPS-ENGINES.md).
 - Build 65 completes live BNO08x validation on the actual bound driver 27:
   39/40 polls contained quaternion and linear acceleration, with one startup
   sample lacking those components. Remote GUI checks verified the 3D model,

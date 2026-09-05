@@ -75,20 +75,12 @@ Seven CMake/CTest suites and six Swift suites pass. PPS tests cover field
 version gates, unsupported boards and short BARs, no-access rejection,
 signed-delay limits, malformed requests, preserved bits, no-write idempotence,
 stale state, changing input measurements/status, disabled-before-write ordering,
-read/write failures, rollback,
-and fail-disabled recovery. Swift tests cover binary layout, unavailable
+read/write failures, rollback, and fail-disabled recovery. Swift tests cover binary layout, unavailable
 measurements, field validation, and unsupported firmware. Universal Intel and
 Apple Silicon builds, bundle checks, and strict signatures pass.
 
-App 66 and CLI 23 are installed on `192.168.1.141`. macOS accepted driver 28,
-but the PCI card still reports ABI v11 from driver 27, which is terminating for
-upgrade. The Mac has not been rebooted in this deployment. Live PPS query,
-populated-editor validation, and physical writes remain unverified until the
-approved restart and subsequent hardware tests. Existing clock access still
-reports configured/active PPS and in-sync status. This does not establish a
-valid UTC epoch.
-
-Remote GUI checks confirmed the build 66 Generators page shows the ABI v12
+App 66 and CLI 23 are installed on `192.168.1.141`. Before the restart, remote
+GUI checks confirmed the build 66 Generators page showed the ABI v12
 requirement without offering unavailable PPS controls. The saved profile
 library retained its existing entry. The read-only self-test completed with
 13 passed checks, two gated checks (PPS and frequency counters), and no
@@ -97,6 +89,47 @@ locally signed artifacts below.
 The exported report was independently read over SSH and retained locally at
 `DRV/MacOS/.build/timecard-build66-self-test.txt`.
 
+### Approved restart and live validation
+
+On September 4, 2026 (America/Los_Angeles), one approved restart activated
+driver 28. The actual PCI-bound service now returns ABI v12, and the running
+extension executable matches the bundled driver hash below. SSH and Screen
+Sharing returned, and app 66 reopened successfully.
+
+Repeated CLI and populated GUI readouts confirmed:
+
+- PPS output/master: core 1.2.0, enabled, active high, 100 ms output width,
+  no latched errors. Cable-delay configuration is not exposed by this version.
+- PPS input/slave: core 1.2.0, enabled, active high, 80 ms measured width,
+  zero cable delay, maximum magnitude 65,535 ns. This version does not expose
+  input error status; absence of that field is not evidence of no input errors.
+- Output editor: unchanged configuration cannot be reviewed; 1,000 ms is
+  rejected; a 99 ms draft showed the 100-to-99 ms confirmation and interruption
+  warning. Both confirmation and draft were cancelled. Subsequent hardware
+  reads still returned 100 ms output width and unchanged PPS configuration.
+
+The configured and active clock source remained PPS (3). Clock status was
+initially not in sync after reboot and returned to 1 (in sync) by the five-minute
+uptime check. UTC validity remains false, so this does not establish a valid
+UTC epoch. All five environmental sensor blocks, all four SMA routes, all six
+LED readbacks, the I2C controller, and non-draining GNSS UART observation worked.
+
+The signed peripheral smoke client was rebuilt against ABI v12. SA53 queries
+reported atomic lock, 50.075 C, and 4.968 V. The pre-existing absent PPS input,
+unlocked disciplining state, and eight unsupported optional queries remain.
+The BNO08x test received quaternion and linear acceleration in 38/40 polls,
+with two startup polls lacking these components. It stopped volatile reports
+and restored the mux to zero. The JSON evidence is retained at
+`DRV/MacOS/.build/timecard-motion-build66.json`. Sensor fusion accuracy remains
+unreliable, and these low-rate samples are not calibrated vibration analysis.
+
+No PPS setter, clock-source setter, SA53 setting command, PHC epoch change,
+flash operation, or macOS time change was performed. Input-editor interaction,
+the post-reboot GUI self-test/export, and setter/no-op/rollback execution on
+physical PPS hardware remain unverified. GUI automation stopped when the user
+began operating the app. No production-release or full Windows-parity claim
+follows from these checks.
+
 Prior app 65 and CLI 22 are retained under
 `/Users/ahmad/TimeCard-Backups/build66.wiV93q/`, outside temporary storage.
 
@@ -104,9 +137,8 @@ Prior app 65 and CLI 22 are retained under
 | --- | --- |
 | App 66 package | `536825e0fb7fc8c069d39b54fef7bf2a53c610b1d9b303a789bf3d54da33d546` |
 | App 66 executable | `91cf23876bf860e4e83ee3971e3b5fe14fbef32bc1f585ef15a1c93919682756` |
-| Bundled driver 28 executable | `7a514e92e1a5df36a8dbf8d66e9c2a32d4b5aa5dc4e7b0e04446abffb0e287db` |
+| Bundled and PCI-bound driver 28 executable | `7a514e92e1a5df36a8dbf8d66e9c2a32d4b5aa5dc4e7b0e04446abffb0e287db` |
 
-After the authorized restart, verify the actual bound driver hash and ABI v12,
-read both engines, confirm no-op behavior without altering PPS settings, and
-recheck clock source, sensors, SMA, and motion. Do not equate an activated
-extension listing with the driver that is actually serving the PCI card.
+Further physical validation requires an agreed test setup for timing changes,
+independent pulse measurement, and controlled recovery tests. Do not equate an
+activated extension listing with the driver that is actually serving the PCI card.
