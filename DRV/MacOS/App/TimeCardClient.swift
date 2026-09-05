@@ -172,12 +172,17 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
         if (capabilities & (1 << 6)) != 0 { names.append("I2C") }
         if (capabilities & (1 << 7)) != 0 { names.append("Sensors") }
         if (capabilities & (1 << 8)) != 0 { names.append("UART") }
+        if supportsClockSource { names.append("Clock source") }
+        if supportsFrequency { names.append("Frequency counters") }
         return names
     }
 
     var supportsUART: Bool {
         abiVersion >= 8 && (capabilities & (1 << 8)) != 0
     }
+
+    var supportsClockSource: Bool { abiVersion >= 10 && capabilities & (1 << 9) != 0 }
+    var supportsFrequency: Bool { abiVersion >= 10 && capabilities & (1 << 10) != 0 }
 
     var supportsUARTWrite: Bool {
         abiVersion >= 9 && supportsUART
@@ -186,6 +191,88 @@ struct TimeCardDeviceSnapshot: Equatable, Sendable {
     func hasValidField(_ field: UInt64) -> Bool {
         (validFields & field) != 0
     }
+}
+
+struct TimeCardClockControlState: Equatable, Sendable, Codable {
+    var size: UInt32 = 32
+    var source: UInt32 = 0
+    var activeSource: UInt32 = 0
+    var supportedSources: UInt32 = 0
+    var clockVersion: UInt32 = 0
+    var control: UInt32 = 0
+    var status: UInt32 = 0
+    var reserved: UInt32 = 0
+
+    static let knownSources: [UInt32] = [0, 1, 2, 3, 4, 5, 6, 0xfe, 0xff]
+    static func name(_ source: UInt32) -> String {
+        switch source {
+        case 0: return "None"
+        case 1: return "Time of Day"
+        case 2: return "IRIG"
+        case 3: return "PPS"
+        case 4: return "PTP"
+        case 5: return "RTC"
+        case 6: return "DCF"
+        case 7: return "NTP"
+        case 8: return "SyncE"
+        case 0xfd: return "Dynamic"
+        case 0xfe: return "Registers"
+        case 0xff: return "External"
+        default: return String(format: "Unknown (0x%02x)", source)
+        }
+    }
+    func supports(_ source: UInt32) -> Bool {
+        let bit: UInt32
+        switch source {
+        case 0...6: bit = 1 << source
+        case 0xfe: bit = 1 << 30
+        case 0xff: bit = 1 << 31
+        default: return false
+        }
+        return supportedSources & bit != 0
+    }
+    var availableSources: [UInt32] { Self.knownSources.filter { supports($0) } }
+}
+
+struct TimeCardFrequencyState: Equatable, Sendable, Identifiable, Codable {
+    var size: UInt32 = 32
+    var counter: UInt32 = 0
+    var integrationSeconds: UInt32 = 0
+    var flags: UInt32 = 0
+    var frequencyHz: UInt32 = 0
+    var control: UInt32 = 0
+    var status: UInt32 = 0
+    var reserved: UInt32 = 0
+    var id: UInt32 { counter }
+    var isEnabled: Bool { flags & 2 != 0 }
+    var hasError: Bool { flags & 8 != 0 }
+    var hasOverrun: Bool { flags & 16 != 0 }
+    var measurementHz: UInt32? {
+        guard flags & 7 == 7, integrationSeconds > 0, !hasError, !hasOverrun else { return nil }
+        return frequencyHz
+    }
+    var stateLabel: String {
+        if flags & 1 == 0 { return "Unavailable" }
+        if !isEnabled { return "Disabled" }
+        if hasError { return "Measurement error" }
+        if hasOverrun { return "Counter overrun" }
+        if integrationSeconds == 0 { return "Invalid integration interval" }
+        return measurementHz == nil ? "Waiting for measurement" : "Valid measurement"
+    }
+}
+
+private struct TimeCardClockSourceRequestRaw {
+    var size: UInt32 = 16
+    var source: UInt32
+    var expectedSource: UInt32
+    var reserved: UInt32 = 0
+}
+
+private struct TimeCardFrequencyRequestRaw {
+    var size: UInt32 = 16
+    var counter: UInt32
+    var integrationSeconds: UInt32 = 0
+    var expectedControl: UInt32 = 0
 }
 
 enum TimeCardSMADirection: UInt32, CaseIterable, Identifiable, Sendable {
@@ -914,6 +1001,7 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
     case invalidTimestamp
     case invalidI2CRequest(String)
     case invalidUARTRequest(String)
+    case invalidTimingRequest(String)
     case serialUnsupportedBaud(UInt32)
     case serialOpenFailed(path: String, errnoCode: Int32)
     case serialConfigureFailed(path: String, operation: String, errnoCode: Int32)
@@ -930,12 +1018,20 @@ enum TimeCardClientError: Error, Equatable, LocalizedError, Sendable {
             "The selected Time Card disconnected before it could be opened."
         case .openFailed(let result):
             "The Time Card user client could not be opened (\(Self.hex(result)))."
+        case .methodFailed(let selector, let result) where (selector == 19 || selector == 21) && result == kIOReturnBusy:
+            "Timing state changed since it was read. Nothing was written. Refresh and try again."
+        case .methodFailed(let selector, let result) where (selector == 19 || selector == 21) && result == kIOReturnIOError:
+            "Timing readback failed. The previous setting was restored and verified."
+        case .methodFailed(let selector, let result) where (selector == 19 || selector == 21) && result == kIOReturnError:
+            "Timing readback and rollback verification failed. Check the card state before further changes."
         case .methodFailed(let selector, let result):
             "Driver method \(selector) failed (\(Self.hex(result)))."
         case .unexpectedOutput(let selector, let expected, let actual):
             "Driver method \(selector) returned \(actual) bytes; expected \(expected)."
         case .invalidClientLayout:
             "The Control Center ABI structure layout is invalid."
+        case .invalidTimingRequest(let reason):
+            "Timing control: \(reason)"
         case .incompatibleABI(let version):
             "Driver ABI \(version) is not supported by this Control Center."
         case .invalidTimestamp:
@@ -985,10 +1081,16 @@ enum TimeCardClient {
     private static let serviceClass = "IOUserService"
     private static let userClassValue = "TimeCardDriver"
     private static let minimumSupportedABIVersion: UInt32 = 7
-    private static let supportedABIVersion: UInt32 = 9
+    private static let supportedABIVersion: UInt32 = 10
 
     static var localABILayoutIsValid: Bool {
-        MemoryLayout<TimeCardTimeRaw>.size == 16
+        MemoryLayout<TimeCardClockControlState>.size == 32
+            && MemoryLayout<TimeCardClockControlState>.offset(of: \.reserved) == 28
+            && MemoryLayout<TimeCardFrequencyState>.size == 32
+            && MemoryLayout<TimeCardFrequencyState>.offset(of: \.reserved) == 28
+            && MemoryLayout<TimeCardClockSourceRequestRaw>.size == 16
+            && MemoryLayout<TimeCardFrequencyRequestRaw>.size == 16
+            && MemoryLayout<TimeCardTimeRaw>.size == 16
             && MemoryLayout<TimeCardTimeRaw>.offset(of: \.seconds) == 0
             && MemoryLayout<TimeCardTimeRaw>.offset(of: \.nanoseconds) == 8
             && MemoryLayout<TimeCardTimeRaw>.offset(of: \.reserved) == 12
@@ -1881,6 +1983,92 @@ enum TimeCardClient {
         case 115_200: speed_t(B115200)
         case 230_400: speed_t(B230400)
         default: nil
+        }
+    }
+
+    static func queryClockControl(for descriptor: TimeCardServiceDescriptor) throws -> TimeCardClockControlState {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+        try requireTimingCapability(connection: connection, bit: 9)
+        var output = TimeCardClockControlState()
+        try callOutput(connection: connection, selector: 18, output: &output)
+        guard output.size == 32, output.reserved == 0 else { throw TimeCardClientError.invalidClientLayout }
+        return output
+    }
+
+    static func setClockSource(for descriptor: TimeCardServiceDescriptor, source: UInt32,
+                               expectedSource: UInt32) throws -> TimeCardClockControlState {
+        guard TimeCardClockControlState.knownSources.contains(source), expectedSource <= 255 else {
+            throw TimeCardClientError.invalidTimingRequest("Unsupported clock source.")
+        }
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+        try requireTimingCapability(connection: connection, bit: 9)
+        var input = TimeCardClockSourceRequestRaw(source: source, expectedSource: expectedSource)
+        var output = TimeCardClockControlState()
+        try callInputOutput(connection: connection, selector: 19, input: &input, output: &output)
+        guard output.size == 32, output.reserved == 0, output.source == source else {
+            throw TimeCardClientError.invalidTimingRequest("Clock-source readback did not match.")
+        }
+        return output
+    }
+
+    static func queryFrequencies(for descriptor: TimeCardServiceDescriptor) throws -> [TimeCardFrequencyState] {
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+        try requireTimingCapability(connection: connection, bit: 10)
+        return try (1...4).map { counter in
+            var input = TimeCardFrequencyRequestRaw(counter: UInt32(counter))
+            var output = TimeCardFrequencyState()
+            try callInputOutput(connection: connection, selector: 20, input: &input, output: &output)
+            guard output.size == 32, output.counter == counter, output.reserved == 0 else {
+                throw TimeCardClientError.invalidClientLayout
+            }
+            return output
+        }
+    }
+
+    static func setFrequency(for descriptor: TimeCardServiceDescriptor, counter: UInt32,
+                             seconds: UInt32, expectedControl: UInt32) throws -> TimeCardFrequencyState {
+        guard (1...4).contains(counter), seconds <= 255, expectedControl & ~0xff01 == 0 else {
+            throw TimeCardClientError.invalidTimingRequest("Counter must be 1...4 and interval 0...255 seconds.")
+        }
+        let connection = try openConnection(for: descriptor)
+        defer { IOServiceClose(connection) }
+        try requireTimingCapability(connection: connection, bit: 10)
+        var input = TimeCardFrequencyRequestRaw(counter: counter, integrationSeconds: seconds,
+                                                expectedControl: expectedControl)
+        var output = TimeCardFrequencyState()
+        try callInputOutput(connection: connection, selector: 21, input: &input, output: &output)
+        let desired: UInt32 = seconds == 0 ? 0 : seconds << 8 | 1
+        guard output.size == 32, output.counter == counter, output.reserved == 0, output.control == desired else {
+            throw TimeCardClientError.invalidTimingRequest("Counter readback did not match.")
+        }
+        return output
+    }
+
+    private static func requireTimingCapability(connection: io_connect_t, bit: UInt64) throws {
+        guard localABILayoutIsValid else { throw TimeCardClientError.invalidClientLayout }
+        var info = TimeCardInfoRaw()
+        try callOutput(connection: connection, selector: 0, output: &info)
+        guard info.abiVersion >= 10, info.abiVersion <= supportedABIVersion,
+              info.capabilities & (1 << bit) != 0 else {
+            throw TimeCardClientError.invalidTimingRequest("Unavailable for this driver or FPGA image. No timing registers were probed.")
+        }
+    }
+
+    private static func callInputOutput<I, O>(connection: io_connect_t, selector: UInt32,
+                                             input: inout I, output: inout O) throws {
+        var outputSize = MemoryLayout<O>.size
+        let result = withUnsafeBytes(of: &input) { inputBytes in
+            withUnsafeMutableBytes(of: &output) { outputBytes in
+                IOConnectCallStructMethod(connection, selector, inputBytes.baseAddress, inputBytes.count,
+                                           outputBytes.baseAddress, &outputSize)
+            }
+        }
+        guard result == KERN_SUCCESS else { throw TimeCardClientError.methodFailed(selector: selector, result: result) }
+        guard outputSize == MemoryLayout<O>.size else {
+            throw TimeCardClientError.unexpectedOutput(selector: selector, expected: MemoryLayout<O>.size, actual: outputSize)
         }
     }
 

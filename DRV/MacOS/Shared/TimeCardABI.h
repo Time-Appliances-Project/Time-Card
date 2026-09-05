@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define TIMECARD_ABI_VERSION 9u
+#define TIMECARD_ABI_VERSION 10u
 #define TIMECARD_DRIVER_VERSION 0x00000002u
 #define TIMECARD_SERVICE_CLASS "TimeCardDriver"
 #define TIMECARD_DRIVER_BUNDLE_ID "org.opentimeserver.timecard.macos.driver"
@@ -33,6 +33,10 @@ enum TimeCardExternalMethod {
     kTimeCardMethodUARTConfigure = 15,
     kTimeCardMethodUARTRead = 16,
     kTimeCardMethodUARTWrite = 17,
+    kTimeCardMethodClockControlQuery = 18,
+    kTimeCardMethodClockSourceSet = 19,
+    kTimeCardMethodFrequencyQuery = 20,
+    kTimeCardMethodFrequencySet = 21,
     kTimeCardMethodCount
 };
 
@@ -65,7 +69,9 @@ enum TimeCardCapability {
     kTimeCardCapabilityLED = 1u << 5,
     kTimeCardCapabilityI2C = 1u << 6,
     kTimeCardCapabilitySensors = 1u << 7,
-    kTimeCardCapabilityUART = 1u << 8
+    kTimeCardCapabilityUART = 1u << 8,
+    kTimeCardCapabilityClockSource = 1u << 9,
+    kTimeCardCapabilityFrequency = 1u << 10
 };
 
 enum TimeCardSMADirection {
@@ -128,6 +134,50 @@ typedef struct TimeCardTime {
     uint32_t nanoseconds;
     uint32_t reserved;
 } TimeCardTime;
+
+/* ABI v10: append-only typed timing operations. No raw register access. */
+typedef struct TimeCardClockControl {
+    uint32_t size;
+    uint32_t source;
+    uint32_t activeSource;
+    uint32_t supportedSources; /* bits 0..6, bit 30 = regs, bit 31 = ext */
+    uint32_t clockVersion;
+    uint32_t control;
+    uint32_t status;
+    uint32_t reserved;
+} TimeCardClockControl;
+
+typedef struct TimeCardClockSourceRequest {
+    uint32_t size;
+    uint32_t source;
+    uint32_t expectedSource; /* compare before writing, detects stale UI */
+    uint32_t reserved;
+} TimeCardClockSourceRequest;
+
+#define TIMECARD_FREQUENCY_COUNT 4u
+enum TimeCardFrequencyFlag {
+    kTimeCardFrequencyPresent = 1u << 0,
+    kTimeCardFrequencyEnabled = 1u << 1,
+    kTimeCardFrequencyValid = 1u << 2,
+    kTimeCardFrequencyError = 1u << 3,
+    kTimeCardFrequencyOverrun = 1u << 4
+};
+typedef struct TimeCardFrequencyControl {
+    uint32_t size;
+    uint32_t counter; /* 1..4 */
+    uint32_t integrationSeconds; /* 0 = disabled, otherwise 1..255 */
+    uint32_t flags;
+    uint32_t frequencyHz;
+    uint32_t control;
+    uint32_t status;
+    uint32_t reserved;
+} TimeCardFrequencyControl;
+typedef struct TimeCardFrequencyRequest {
+    uint32_t size;
+    uint32_t counter;
+    uint32_t integrationSeconds;
+    uint32_t expectedControl; /* query requires both final fields zero */
+} TimeCardFrequencyRequest;
 
 /* System timestamps are nanoseconds since the Unix epoch. */
 typedef struct TimeCardCrossTimestamp {
@@ -381,6 +431,10 @@ typedef struct TimeCardSensorTelemetry {
 }
 
 static_assert(sizeof(TimeCardTime) == 16, "TimeCardTime ABI changed");
+static_assert(sizeof(TimeCardClockControl) == 32, "Clock control ABI changed");
+static_assert(sizeof(TimeCardClockSourceRequest) == 16, "Clock request ABI changed");
+static_assert(sizeof(TimeCardFrequencyControl) == 32, "Frequency ABI changed");
+static_assert(sizeof(TimeCardFrequencyRequest) == 16, "Frequency request ABI changed");
 static_assert(sizeof(TimeCardCrossTimestamp) == 32,
               "TimeCardCrossTimestamp ABI changed");
 static_assert(sizeof(TimeCardInfo) == 112, "TimeCardInfo ABI changed");

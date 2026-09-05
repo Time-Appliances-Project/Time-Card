@@ -7,7 +7,7 @@ endif()
 
 project(TimeCardMacOS LANGUAGES C CXX)
 
-set(TIMECARDCTL_BUNDLE_VERSION "20")
+set(TIMECARDCTL_BUNDLE_VERSION "21")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED YES)
@@ -32,6 +32,10 @@ if(APPLE)
 endif()
 
 enable_testing()
+add_executable(timecard_timing_tests Tests/TimingTests.cpp)
+target_include_directories(timecard_timing_tests PRIVATE Shared)
+target_compile_options(timecard_timing_tests PRIVATE -Wall -Wextra -Werror)
+add_test(NAME timing_transactions COMMAND timecard_timing_tests)
 add_test(NAME register_map COMMAND timecard_register_tests)
 add_test(
     NAME driver_metadata

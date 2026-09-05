@@ -185,6 +185,12 @@ final class TimeCardMonitor: ObservableObject {
     @Published private(set) var telemetryRecording: TimeCardTelemetryRecording?
     @Published private(set) var commandInProgress = false
     @Published private(set) var commandMessage = ""
+    @Published private(set) var clockControl: TimeCardClockControlState?
+    @Published private(set) var frequencyStates: [TimeCardFrequencyState] = []
+    @Published private(set) var timingRefreshInProgress = false
+    @Published private(set) var timingMessage = ""
+    @Published private(set) var clockControlError = ""
+    @Published private(set) var frequencyError = ""
     @Published private(set) var smaRoutes: [TimeCardSMARoute] = []
     @Published private(set) var smaMessage = ""
     @Published private(set) var sensorTelemetry: TimeCardSensorSnapshot?
@@ -251,6 +257,7 @@ final class TimeCardMonitor: ObservableObject {
         }
         selectedServiceID = serviceID
         selectionGeneration &+= 1
+        clearTimingState()
         stopTelemetryRecording(reason: "Active Time Card changed")
         telemetryHistory.removeAll(keepingCapacity: true)
         snapshot = nil
@@ -914,6 +921,95 @@ final class TimeCardMonitor: ObservableObject {
                     message: self.commandMessage
                 )
             }
+        }
+    }
+
+    private func clearTimingState() {
+        clockControl = nil
+        frequencyStates = []
+        clockControlError = ""
+        frequencyError = ""
+        timingMessage = ""
+    }
+
+    func refreshTiming() {
+        guard !timingRefreshInProgress, !commandInProgress, state == .connected,
+              let current = snapshot else { return }
+        let generation = selectionGeneration
+        let descriptor = current.service
+        timingRefreshInProgress = true
+        Task { [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                let clock: Result<TimeCardClockControlState, Error>? = current.supportsClockSource
+                    ? Result { try TimeCardClient.queryClockControl(for: descriptor) } : nil
+                let frequencies: Result<[TimeCardFrequencyState], Error>? = current.supportsFrequency
+                    ? Result { try TimeCardClient.queryFrequencies(for: descriptor) } : nil
+                return (clock, frequencies)
+            }.value
+            guard let self else { return }
+            self.timingRefreshInProgress = false
+            guard generation == self.selectionGeneration, descriptor.id == self.selectedServiceID,
+                  self.state == .connected, !self.commandInProgress else { return }
+            switch result.0 {
+            case .success(let value): self.clockControl = value; self.clockControlError = ""
+            case .failure(let error): self.clockControl = nil; self.clockControlError = error.localizedDescription
+            case nil: self.clockControl = nil; self.clockControlError = ""
+            }
+            switch result.1 {
+            case .success(let value): self.frequencyStates = value; self.frequencyError = ""
+            case .failure(let error): self.frequencyStates = []; self.frequencyError = error.localizedDescription
+            case nil: self.frequencyStates = []; self.frequencyError = ""
+            }
+        }
+    }
+
+    func setClockSource(_ source: UInt32, expectedSource: UInt32, serviceID: UInt64) {
+        guard snapshot?.supportsClockSource == true, clockControl?.supports(source) == true else { return }
+        performTimingCommand(serviceID: serviceID, description: "Set clock source to \(TimeCardClockControlState.name(source))") { descriptor in
+            _ = try TimeCardClient.setClockSource(for: descriptor, source: source, expectedSource: expectedSource)
+        }
+    }
+
+    func setFrequency(counter: UInt32, seconds: UInt32, expectedControl: UInt32, serviceID: UInt64) {
+        guard snapshot?.supportsFrequency == true else { return }
+        performTimingCommand(serviceID: serviceID, description: "Set counter \(counter) interval to \(seconds) s") { descriptor in
+            _ = try TimeCardClient.setFrequency(for: descriptor, counter: counter, seconds: seconds,
+                                                expectedControl: expectedControl)
+        }
+    }
+
+    private func performTimingCommand(serviceID: UInt64, description: String,
+                                       operation: @escaping @Sendable (TimeCardServiceDescriptor) throws -> Void) {
+        // A read that started while confirmation was open must not silently
+        // discard the confirmed command. The driver serializes both operations.
+        guard !commandInProgress, state == .connected,
+              selectedServiceID == serviceID,
+              let descriptor = services.first(where: { $0.id == serviceID }) else { return }
+        let generation = selectionGeneration
+        commandInProgress = true
+        timingMessage = description + "..."
+        appendSessionLog(severity: .info, category: "Timing", message: timingMessage)
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try operation(descriptor) }
+            }.value
+            guard let self else { return }
+            self.commandInProgress = false
+            guard generation == self.selectionGeneration, self.selectedServiceID == serviceID else {
+                self.appendSessionLog(severity: .warning, category: "Timing",
+                                      message: "Timing command finished for previous service \(serviceID): \(result).")
+                return
+            }
+            switch result {
+            case .success:
+                self.timingMessage = description + ". Readback verified."
+                self.appendSessionLog(severity: .success, category: "Timing", message: self.timingMessage)
+            case .failure(let error):
+                self.timingMessage = description + " failed: " + error.localizedDescription
+                self.appendSessionLog(severity: .error, category: "Timing", message: self.timingMessage)
+            }
+            self.refreshTiming()
+            self.refresh()
         }
     }
 
@@ -2368,6 +2464,8 @@ final class TimeCardMonitor: ObservableObject {
     ) {
         let newServiceID = descriptor?.id
         if selectedServiceID != newServiceID {
+            selectionGeneration &+= 1
+            clearTimingState()
             stopTelemetryRecording(reason: "Time Card disconnected or selection changed")
             telemetryHistory.removeAll(keepingCapacity: true)
             selectedServiceID = newServiceID

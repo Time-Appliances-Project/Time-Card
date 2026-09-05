@@ -8,6 +8,7 @@ private final class ActivationRequestDelegate: NSObject,
     OSSystemExtensionRequestDelegate {
     private let driverIdentifier: String
     private var done = false
+    private var exitStatus: Int32 = 1
 
     init(driverIdentifier: String) {
         self.driverIdentifier = driverIdentifier
@@ -27,7 +28,7 @@ private final class ActivationRequestDelegate: NSObject,
             RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.1))
         }
         if done {
-            return 0
+            return exitStatus
         }
         fputs("TimeCardMacOS: activation request timed out\n", stderr)
         return 1
@@ -59,6 +60,7 @@ private final class ActivationRequestDelegate: NSObject,
         didFinishWithResult result: OSSystemExtensionRequest.Result
     ) {
         fputs("TimeCardMacOS: activation result \(result.rawValue)\n", stderr)
+        exitStatus = 0
         done = true
     }
 
@@ -67,6 +69,7 @@ private final class ActivationRequestDelegate: NSObject,
         didFailWithError error: Error
     ) {
         fputs("TimeCardMacOS: activation failed: \(error)\n", stderr)
+        exitStatus = 1
         done = true
     }
 }

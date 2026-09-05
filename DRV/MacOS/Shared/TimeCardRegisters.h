@@ -337,6 +337,45 @@ TimeCardRegisterMapHasTOD(const TimeCardRegisterMap *map)
     return map != NULL && map->todOffset != 0;
 }
 
+static inline uint64_t
+TimeCardFrequencyOffset(const TimeCardRegisterMap *map, uint64_t barSize,
+                         uint32_t counter)
+{
+    /* Versionless cores: the original classic TimeCard design omits them.
+     * Revision-02 LitePCIe has all four in its published block design.
+     * Classic/ART/ADVA need an exact-image presence contract before any probe.
+     */
+    if (map == NULL || counter < 1 || counter > TIMECARD_FREQUENCY_COUNT ||
+        map->layout != kTimeCardLayoutLitePCIe ||
+        (map->boardProfile != kTimeCardBoardFacebook &&
+         map->boardProfile != kTimeCardBoardCelestica))
+        return 0;
+    const uint64_t offset = 0x03200000ull + (counter - 1) * 0x10000ull;
+    return TimeCardRangeFits(barSize, offset, 8) ? offset : 0;
+}
+
+static inline uint32_t
+TimeCardClockSourceBit(uint32_t source)
+{
+    if (source <= 6u) return 1u << source;
+    if (source == 0xfeu) return 1u << 30;
+    if (source == 0xffu) return 1u << 31;
+    return 0;
+}
+
+static inline uint32_t
+TimeCardClockSourceMask(const TimeCardRegisterMap *map, uint32_t version)
+{
+    if (map == NULL || map->layout == kTimeCardLayoutUnknown ||
+        version < 0x01020000u || (version >> 24) > 2u)
+        return 0;
+    uint32_t mask = 0x3fu | (1u << 30) | (1u << 31);
+    if (!TimeCardRegisterMapHasTOD(map)) mask &= ~(1u << 1);
+    if (version >= 0x01080000u) mask |= 1u << 6;
+    /* NTP, SyncE, and dynamic sources require synthesis contracts. */
+    return mask;
+}
+
 static inline bool
 TimeCardRegisterMapHasTODTelemetry(const TimeCardRegisterMap *map,
                                    uint64_t barSize)

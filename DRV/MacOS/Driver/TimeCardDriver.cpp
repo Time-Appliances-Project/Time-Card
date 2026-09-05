@@ -12,6 +12,7 @@
 #include "TimeCardDriver.h"
 #include "TimeCardUserClient.h"
 #include "TimeCardRegisters.h"
+#include "TimeCardTiming.h"
 
 struct TimeCardDriver_IVars {
     IOPCIDevice *pciDevice;
@@ -496,6 +497,90 @@ TimeCardDriver::GetCrossTimestamp(TimeCardCrossTimestamp *timestamp)
     return result;
 }
 
+struct TimeCardTimingIO {
+    TimeCardDriver_IVars *state;
+    bool read(uint64_t offset, uint32_t *value) {
+        if (!TimeCardRangeFits(state->barSize, offset, sizeof(uint32_t))) return false;
+        return ReadRegister32(state->pciDevice, state->memoryIndex, offset, value);
+    }
+    void write(uint64_t offset, uint32_t value) {
+        if (TimeCardRangeFits(state->barSize, offset, sizeof(uint32_t)))
+            WriteRegister32(state->pciDevice, state->memoryIndex, offset, value);
+    }
+};
+
+static kern_return_t
+TimeCardTimingStatus(TimeCardTimingResult result)
+{
+    switch (result) {
+    case TimeCardTimingResult::success: return kIOReturnSuccess;
+    case TimeCardTimingResult::invalid: return kIOReturnBadArgument;
+    case TimeCardTimingResult::unsupported: return kIOReturnUnsupported;
+    case TimeCardTimingResult::readFailed: return kIOReturnNotResponding;
+    case TimeCardTimingResult::stale: return kIOReturnBusy;
+    case TimeCardTimingResult::verifyFailed: return kIOReturnIOError;
+    case TimeCardTimingResult::rollbackFailed:
+        os_log(OS_LOG_DEFAULT, "TimeCard: ERROR timing rollback could not be verified");
+        return kIOReturnError;
+    }
+    return kIOReturnError;
+}
+
+kern_return_t
+TimeCardDriver::QueryClockControl(TimeCardClockControl *response)
+{
+    if (response == nullptr) return kIOReturnBadArgument;
+    if (!ivars->deviceOpen) return kIOReturnNotReady;
+    IOLockLock(ivars->registerLock);
+    TimeCardTimingIO io{ivars};
+    const auto result = TimeCardQueryClockControl(io, ivars->registers, *response);
+    IOLockUnlock(ivars->registerLock);
+    return TimeCardTimingStatus(result);
+}
+
+kern_return_t
+TimeCardDriver::SetClockSource(const TimeCardClockSourceRequest *request,
+                              TimeCardClockControl *response)
+{
+    if (request == nullptr || response == nullptr) return kIOReturnBadArgument;
+    if (!ivars->deviceOpen) return kIOReturnNotReady;
+    IOLockLock(ivars->registerLock);
+    TimeCardTimingIO io{ivars};
+    const auto result = TimeCardApplyClockSource(io, ivars->registers, *request, *response);
+    IOLockUnlock(ivars->registerLock);
+    return TimeCardTimingStatus(result);
+}
+
+kern_return_t
+TimeCardDriver::QueryFrequency(const TimeCardFrequencyRequest *request,
+                              TimeCardFrequencyControl *response)
+{
+    if (request == nullptr || response == nullptr || request->size != sizeof(*request) ||
+        request->integrationSeconds != 0 || request->expectedControl != 0)
+        return kIOReturnBadArgument;
+    if (!ivars->deviceOpen) return kIOReturnNotReady;
+    IOLockLock(ivars->registerLock);
+    TimeCardTimingIO io{ivars};
+    const auto result = TimeCardQueryFrequency(io, ivars->registers, ivars->barSize,
+                                               request->counter, *response);
+    IOLockUnlock(ivars->registerLock);
+    return TimeCardTimingStatus(result);
+}
+
+kern_return_t
+TimeCardDriver::SetFrequency(const TimeCardFrequencyRequest *request,
+                            TimeCardFrequencyControl *response)
+{
+    if (request == nullptr || response == nullptr) return kIOReturnBadArgument;
+    if (!ivars->deviceOpen) return kIOReturnNotReady;
+    IOLockLock(ivars->registerLock);
+    TimeCardTimingIO io{ivars};
+    const auto result = TimeCardApplyFrequency(io, ivars->registers, ivars->barSize,
+                                               *request, *response);
+    IOLockUnlock(ivars->registerLock);
+    return TimeCardTimingStatus(result);
+}
+
 kern_return_t
 TimeCardDriver::GetInfo(TimeCardInfo *info)
 {
@@ -525,6 +610,10 @@ TimeCardDriver::GetInfo(TimeCardInfo *info)
         return kIOReturnNotResponding;
     }
     info->validFields |= kTimeCardInfoValidClockVersion;
+    if (TimeCardClockSourceMask(&ivars->registers, info->clockVersion) != 0)
+        info->capabilities |= kTimeCardCapabilityClockSource;
+    if (TimeCardFrequencyOffset(&ivars->registers, ivars->barSize, 4) != 0)
+        info->capabilities |= kTimeCardCapabilityFrequency;
 
     if (info->clockVersion >= kTimeCardClockVersionStatus &&
         ReadRegister32(
@@ -3207,6 +3296,67 @@ UARTWriteAction(OSObject *, void *reference,
     return result;
 }
 
+static kern_return_t
+ClockControlQueryAction(OSObject *, void *reference,
+                        IOUserClientMethodArguments *arguments)
+{
+    TimeCardClockControl response = {};
+    const auto result = static_cast<TimeCardDriver *>(reference)->QueryClockControl(&response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput = OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr) return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+ClockSourceSetAction(OSObject *, void *reference,
+                 IOUserClientMethodArguments *arguments)
+{
+    if (arguments->structureInput == nullptr) return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardClockSourceRequest *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardClockControl response = {};
+    const auto result = static_cast<TimeCardDriver *>(reference)->SetClockSource(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput = OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr) return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+FrequencyQueryAction(OSObject *, void *reference,
+                 IOUserClientMethodArguments *arguments)
+{
+    if (arguments->structureInput == nullptr) return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardFrequencyRequest *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardFrequencyControl response = {};
+    const auto result = static_cast<TimeCardDriver *>(reference)->QueryFrequency(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput = OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr) return kIOReturnNoMemory;
+    }
+    return result;
+}
+
+static kern_return_t
+FrequencySetAction(OSObject *, void *reference,
+                 IOUserClientMethodArguments *arguments)
+{
+    if (arguments->structureInput == nullptr) return kIOReturnBadArgument;
+    auto *request = static_cast<const TimeCardFrequencyRequest *>(
+        arguments->structureInput->getBytesNoCopy());
+    TimeCardFrequencyControl response = {};
+    const auto result = static_cast<TimeCardDriver *>(reference)->SetFrequency(request, &response);
+    if (result == kIOReturnSuccess) {
+        arguments->structureOutput = OSData::withBytes(&response, sizeof(response));
+        if (arguments->structureOutput == nullptr) return kIOReturnNoMemory;
+    }
+    return result;
+}
+
 static const IOUserClientMethodDispatch kTimeCardDispatch[
     kTimeCardMethodCount] = {
     {GetInfoAction, false, 0, 0, 0, sizeof(TimeCardInfo)},
@@ -3238,6 +3388,13 @@ static const IOUserClientMethodDispatch kTimeCardDispatch[
      sizeof(TimeCardUARTTransfer)},
     {UARTWriteAction, false, 0, sizeof(TimeCardUARTTransfer), 0,
      sizeof(TimeCardUARTTransfer)},
+    {ClockControlQueryAction, false, 0, 0, 0, sizeof(TimeCardClockControl)},
+    {ClockSourceSetAction, false, 0, sizeof(TimeCardClockSourceRequest), 0,
+     sizeof(TimeCardClockControl)},
+    {FrequencyQueryAction, false, 0, sizeof(TimeCardFrequencyRequest), 0,
+     sizeof(TimeCardFrequencyControl)},
+    {FrequencySetAction, false, 0, sizeof(TimeCardFrequencyRequest), 0,
+     sizeof(TimeCardFrequencyControl)},
 };
 
 kern_return_t

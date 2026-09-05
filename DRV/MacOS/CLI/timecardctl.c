@@ -27,6 +27,10 @@ print_usage(FILE *stream)
             "usage: timecardctl status\n"
             "       timecardctl get\n"
             "       timecardctl set-card-from-system\n"
+            "       timecardctl clock-control\n"
+            "       timecardctl clock-source source [expected-source]\n"
+            "       timecardctl frequency [counter]\n"
+            "       timecardctl frequency-set counter seconds\n"
             "       timecardctl sma [connector]\n"
             "       timecardctl sma-set connector input|output function\n"
             "       timecardctl sma-set connector disabled\n"
@@ -259,6 +263,7 @@ command_status(io_connect_t connection)
             info.abiVersion, TIMECARD_MIN_COMPATIBLE_ABI_VERSION, "status");
 
     printf("PCI device:       %04x:%04x\n", info.vendorID, info.deviceID);
+    printf("User-client ABI:  %u\n", info.abiVersion);
     printf("PCI revision:     %02x\n", info.pciRevision & 0xffu);
     printf("Board profile:    %s\n",
            TimeCardBoardProfileName(info.boardProfile));
@@ -273,7 +278,7 @@ command_status(io_connect_t connection)
     }
     printf("Register layout:  %s\n",
            TimeCardRegisterLayoutName(info.layout));
-    printf("Capabilities:     %s%s%s%s%s%s%s%s%s\n",
+    printf("Capabilities:     %s%s%s%s%s%s%s%s%s%s%s\n",
            (info.capabilities & kTimeCardCapabilityReadClock) != 0 ?
                "clock-read" : "no-clock-read",
            (info.capabilities & kTimeCardCapabilitySetClock) != 0 ?
@@ -291,7 +296,11 @@ command_status(io_connect_t connection)
            (info.capabilities & kTimeCardCapabilitySensors) != 0 ?
                ", sensors" : "",
            (info.capabilities & kTimeCardCapabilityUART) != 0 ?
-               ", UART" : "");
+               ", UART" : "",
+           (info.capabilities & kTimeCardCapabilityClockSource) != 0 ?
+               ", clock-source" : "",
+           (info.capabilities & kTimeCardCapabilityFrequency) != 0 ?
+               ", frequency-counters" : "");
     printf("Clock offset:     0x%" PRIx64 "\n", info.clockOffset);
     if ((info.validFields & kTimeCardInfoValidClockVersion) != 0)
         printf("Clock version:    0x%08x\n", info.clockVersion);
@@ -1607,6 +1616,93 @@ command_set_card_from_system(io_connect_t connection)
     return 0;
 }
 
+static int
+require_timing_capability(io_connect_t connection, uint64_t capability)
+{
+    TimeCardInfo info = {0};
+    if (call_output(connection, kTimeCardMethodGetInfo, &info, sizeof(info))) return 1;
+    if (!driver_abi_supported(info.abiVersion, 10u))
+        return report_unsupported_abi(info.abiVersion, 10u, "timing control");
+    if ((info.capabilities & capability) == 0) {
+        fprintf(stderr, "timecardctl: timing feature unavailable for this FPGA image. "
+                "No optional timing registers were probed.\n");
+        return 1;
+    }
+    return 0;
+}
+
+static void
+print_clock_control(const TimeCardClockControl *clock)
+{
+    printf("Configured source: 0x%02x\nActive source:     0x%02x\n"
+           "Supported mask:    0x%08x\nClock version:     0x%08x\n"
+           "Clock control:     0x%08x\nClock status:      0x%08x\n",
+           clock->source, clock->activeSource, clock->supportedSources,
+           clock->clockVersion, clock->control, clock->status);
+}
+
+static int
+command_clock_control(io_connect_t connection, int argc, char **argv, bool set)
+{
+    if ((!set && argc != 2) || (set && (argc < 3 || argc > 4))) return 2;
+    unsigned long source = set ? parse_ulong(argv[2], "clock source") : 0;
+    unsigned long expected = set && argc == 4 ? parse_ulong(argv[3], "expected source") : 0;
+    if (source > 255 || expected > 255 || (set && TimeCardClockSourceBit((uint32_t)source) == 0)) {
+        fprintf(stderr, "timecardctl: source must be 0...6, 0xfe, or 0xff\n");
+        return 2;
+    }
+    if (require_timing_capability(connection, kTimeCardCapabilityClockSource)) return 1;
+    TimeCardClockControl response = {0};
+    if (call_output(connection, kTimeCardMethodClockControlQuery, &response, sizeof(response))) return 1;
+    if (set) {
+        TimeCardClockSourceRequest request = {
+            .size = sizeof(request), .source = (uint32_t)source,
+            .expectedSource = argc == 4 ? (uint32_t)expected : response.source,
+        };
+        if (call_inout(connection, kTimeCardMethodClockSourceSet, &request, sizeof(request),
+                       &response, sizeof(response))) return 1;
+        printf("Clock source readback verified.\n");
+    }
+    print_clock_control(&response);
+    return 0;
+}
+
+static int
+command_frequency(io_connect_t connection, int argc, char **argv, bool set)
+{
+    if ((!set && (argc < 2 || argc > 3)) || (set && argc != 4)) return 2;
+    unsigned long first = argc >= 3 ? parse_ulong(argv[2], "counter") : 1;
+    unsigned long last = argc >= 3 ? first : TIMECARD_FREQUENCY_COUNT;
+    unsigned long seconds = set ? parse_ulong(argv[3], "integration seconds") : 0;
+    if (first < 1 || last > 4 || seconds > 255) {
+        fprintf(stderr, "timecardctl: counter must be 1...4; interval 0...255 seconds (0 disables)\n");
+        return 2;
+    }
+    if (require_timing_capability(connection, kTimeCardCapabilityFrequency)) return 1;
+    for (unsigned long counter = first; counter <= last; ++counter) {
+        TimeCardFrequencyRequest request = {.size = sizeof(request), .counter = (uint32_t)counter};
+        TimeCardFrequencyControl response = {0};
+        if (call_inout(connection, kTimeCardMethodFrequencyQuery, &request, sizeof(request),
+                       &response, sizeof(response))) return 1;
+        if (set) {
+            request.integrationSeconds = (uint32_t)seconds;
+            request.expectedControl = response.control;
+            if (call_inout(connection, kTimeCardMethodFrequencySet, &request, sizeof(request),
+                           &response, sizeof(response))) return 1;
+        }
+        const bool enabled = (response.flags & kTimeCardFrequencyEnabled) != 0;
+        const bool error = (response.flags & kTimeCardFrequencyError) != 0;
+        const bool overrun = (response.flags & kTimeCardFrequencyOverrun) != 0;
+        const bool valid = enabled && response.integrationSeconds > 0 && !error && !overrun &&
+            (response.flags & kTimeCardFrequencyValid) != 0;
+        printf("Counter %lu: %s, integration %u s, control 0x%08x, status 0x%08x\n",
+               counter, !enabled ? "disabled" : error ? "error" : overrun ? "overrun" :
+               valid ? "valid" : "waiting", response.integrationSeconds, response.control, response.status);
+        if (valid) printf("Frequency: %u Hz\n", response.frequencyHz);
+    }
+    return 0;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1625,6 +1721,14 @@ main(int argc, char **argv)
         status = command_get(connection);
     else if (strcmp(argv[1], "set-card-from-system") == 0 && argc == 2)
         status = command_set_card_from_system(connection);
+    else if (strcmp(argv[1], "clock-control") == 0)
+        status = command_clock_control(connection, argc, argv, false);
+    else if (strcmp(argv[1], "clock-source") == 0)
+        status = command_clock_control(connection, argc, argv, true);
+    else if (strcmp(argv[1], "frequency") == 0)
+        status = command_frequency(connection, argc, argv, false);
+    else if (strcmp(argv[1], "frequency-set") == 0)
+        status = command_frequency(connection, argc, argv, true);
     else if (strcmp(argv[1], "sma") == 0)
         status = command_sma(connection, argc, argv);
     else if (strcmp(argv[1], "sma-set") == 0)

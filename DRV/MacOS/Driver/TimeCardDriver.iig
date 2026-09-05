@@ -45,6 +45,13 @@ public:
                            TimeCardUARTTransfer *response) LOCALONLY;
     kern_return_t WriteUART(const TimeCardUARTTransfer *request,
                             TimeCardUARTTransfer *response) LOCALONLY;
+    kern_return_t QueryClockControl(TimeCardClockControl *response) LOCALONLY;
+    kern_return_t SetClockSource(const TimeCardClockSourceRequest *request,
+                                 TimeCardClockControl *response) LOCALONLY;
+    kern_return_t QueryFrequency(const TimeCardFrequencyRequest *request,
+                                 TimeCardFrequencyControl *response) LOCALONLY;
+    kern_return_t SetFrequency(const TimeCardFrequencyRequest *request,
+                               TimeCardFrequencyControl *response) LOCALONLY;
 };
 
 #endif /* TIMECARD_DRIVER_IIG */

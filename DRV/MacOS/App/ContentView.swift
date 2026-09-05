@@ -86,7 +86,7 @@ struct ContentView: View {
                 case .sma:
                     SMARoutingView()
                 case .timing:
-                    CapabilityWorkspaceView(workspace: .timing)
+                    TimingControlsView()
                 case .fpga:
                     CapabilityWorkspaceView(workspace: .fpga)
                 case .sensors:
@@ -323,6 +323,7 @@ private struct PrecisionClockView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                ClockSourceControlPanel()
                 if let snapshot = monitor.snapshot {
                     HStack(spacing: 14) {
                         MetricCard(
@@ -4155,7 +4156,7 @@ private enum MacWorkspace: String {
         case .timing:
             return [
                 ("Periodic generators", "Needs generator query/control ABI"),
-                ("Frequency counters", "Needs counter query/control ABI"),
+                ("Frequency counters", "ABI v10 query/control for validated revision-02 LitePCIe images"),
                 ("Future PHC/TAI starts", "Needs trusted time-scale contract"),
                 ("Completion/error events", "Needs event FIFO ABI"),
             ]
@@ -7250,7 +7251,7 @@ private struct TimeCardFPGACoreReadiness: Identifiable {
                 status(live: has("Clock read")),
                 clockEvidence,
                 has("Clock set")
-                    ? "Pair with a discipline service before one-click source changes."
+                    ? "Use guarded source selection in Precision Clock; system discipline remains separate."
                     : "Expose the guarded clock-set selector for discipline workflows.",
                 "clock"
             ),
@@ -7274,8 +7275,20 @@ private struct TimeCardFPGACoreReadiness: Identifiable {
                 snapshot?.todTelemetryAvailable == true
                     ? "Live" : (has("ToD") ? "Partial" : (connected ? "Unavailable" : "Waiting")),
                 todEvidence,
-                "Add read-back-verified source selection before profile apply.",
+                "Validate the time-scale contract before automated profile apply.",
                 "calendar.badge.clock"
+            ),
+            row(
+                "clock-source-selector",
+                "Clock and time scale",
+                "Clock-source selector",
+                "Configured and active source",
+                status(live: false, ready: snapshot?.supportsClockSource == true),
+                snapshot?.supportsClockSource == true
+                    ? "ABI v10 exposes the source mask, configured input, and active input."
+                    : "Clock-source controls require ABI v10 and a supported clock version.",
+                "Apply with confirmation in Precision Clock or Generators; stale writes are rejected.",
+                "arrow.triangle.branch"
             ),
             row(
                 "pps-master-slave",
@@ -7365,9 +7378,11 @@ private struct TimeCardFPGACoreReadiness: Identifiable {
                 "Signal I/O",
                 "Frequency counters",
                 "Counter panel",
-                connected ? "ABI needed" : "Waiting",
-                "Counter results and gate intervals are not exposed by the current ABI.",
-                "Add counter query, gate-time configuration, and overflow reporting.",
+                snapshot?.supportsFrequency == true ? "Ready" : (connected ? "Unavailable" : "Waiting"),
+                snapshot?.supportsFrequency == true
+                    ? "ABI v10 provides four counters, integration control, error and overrun reporting."
+                    : "Counter presence is not verified for this image; optional addresses are not probed.",
+                "Open Generators for validated LitePCIe counters. Classic/ART/ADVA need exact-image contracts.",
                 "number"
             ),
             row(
@@ -7907,14 +7922,14 @@ private struct TimeCardConfigurationProfilePlan: Identifiable {
                 name: "PTP disciplined",
                 description: "Use the PTP clock source exposed by the FPGA.",
                 state: connected ? "Planned" : "Waiting",
-                detail: "The current macOS driver does not expose a Linux-style /dev/ptpN device or a PTP source-control ABI.",
+                detail: "The PTP FPGA source is selectable on supported cores through ABI v10. A macOS PTP discipline service is still required.",
                 actions: [
                     "Expose a macOS PHC or service-owned PTP discipline endpoint.",
                     "Read back the FPGA PTP source selection.",
                     "Start clock discipline only after source and time scale are verified.",
                 ],
                 blockers: connected
-                    ? ["PTP source ABI", "macOS PHC service surface"]
+                    ? missingProfileRequirements([(snapshot?.supportsClockSource == true, "Clock-source capability")]) + ["macOS PHC service surface"]
                     : ["Time Card driver connection"]
             ),
             TimeCardConfigurationProfilePlan(

@@ -34,7 +34,11 @@ The current implementation provides:
 - Bracketed card/system cross timestamps
 - Version-gated clock and TOD status reads
 - Capability and field-validity reporting for absent or gated registers
-- A versioned, size-checked user-client ABI v9
+- A versioned, size-checked user-client ABI v10
+- Guarded clock-source query/set with supported-source masks, active-source
+  readback, expected-state checks, and verified rollback on failed writes
+- Four frequency counters with integration controls and error/overrun states
+  on the validated Meta/Celestica revision-02 LitePCIe register layout
 - SMA connector query and guarded route setting through DriverKit, including
   Linux-compatible fixed-route handling for FPGA images without writable SMA
   routing GPIO
@@ -93,6 +97,8 @@ The current implementation provides:
   - a board-variant compatibility matrix for Meta/Facebook, Celestica R4006,
     Orolia/Safran ART, ADVA, and ADVA X1 profiles, also exported in support ZIPs
   - a rolling bracketed sampling-window chart
+  - clock-source selection with confirmation in Precision Clock and Generators,
+    plus capability-gated frequency cards and timing snapshot JSON export
   - an interactive Telemetry Studio with one-hour bounded history, selectable
     time ranges, sampling-window median/p95/p99 and histogram, valid ToD GNSS
     satellite history, per-sensor temperature charts, point inspection, and
@@ -112,6 +118,7 @@ The current implementation provides:
     reports, and session-log text/JSON, plus support ZIP session-log JSON
   - clear user-client entitlement and restart diagnostics
 - `timecardctl` commands for `status`, `get`, `set-card-from-system`, `sma`,
+  `clock-control`, `clock-source`, `frequency`, `frequency-set`,
   `sma-set`, `led`, `led-set`, `led-sma-auto`, `led-gnss-auto`, `led-auto`,
   `i2c-status`, `i2c-scan`, `i2c-read`, `i2c-mux`, `sensors`,
   `uart-observe`, `uart-config`, `uart-read`, `uart-capture`,
@@ -152,6 +159,45 @@ Driver/    PCIDriverKit extension and user client
 Shared/    Stable C ABI and hardware register definitions
 Tests/     Register-map, safety, bundle, and Swift model tests
 ```
+
+## Clock sources and frequency counters
+
+App build 62 bundles driver build 25 (ABI v10). Activate the bundled driver
+update before using the new controls. Older ABI v7-v9 drivers remain usable
+for their existing features; the new controls stay disabled.
+
+**Precision Clock** and **Generators** show the configured source separately
+from the active input. Source changes require confirmation, preserve the PHC
+time and control register, reject a stale expected source, and verify readback.
+If readback fails, the driver restores and verifies the previous setting. A
+rollback verification failure is reported explicitly. Selecting a source does
+not guarantee that the corresponding reference signal is connected or locked.
+NTP, SyncE, and Dynamic remain gated on exact-image synthesis contracts. DCF
+requires clock core v1.8 or newer. No macOS system-time setting is performed.
+
+Frequency counters have four channels, 1-255 second integration, and an explicit
+zero-second disable setting. Valid, waiting, disabled, error, and overrun states
+are distinct. Counter controls do not change SMA routing or enable generators.
+Original classic FPGA block designs omit these versionless cores, while the
+repository's revision-02 LitePCIe block design includes all four. Accordingly,
+classic/ART/ADVA counter addresses are not probed without an exact-image presence
+contract. LitePCIe counter operation still requires physical-card validation.
+
+```sh
+timecardctl clock-control
+# Explicit source changes can interrupt downstream synchronization:
+timecardctl clock-source 3 3   # PPS expected; already-PPS is a no-write check
+timecardctl frequency         # Unsupported images are rejected without probing
+timecardctl frequency-set 1 10
+timecardctl frequency-set 1 0  # Disable counter 1
+```
+
+The source mask uses bits 0-6 for source IDs 0-6, bit 30 for Registers (0xfe),
+and bit 31 for External (0xff). New selectors 18-21 append to the existing ABI;
+all prior structure sizes and selectors are unchanged. Timing JSON exports
+include PCI identity, service ID, ABI, register layout, raw control/status,
+decoded fields, and availability/errors. Raw valid bits must be interpreted
+together with enabled/error/overrun flags before using a frequency value.
 
 ## Receiver console and telemetry sessions
 
@@ -332,8 +378,9 @@ and it does not yet apply a UTC/TAI correction.
 - Cross timestamps currently bracket the MMIO clock read with macOS realtime
   samples. PCIe PTM support is not implemented.
 - UART interrupt-backed streaming, PPS interrupts, external timestamp inputs
-  beyond SMA route readback, arbitrary raw I2C writes, SPI flash, frequency
-  counters, and signal generators are not implemented.
+  beyond SMA route readback, arbitrary raw I2C writes, SPI flash, and signal
+  generators are not implemented. Frequency counters are gated to the
+  revision-02 LitePCIe contract described above.
 - I2C support intentionally exposes diagnostics, probes, bounded reads, and mux
   control only. General writes remain gated until the Control Center has device
   profiles, paging rules, and write-safety warnings.

@@ -7,7 +7,7 @@ enum TimeCardClientTests {
     static func main() {
         precondition(
             TimeCardClient.localABILayoutIsValid,
-            "Swift structures must preserve the DriverKit ABI v9 layout"
+            "Swift structures must preserve the DriverKit ABI v10 layout"
         )
 
         let utcStatus: UInt32 = (1 << 8) | (1 << 16) | 18
@@ -69,6 +69,34 @@ enum TimeCardClientTests {
         ])
         precondition(snapshot.supportsUART)
         precondition(snapshot.supportsUARTWrite)
+        precondition(!snapshot.supportsClockSource && !snapshot.supportsFrequency)
+        var clockControl = TimeCardClockControlState(source: 3, activeSource: 3,
+                                                     supportedSources: 0xc000003f)
+        precondition(clockControl.availableSources == [0, 1, 2, 3, 4, 5, 0xfe, 0xff])
+        precondition(!clockControl.supports(6) && !clockControl.supports(7))
+        precondition(!clockControl.supports(8) && !clockControl.supports(0xfd))
+        precondition(!clockControl.supports(UInt32.max))
+        clockControl.supportedSources |= 1 << 6
+        precondition(clockControl.supports(6))
+        precondition(TimeCardClockControlState.name(3) == "PPS")
+        precondition(TimeCardClockControlState.name(0xfe) == "Registers")
+        var counter = TimeCardFrequencyState(counter: 1, integrationSeconds: 1, flags: 7,
+                                              frequencyHz: 10_000_000, control: 0x101)
+        precondition(counter.measurementHz == 10_000_000 && counter.stateLabel == "Valid measurement")
+        counter.flags = 31
+        precondition(counter.measurementHz == nil && counter.stateLabel == "Measurement error")
+        counter.flags = 23
+        precondition(counter.measurementHz == nil && counter.stateLabel == "Counter overrun")
+        counter.flags = 5
+        precondition(counter.measurementHz == nil && counter.stateLabel == "Disabled")
+        counter.flags = 3
+        precondition(counter.measurementHz == nil && counter.stateLabel == "Waiting for measurement")
+        counter.flags = 7; counter.integrationSeconds = 0
+        precondition(counter.measurementHz == nil && counter.stateLabel == "Invalid integration interval")
+        counter.flags = 0
+        precondition(counter.measurementHz == nil && counter.stateLabel == "Unavailable")
+        let timingJSON = try! JSONEncoder().encode(clockControl)
+        precondition(try! JSONDecoder().decode(TimeCardClockControlState.self, from: timingJSON) == clockControl)
 
         let i2c = TimeCardI2CStatusSnapshot(
             flags: (1 << 0) | (1 << 1) | (1 << 3) | (1 << 4),

@@ -74,10 +74,17 @@ the bounded ABI v8 read path.
 
 ## Milestone 3: timing configuration
 
-- Clock-source selection
+Status: partially implemented in ABI v10. Clock-source query/set and guarded
+frequency-counter controls have SwiftUI and CLI interfaces, shared transaction
+tests, expected-state checks, and verified rollback. Counter presence is
+restricted to the Meta/Celestica revision-02 LitePCIe layout; classic/ART/ADVA
+images remain gated until exact-image presence is established.
+
+- Clock-source selection, implemented with supported-source masks and confirmation
 - IRIG-B and DCF configuration
 - Periodic outputs and signal generators
-- Frequency counters and timestamp channels
+- Frequency counters, implemented for the validated LitePCIe contract
+- Timestamp channels
 - SwiftUI configuration views; the read-only monitoring foundation is in
   milestone 1
 

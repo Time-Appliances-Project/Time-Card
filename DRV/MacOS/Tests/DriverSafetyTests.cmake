@@ -452,7 +452,7 @@ endforeach()
 set(abi_source "${TIMECARD_SOURCE_DIR}/Shared/TimeCardABI.h")
 file(READ "${abi_source}" abi)
 foreach(required_uart_abi IN ITEMS
-        "TIMECARD_ABI_VERSION 9u"
+        "TIMECARD_ABI_VERSION 10u"
         "kTimeCardCapabilityUART"
         "TimeCardUARTObserve"
         "TimeCardUARTConfig"
@@ -466,6 +466,20 @@ foreach(required_uart_abi IN ITEMS
     if(uart_abi_offset EQUAL -1)
         message(FATAL_ERROR
             "Shared ABI must expose guarded macOS UART stream access")
+    endif()
+endforeach()
+
+file(READ "${TIMECARD_SOURCE_DIR}/Shared/TimeCardTiming.h" timing_transactions)
+foreach(required_timing_guard IN ITEMS
+        "TimeCardTimingResult::stale"
+        "TimeCardTimingResult::rollbackFailed"
+        "request.expectedSource"
+        "request.expectedControl"
+        "TimeCardClockSourceMask"
+        "TimeCardFrequencyOffset")
+    string(FIND "${timing_transactions}" "${required_timing_guard}" timing_guard_offset)
+    if(timing_guard_offset EQUAL -1)
+        message(FATAL_ERROR "Timing transactions lost guard: ${required_timing_guard}")
     endif()
 endforeach()
 
