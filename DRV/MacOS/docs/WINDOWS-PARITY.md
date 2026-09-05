@@ -51,13 +51,27 @@ physically validated.
   and recording UI checks remain pending because the Mac was at its login
   screen during deployment.
 - Build 62 and CLI build 21 were installed on `.141`, with recoverable backups
-  of build 61 and CLI 20. macOS accepted driver build 25 activation, but the
-  bound PCI service continued to report ABI v9 from the build 24 process,
-  listed as `terminating for upgrade via delegate`. New timing controls remain
-  gated until that running driver is replaced. A restart is pending; live ABI
-  v10 source-control validation has not yet been performed. Existing PHC/PPS
-  status, SMA fixed routes, UART observe, and five environmental readings were
-  still functional after installation. No clock source was changed.
+  of build 61 and CLI 20. macOS initially left build 24 bound to the PCI card,
+  listed as `terminating for upgrade via delegate`. The authorized restart on
+  September 4, 2026 completed the replacement: the bound service now reports
+  ABI v10, with build 25 activated and enabled.
+- Live ABI v10 checks returned configured and active PPS source `0x03`, source
+  mask `0xc000003f`, core version `0x01020000`, and enabled clock control `0x01`.
+  Reapplying the existing PPS source succeeded through the no-write path. A
+  stale expected source was rejected with `kIOReturnBusy` (`0xe00002d5`). The
+  source remained PPS throughout; changing to a different reference and live
+  rollback fault injection were not tested on the physical card.
+- The classic image correctly omits the frequency-counter capability. The CLI
+  rejects counter access without probing optional timing registers. Five
+  consecutive PHC reads advanced monotonically, with 11-12 microsecond host
+  sampling windows in that short check. Five environmental readings, SMA fixed
+  routes, and non-draining observation on all four UART ports remained functional. Both
+  installed signatures passed verification, and the VNC port was reachable.
+- Clock status was initially not synchronized after restart, then reported
+  `0x01` (in sync) within approximately four minutes, with PPS still configured
+  and active. The raw PHC remains boot-relative with a 1970-looking epoch; lock
+  does not establish UTC validity. Live GUI validation on `.141` remains
+  pending a logged-in desktop session.
 - Local build 62 GUI checks verified the Generators and Precision Clock layout,
   unavailable-data messaging, and disabled export without a connected card.
 

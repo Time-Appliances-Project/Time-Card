@@ -137,7 +137,8 @@ Current upstream Linux defines the classic Meta/Celestica map and the fixed ART
 and ADVA maps. The shifted revision-02 map comes from this repository's
 LitePCIe gateware and Windows/Linux support; it is not currently in upstream
 Linux. The Meta/Facebook classic profile is hardware-validated on an Intel Mac
-Pro, including ABI v9 status, SMA fixed-route readback, SMA/GNSS LED policy
+Pro, including ABI v10 status, clock-source query and no-write/stale-state
+setter checks, SMA fixed-route readback, SMA/GNSS LED policy
 application, I2C diagnostics, optional ToD GNSS/UTC summary telemetry,
 LM75B/SHT3x/ICP-10100 environmental sensor telemetry with compensated
 ICP-10100 pressure, bounded UART observe/configure/read smoke checks on all
