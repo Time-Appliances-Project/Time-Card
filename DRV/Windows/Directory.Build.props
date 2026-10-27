@@ -1,0 +1,10 @@
+<Project>
+  <!-- Pinned VS 2022-compatible kit for repeatable CI; installed WDK builds
+       remain supported when the optional NuGet packages are absent. -->
+  <Import Project="$(MSBuildThisFileDirectory)packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props"
+          Condition="Exists('$(MSBuildThisFileDirectory)packages\Microsoft.Windows.WDK.x64.10.0.26100.6584\build\native\Microsoft.Windows.WDK.x64.props') and '$(Platform)' == 'x64'" />
+  <Import Project="$(MSBuildThisFileDirectory)packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props"
+          Condition="Exists('$(MSBuildThisFileDirectory)packages\Microsoft.Windows.SDK.CPP.x64.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.x64.props') and '$(Platform)' == 'x64'" />
+  <Import Project="$(MSBuildThisFileDirectory)packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props"
+          Condition="Exists('$(MSBuildThisFileDirectory)packages\Microsoft.Windows.SDK.CPP.10.0.26100.6584\build\native\Microsoft.Windows.SDK.cpp.props')" />
+</Project>

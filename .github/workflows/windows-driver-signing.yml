@@ -1,0 +1,53 @@
+name: Windows driver signing inputs
+
+on:
+  push:
+    branches:
+      - windows/asix-signing-cab-20261027
+    paths:
+      - DRV/Windows/**
+      - .github/workflows/windows-driver-signing.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unsigned-cab:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Restore pinned SDK and WDK
+        shell: pwsh
+        working-directory: DRV/Windows
+        run: |
+          nuget restore packages.config -PackagesDirectory packages -NonInteractive -Source https://api.nuget.org/v3/index.json
+          if ($LASTEXITCODE -ne 0) { throw 'WDK restore failed.' }
+      - name: Build and validate unsigned driver CAB
+        shell: pwsh
+        working-directory: DRV/Windows
+        run: ./tools/build-signing-cab.ps1
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: timecard-windows-build-evidence
+          path: |
+            DRV/Windows/build-evidence/
+            DRV/Windows/timecard-release.log
+            DRV/Windows/x64/Release/*.log
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload verified unsigned signing inputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TimeCard-1.44.0.0-x64-unsigned
+          path: |
+            DRV/Windows/submission/TimeCard-1.44.0.0-x64.cab
+            DRV/Windows/submission/TimeCard/
+            DRV/Windows/submission/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 90

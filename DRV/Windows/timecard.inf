@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: BSD-3-Clause
-; OCP TimeCard Windows KMDF driver (x64, Windows 10 2004 and newer).
+; OCP TimeCard Windows KMDF driver (x64, Windows 11 desktop 21H2 and newer).
 
 [Version]
 Signature   = "$WINDOWS NT$"
@@ -7,7 +7,7 @@ Class       = TimeCard
 ClassGuid   = {B5415088-5EE1-4D3A-8519-C3487370E0BF}
 Provider    = %ProviderName%
 CatalogFile = timecard.cat
-DriverVer   = 08/02/2026,1.43.0.0
+DriverVer   = 10/27/2026,1.44.0.0
 PnpLockdown = 1
 
 [ClassInstall32]
@@ -42,9 +42,10 @@ timecard-flash.ico = 1
 timecard-ptm.ico = 1
 
 [Manufacturer]
-%ProviderName% = Standard,NTamd64.10.0...19041
+; KMDF 1.33 requires Windows 11 or newer. ProductType 1 excludes Server.
+%ProviderName% = Standard,NTamd64.10.0.1..22000
 
-[Standard.NTamd64.10.0...19041]
+[Standard.NTamd64.10.0.1..22000]
 %MetaTimeCard.DeviceDesc% = TimeCard_Device, PCI\VEN_1D9B&DEV_0400
 %CelesticaTimeCard.DeviceDesc% = TimeCard_Device, PCI\VEN_18D4&DEV_1008
 %OroliaArtCard.DeviceDesc% = TimeCard_Device, PCI\VEN_1AD7&DEV_A000

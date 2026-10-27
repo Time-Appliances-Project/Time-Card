@@ -20,7 +20,16 @@ if (-not $OutputDirectory.StartsWith(
     throw 'OutputDirectory must be a child of the Windows driver directory.'
 }
 $driverFolder = Join-Path $OutputDirectory 'TimeCard'
-$cabPath = Join-Path $OutputDirectory 'TimeCard-1.43-x64.cab'
+$sourceInf = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'timecard.inf') -Raw
+if ($sourceInf -notmatch '(?m)^DriverVer\s*=\s*\d{2}/\d{2}/\d{4},(\d+\.\d+\.\d+\.\d+)\s*$') {
+    throw 'The source INF must contain an explicit four-part DriverVer.'
+}
+$driverVersion = $Matches[1]
+$cabName = "TimeCard-$driverVersion-x64.cab"
+$cabPath = Join-Path $OutputDirectory $cabName
+if (Test-Path -LiteralPath $OutputDirectory) {
+    throw 'OutputDirectory already exists. Choose a fresh submission directory.'
+}
 
 function Find-MSBuild {
     $command = Get-Command msbuild.exe -ErrorAction SilentlyContinue
@@ -75,6 +84,7 @@ if (-not $SkipBuild) {
     $msbuild = Find-MSBuild
     & $msbuild $project /t:Rebuild /p:Configuration=Release /p:Platform=x64 `
         /p:SignMode=Off /p:EnableInf2Cat=true /p:RunCodeAnalysis=true `
+        /fl /flp:logfile=timecard-release.log `
         /nologo /v:minimal
     if ($LASTEXITCODE -ne 0) {
         throw "MSBuild failed with exit code $LASTEXITCODE."
@@ -108,11 +118,21 @@ foreach ($file in $files) {
     }
 }
 
-if (Test-Path -LiteralPath $OutputDirectory) {
-    Remove-Item -LiteralPath $OutputDirectory -Recurse -Force
-}
 New-Item -ItemType Directory -Path $driverFolder -Force | Out-Null
 Copy-Item -LiteralPath $files -Destination $driverFolder
+$packagedInf = Get-Content -LiteralPath (Join-Path $driverFolder 'timecard.inf') -Raw
+if ($packagedInf -notmatch ('DriverVer\s*=\s*\d{2}/\d{2}/\d{4},' +
+        [regex]::Escape($driverVersion) + '\s*(\r?\n|$)')) {
+    throw 'Packaged INF version does not match the source.'
+}
+$fileVersion = (Get-Item -LiteralPath (Join-Path $driverFolder 'timecard.sys')).VersionInfo.FileVersion
+if ($fileVersion -ne $driverVersion) {
+    throw "SYS version $fileVersion does not match INF version $driverVersion."
+}
+$signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $driverFolder 'timecard.sys')
+if ($signature.Status -ne 'NotSigned') {
+    throw 'Expected an unsigned Release SYS, not a previously signed or test-signed image.'
+}
 
 $ddfPath = Join-Path $OutputDirectory 'TimeCard.ddf'
 $ddfLines = @(
@@ -126,7 +146,7 @@ $ddfLines = @(
     '.Set CompressionType=MSZIP',
     '.Set Cabinet=on',
     '.Set Compress=on',
-    '.Set CabinetNameTemplate=TimeCard-1.43-x64.cab',
+    ".Set CabinetNameTemplate=$cabName",
     ".Set DiskDirectoryTemplate=`"$OutputDirectory`"",
     ".Set RptFileName=`"$(Join-Path $OutputDirectory 'TimeCard.rpt')`"",
     ".Set InfFileName=`"$(Join-Path $OutputDirectory 'TimeCard-cab.inf')`"",
@@ -143,6 +163,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 if (-not (Test-Path -LiteralPath $cabPath)) {
     throw "MakeCab did not create the expected file: $cabPath"
+}
+
+# Ensure the CAB contains the exact 16 validated input files under TimeCard/.
+$roundtrip = Join-Path $OutputDirectory 'cab-roundtrip'
+New-Item -ItemType Directory -Path $roundtrip | Out-Null
+& expand.exe $cabPath '-F:*' $roundtrip
+if ($LASTEXITCODE -ne 0) { throw 'CAB extraction verification failed.' }
+$expectedFiles = @(Get-ChildItem -LiteralPath $driverFolder -File)
+$extractedFiles = @(Get-ChildItem -LiteralPath $roundtrip -Recurse -File)
+if ($extractedFiles.Count -ne $expectedFiles.Count) { throw 'CAB file count mismatch.' }
+foreach ($file in $expectedFiles) {
+    $extracted = Join-Path $roundtrip ('TimeCard\' + $file.Name)
+    if (-not (Test-Path -LiteralPath $extracted) -or
+        (Get-FileHash -LiteralPath $extracted -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash) {
+        throw "CAB content mismatch: $($file.Name)"
+    }
 }
 
 if ($CertificateThumbprint) {

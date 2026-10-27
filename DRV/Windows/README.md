@@ -1,5 +1,12 @@
 # Windows Time Card Driver
 
+The 1.44 signing package targets **Windows 11 desktop x64 (build 22000+)**
+with KMDF 1.33. It corrects the former Windows 10 INF declaration without
+downgrading the framework. Windows Server is excluded from this desktop INF.
+The ABI remains 15 and the 1.43 user-space applications remain compatible.
+An unsigned CAB is a signing input, not Microsoft approval or hardware
+certification. See [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
+
 This directory contains the Windows x64 KMDF driver for every PCI Time Card
 profile enumerated by the repository's Linux `ptp_ocp` driver:
 

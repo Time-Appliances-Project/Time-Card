@@ -367,11 +367,14 @@ Assert-Sequence $timestamp @(
     'STATUS_DEVICE_DATA_ERROR') `
     'timestamp configuration does not restore its prior state on failure'
 
-Write-Host '=== 1.43 package metadata ==='
-Assert-Match $inf 'DriverVer\s*=\s*08/02/2026,1\.43\.0\.0' `
-    'INF version is not 1.43.0.0'
-Assert-Match $package 'TimeCard-1\.43-x64\.cab' `
-    'submission CAB name is not version 1.43'
+Write-Host '=== 1.44 driver / 1.43 compatible user-space metadata ==='
+Assert-Match $inf 'DriverVer\s*=\s*10/27/2026,1\.44\.0\.0' `
+    'INF version is not 1.44.0.0'
+Assert-Match $inf 'Standard,NTamd64\.10\.0\.1\.\.22000' `
+    'INF must target Windows 11 desktop x64 with KMDF 1.33'
+Assert-NotMatch $inf '19041' 'INF must not claim Windows 10 support'
+Assert-Match $package 'TimeCard-\$driverVersion-x64\.cab' `
+    'submission CAB name is not derived from the INF version'
 Assert-Match $providerResource 'FILEVERSION\s+1,43,0,0' `
     'W32Time provider file version is not 1.43.0.0'
 Assert-Match $providerBuild `
@@ -386,7 +389,7 @@ Assert-Match $serviceAssembly `
 Assert-Match $serviceRuntime `
     'ServiceVersion\s*=\s*"1\.43\.0"' `
     'oscillatord monitoring version is not 1.43.0'
-Assert-Match $ptp 'DriverVersion\s*=\s*0x0001002bu' `
-    'runtime driver version is not 1.43'
+Assert-Match $ptp 'DriverVersion\s*=\s*0x0001002cu' `
+    'runtime driver version is not 1.44'
 
 Write-Host "Advanced FPGA static tests passed ($assertions assertions; no hardware accessed)."

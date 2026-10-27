@@ -4,6 +4,11 @@ The checked-in Release configuration does not create or embed a WDK test
 signature. Microsoft supplies the production signature after a successful
 Hardware Dev Center submission.
 
+Driver 1.44 corrects the minimum-OS declaration to Windows 11 desktop x64,
+build 22000 and newer, matching KMDF 1.33. Windows 10 and Windows Server are
+not advertised by this package. The user/kernel ABI remains version 15;
+the existing 1.43 user-space applications remain compatible.
+
 ## Create the release inputs
 
 From PowerShell in this directory:
@@ -15,7 +20,7 @@ From PowerShell in this directory:
 This performs a clean unsigned x64 Release build and creates:
 
 - `submission\TimeCard\` - the driver folder to add to an HLK project.
-- `submission\TimeCard-1.37-x64.cab` - a CAB with the required driver,
+- `submission\TimeCard-1.44.0.0-x64.cab` - a CAB with the required driver,
   INF, catalog, subsystem icons, and PDB in a non-root `TimeCard` folder.
 
 The CAB is intentionally unsigned unless a registered code-signing
@@ -55,7 +60,7 @@ Use this route for a retail driver and for Windows Update eligibility:
 Microsoft currently limits attestation signing to supported testing
 scenarios; attestation-signed retail drivers are not published to Windows
 Update. When the Partner Center account is eligible for such a scenario,
-upload the certificate-signed `TimeCard-1.37-x64.cab`, leave both test-signing
+upload the certificate-signed `TimeCard-1.44.0.0-x64.cab`, leave both test-signing
 options disabled, and download the Microsoft-signed result.
 
 ## Verify the returned package
