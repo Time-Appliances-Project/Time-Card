@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Diagnostic/control utility for the OCP TimeCard Windows driver. */
+/* Diagnostic/control utility for the Time Card Windows driver. */
 
 #include <windows.h>
 #include <winioctl.h>

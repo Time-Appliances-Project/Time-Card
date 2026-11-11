@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Bounded Xilinx AXI IIC access for the OCP Time Card. */
+/* Bounded Xilinx AXI IIC access for the Time Card. */
 
 #include "timecard.h"
 

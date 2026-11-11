@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* OCP TimeCard Windows KMDF driver: entry, PnP, and BAR discovery. */
+/* Time Card Windows KMDF driver: entry, PnP, and BAR discovery. */
 
 #include "timecard.h"
 #include <wdmguid.h>

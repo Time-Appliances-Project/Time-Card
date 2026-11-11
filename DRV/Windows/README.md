@@ -1,6 +1,6 @@
 # Windows Time Card Driver
 
-The 1.45 signing package targets **Windows 11 desktop x64 (build 22000+)**
+The 1.46 signing package targets **Windows 11 desktop x64 (build 22000+)**
 with KMDF 1.33. It corrects the former Windows 10 INF declaration without
 downgrading the framework. Windows Server is excluded from this desktop INF.
 The ABI remains 15 and the 1.43 user-space applications remain compatible.
@@ -9,8 +9,8 @@ certification. See [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
 
 The Windows x64 KMDF driver supports these PCI identities.
 
-- Meta/Facebook OCP Time Card: `PCI\VEN_1D9B&DEV_0400`
-- Celestica OCP Time Card: `PCI\VEN_18D4&DEV_1008`
+- Meta/Facebook Time Card: `PCI\VEN_1D9B&DEV_0400`
+- Celestica Time Card: `PCI\VEN_18D4&DEV_1008`
 - WiWi revision 02, `PCI\VEN_2163&DEV_1008&SUBSYS_000710EE&REV_02`
 - Orolia/Safran ART Time Card: `PCI\VEN_1AD7&DEV_A000`
 
@@ -813,12 +813,12 @@ subsystems in the dedicated **Time Card** category. **Devices by connection**
 shows the subsystem PDOs nested under the PCI controller.
 
 Each subsystem has a compact blue, gold, and white icon matched to its
-function. The OCP Time Card Controller uses the green clock artwork, while
+function. The Time Card Controller uses the green clock artwork, while
 the Time Card category retains the original card artwork.
 
 ![Time Card subsystem icons](assets/subsystem-icon-sheet.png)
 
-![OCP Time Card controller and subsystem icons in Windows Device Manager](assets/device-manager-time-card.png)
+![Time Card controller and subsystem icons in Windows Device Manager](assets/device-manager-time-card.png)
 
 Production deployment requires the package returned by Microsoft Hardware Dev
 Center. The repository does not contain a private signing key or a WDK test

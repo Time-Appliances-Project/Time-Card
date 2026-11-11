@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* OCP TimeCard PHC access, ported from the Linux ptp_ocp driver. */
+/* Time Card PHC access, ported from the Linux ptp_ocp driver. */
 
 #include "timecard.h"
 
@@ -192,7 +192,7 @@ TimeCardGetInfo(PDEVICE_CONTEXT context, TIMECARD_INFO *info)
 
     RtlZeroMemory(info, sizeof(*info));
     info->AbiVersion = TIMECARD_ABI_VERSION;
-    info->DriverVersion = 0x0001002du;
+    info->DriverVersion = 0x0001002eu;
     info->Layout = context->Layout;
     info->InterruptMessages = context->InterruptMessages;
     info->BarLength = context->Bar0Length;

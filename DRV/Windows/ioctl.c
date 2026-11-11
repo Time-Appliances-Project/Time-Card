@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* IOCTL dispatch for the OCP TimeCard Windows driver. */
+/* IOCTL dispatch for the Time Card Windows driver. */
 
 #include "timecard.h"
 

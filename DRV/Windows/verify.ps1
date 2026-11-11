@@ -26,7 +26,7 @@ try {
             ($instances | Where-Object { $id -like $_ })
     }
     if (-not $devices) {
-        throw 'A supported OCP Time Card PCI device is not present.'
+        throw 'A supported Time Card PCI device is not present.'
     }
     $devices | Format-List Status, Class, FriendlyName, InstanceId | Out-Host
     foreach ($device in $devices) {

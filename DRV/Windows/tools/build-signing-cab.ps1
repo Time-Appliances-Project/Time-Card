@@ -19,7 +19,7 @@ try {
         SourceCommit = (& git rev-parse HEAD)
         Configuration = 'Release'
         Platform = 'x64'
-        DriverVersion = '1.45.0.0'
+        DriverVersion = '1.46.0.0'
         Abi = 15
         Kmdf = '1.33'
         MinimumDesktopBuild = 22000
@@ -47,7 +47,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'PE/PDB package validation failed.' }
     $submission = Join-Path $windows 'submission'
     $files = @(Get-ChildItem -LiteralPath (Join-Path $submission 'TimeCard') -File)
-    $files += Get-Item -LiteralPath (Join-Path $submission 'TimeCard-1.45.0.0-x64.cab')
+    $files += Get-Item -LiteralPath (Join-Path $submission 'TimeCard-1.46.0.0-x64.cab')
     $hashes = foreach ($file in $files | Sort-Object FullName) {
         $relative = $file.FullName.Substring($submission.Length + 1).Replace('\', '/')
         '{0}  {1}' -f (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $relative

@@ -1,5 +1,5 @@
 ; SPDX-License-Identifier: BSD-3-Clause
-; OCP TimeCard Windows KMDF driver (x64, Windows 11 desktop 21H2 and newer).
+; Time Card Windows KMDF driver (x64, Windows 11 desktop 21H2 and newer).
 
 [Version]
 Signature   = "$WINDOWS NT$"
@@ -7,7 +7,7 @@ Class       = TimeCard
 ClassGuid   = {B5415088-5EE1-4D3A-8519-C3487370E0BF}
 Provider    = %ProviderName%
 CatalogFile = timecard.cat
-DriverVer   = 11/11/2026,1.45.0.0
+DriverVer   = 11/11/2026,1.46.0.0
 PnpLockdown = 1
 
 [ClassInstall32]
@@ -238,13 +238,13 @@ DeviceIcon,,,,"%13%\timecard-ptm.ico"
 [Strings]
 SPSVCINST_ASSOCSERVICE       = 0x00000002
 ProviderName                 = "Open Compute Project"
-DiskName                     = "OCP TimeCard Installation Disk"
-ServiceName                  = "OCP TimeCard Driver"
+DiskName                     = "Time Card Installation Disk"
+ServiceName                  = "Time Card Driver"
 TimeCardClassName            = "Time Card"
-MetaTimeCard.DeviceDesc      = "OCP Time Card Controller"
-CelesticaTimeCard.DeviceDesc = "OCP Time Card Controller (Celestica)"
-WiWiTimeCard.DeviceDesc      = "WiWi Time Card Controller (Revision 02)"
-OroliaArtCard.DeviceDesc     = "Orolia ART Time Card Controller"
+MetaTimeCard.DeviceDesc      = "Time Card Controller"
+CelesticaTimeCard.DeviceDesc = "Time Card Controller (Celestica)"
+WiWiTimeCard.DeviceDesc      = "Time Card Controller (WiWi Revision 02)"
+OroliaArtCard.DeviceDesc     = "Time Card Controller (Orolia ART)"
 Phc.DeviceDesc               = "Time Card Precision Hardware Clock (PHC)"
 Tod.DeviceDesc               = "Time Card GNSS Time-of-Day Engine"
 Gnss.DeviceDesc              = "Time Card GNSS Receiver (UART)"

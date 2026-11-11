@@ -60,7 +60,7 @@ TimeCardCreateChild(WDFDEVICE parent,
                     const TIMECARD_CHILD_DESCRIPTION *description,
                     WDFDEVICE *childDevice)
 {
-    DECLARE_CONST_UNICODE_STRING(location, L"on OCP Time Card");
+    DECLARE_CONST_UNICODE_STRING(location, L"on Time Card");
     DECLARE_CONST_UNICODE_STRING(sddl,
         L"D:P(A;;GA;;;SY)(A;;GA;;;BA)");
     WDF_OBJECT_ATTRIBUTES attributes;

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Public IOCTL ABI for the OCP TimeCard Windows driver. */
+/* Public IOCTL ABI for the Time Card Windows driver. */
 
 #ifndef TIMECARD_IOCTL_H
 #define TIMECARD_IOCTL_H

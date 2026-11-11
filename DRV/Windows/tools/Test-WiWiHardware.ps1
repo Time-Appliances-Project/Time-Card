@@ -12,9 +12,22 @@ if ($cards.Count -ne 1 -or $cards[0].HardwareID -notcontains $wiwi) {
 }
 $card = $cards[0]
 $driver = Get-CimInstance Win32_PnPSignedDriver | Where-Object DeviceID -EQ $card.InstanceId
-if ($card.Status -ne 'OK' -or $driver.DriverVersion -ne '1.45.0.0') {
+if ($card.Status -ne 'OK' -or $driver.DriverVersion -ne '1.46.0.0') {
     throw "WiWi status $($card.Status), bound driver $($driver.DriverVersion), INF $($driver.InfName)"
 }
+$label = (Get-PnpDeviceProperty -InstanceId $card.InstanceId -KeyName 'DEVPKEY_Device_DeviceDesc').Data
+if ($label -ne 'Time Card Controller (WiWi Revision 02)') { throw "Unexpected controller label: $label" }
+$service = Get-CimInstance Win32_SystemDriver -Filter "Name='timecard'"
+if ($service.State -ne 'Running' -or $service.DisplayName -ne 'Time Card Driver') {
+    throw "Unexpected Time Card service: $($service.DisplayName), $($service.State)"
+}
+$imagePath = [Environment]::ExpandEnvironmentVariables($service.PathName.Trim('"'))
+$imagePath = $imagePath -replace '^\\SystemRoot(?=\\)', $env:SystemRoot -replace '^\\\?\?\\', ''
+if ($imagePath -like 'System32\*') { $imagePath = Join-Path $env:SystemRoot $imagePath }
+$version = (Get-Item -LiteralPath $imagePath).VersionInfo
+if ($version.ProductName -ne 'Time Card' -or $version.FileDescription -ne 'Time Card KMDF Driver' -or
+    $version.FileVersion -ne $driver.DriverVersion) { throw "Unexpected file metadata on $imagePath" }
+Write-Output "$label | $($service.DisplayName) | $($version.FileDescription) | $($version.FileVersion)"
 $os = Get-CimInstance Win32_OperatingSystem
 Write-Output "$env:COMPUTERNAME | $($os.Caption) $($os.Version) | $($card.InstanceId) | $($driver.InfName)"
 function Read-Card([string]$Command) {
@@ -26,7 +39,8 @@ $status = Read-Card status
 $cap = Read-Card capabilities
 $fpga = Read-Card fpga-status
 Write-Output $status $cap $fpga
-if ($status -notmatch 'Register layout:\s+MSI-X' -or $status -notmatch 'BAR length:\s+0x04000000' -or
+if ($status -notmatch '(?m)^Driver:\s+1\.46\s*$' -or
+    $status -notmatch 'Register layout:\s+MSI-X' -or $status -notmatch 'BAR length:\s+0x04000000' -or
     $status -notmatch 'Clock offset:\s+0x03000000' -or $cap -notmatch 'Board profile:\s+WiWi' -or
     $fpga -notmatch 'FPGA image build:\s+0x[0-9a-f]{8}') { throw 'Unexpected runtime profile or FPGA mapping.' }
 

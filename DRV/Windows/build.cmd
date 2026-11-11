@@ -1,5 +1,5 @@
 @echo off
-rem Build the OCP TimeCard Windows driver and control tool.
+rem Build the Time Card Windows driver and control tool.
 setlocal
 cd /d "%~dp0"
 

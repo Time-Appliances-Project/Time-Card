@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
-/* Internal declarations for the OCP TimeCard Windows KMDF driver. */
+/* Internal declarations for the Time Card Windows KMDF driver. */
 
 #pragma once
 

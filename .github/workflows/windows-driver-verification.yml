@@ -68,7 +68,9 @@ jobs:
           & $dvl /manualCreate timecard X64 /sarifPath $logs.FullName
           if ($LASTEXITCODE) { throw 'DVL generation failed.' }
           $xml = [xml](Get-Content -Raw -LiteralPath timecard.DVL.XML)
-          if ($xml.OuterXml -notmatch 'CodeQL') { throw 'The DVL contains no CodeQL evidence.' }
+          if ($xml.OuterXml -notmatch 'timecard\.x64\.(Semmle|CodeQL)\.Summary') {
+            throw 'The DVL has no x64 Time Card analysis summary.'
+          }
           Get-FileHash timecard.DVL.XML -Algorithm SHA256
       - name: Upload the Windows 11 25H2 driver verification log
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
