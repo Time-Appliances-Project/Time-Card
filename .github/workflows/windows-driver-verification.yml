@@ -9,6 +9,7 @@ on:
       - DRV/Windows/*.h
       - DRV/Windows/include/**
       - DRV/Windows/timecard.vcxproj
+      - DRV/Windows/Directory.Build.props
       - DRV/Windows/packages.config
   workflow_dispatch:
 
@@ -30,7 +31,8 @@ jobs:
       - name: Restore the release build kit and the DVL generator
         run: |
           $source = 'https://api.nuget.org/v3/index.json'
-          nuget restore packages.config -PackagesDirectory packages -NonInteractive -Source $source
+          $kit = Join-Path $env:RUNNER_TEMP 'timecard-release-kit'
+          nuget restore packages.config -PackagesDirectory $kit -NonInteractive -Source $source
           if ($LASTEXITCODE) { throw 'Release kit restore failed.' }
           nuget install Microsoft.Windows.WDK.x64 -Version 10.0.28000.1761-preview -Prerelease -DependencyVersion Ignore -OutputDirectory "$env:RUNNER_TEMP/dvl-kit" -Source $source -NonInteractive
           if ($LASTEXITCODE) { throw 'DVL tools restore failed.' }
@@ -56,6 +58,7 @@ jobs:
           $codeql = Join-Path $env:RUNNER_TEMP 'whcp/codeql/codeql.exe'
           $database = Join-Path $env:RUNNER_TEMP 'timecard-db'
           $driver = (Get-Location).Path
+          $env:TimeCardKitPackages = Join-Path $env:RUNNER_TEMP 'timecard-release-kit'
           $build = 'msbuild.exe timecard.vcxproj /t:Rebuild /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:RunCodeAnalysis=true /nologo /v:minimal'
           & $codeql database create $database --language=cpp "--source-root=$driver" "--command=$build"
           if ($LASTEXITCODE) { throw 'CodeQL driver extraction failed.' }
@@ -63,6 +66,11 @@ jobs:
           $sarif = Join-Path $logs.FullName 'timecard.sarif'
           & $codeql database analyze $database 'microsoft/windows-drivers@1.8.0:windows-driver-suites/mustrun.qls' --format=sarifv2.1.0 "--output=$sarif" --threads=2
           if ($LASTEXITCODE) { throw 'CodeQL driver analysis failed.' }
+          $analysis = Get-Content -Raw -LiteralPath $sarif | ConvertFrom-Json
+          $allocationResults = @($analysis.runs.results | Where-Object ruleId -eq 'cpp/drivers/wdk-deprecated-api')
+          foreach ($origin in $allocationResults | Group-Object { $_.locations[0].physicalLocation.artifactLocation.uri }) {
+            Write-Host ("Deprecated API source: {0} ({1})" -f [IO.Path]::GetFileName($origin.Name), $origin.Count)
+          }
           $dvl = Join-Path $env:RUNNER_TEMP 'dvl-kit/Microsoft.Windows.WDK.x64.10.0.28000.1761-preview/c/tools/dvl/dvl.exe'
           Set-Location -LiteralPath $logs.FullName
           & $dvl /manualCreate timecard X64 /sarifPath $logs.FullName
@@ -72,6 +80,9 @@ jobs:
             throw 'The DVL has no x64 Time Card analysis summary.'
           }
           Get-FileHash timecard.DVL.XML -Algorithm SHA256
+          foreach ($score in $xml.SelectNodes('//AssessmentScore[@ScoreUnit="SEMMLE_MUSTFIX_FAILED"]')) {
+            if ([int]$score.ScoreValue -gt 0) { throw 'Microsoft reported an outstanding must-fix finding.' }
+          }
       - name: Upload the Windows 11 25H2 driver verification log
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
