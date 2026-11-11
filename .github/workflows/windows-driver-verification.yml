@@ -1,0 +1,79 @@
+name: Time Card Windows driver verification
+
+on:
+  push:
+    branches: [windows/wiwi-rev02]
+    paths:
+      - .github/workflows/windows-driver-verification.yml
+      - DRV/Windows/*.c
+      - DRV/Windows/*.h
+      - DRV/Windows/include/**
+      - DRV/Windows/timecard.vcxproj
+      - DRV/Windows/packages.config
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-11-25h2-dvl:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: DRV/Windows
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Restore the release build kit and the DVL generator
+        run: |
+          $source = 'https://api.nuget.org/v3/index.json'
+          nuget restore packages.config -PackagesDirectory packages -NonInteractive -Source $source
+          if ($LASTEXITCODE) { throw 'Release kit restore failed.' }
+          nuget install Microsoft.Windows.WDK.x64 -Version 10.0.28000.1761-preview -Prerelease -DependencyVersion Ignore -OutputDirectory "$env:RUNNER_TEMP/dvl-kit" -Source $source -NonInteractive
+          if ($LASTEXITCODE) { throw 'DVL tools restore failed.' }
+      - name: Install the WHCP 25H2 analysis tools
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'codeql-win64.zip'
+          curl.exe --fail --location --retry 3 --silent --show-error --output $archive https://github.com/github/codeql-cli-binaries/releases/download/v2.20.1/codeql-win64.zip
+          if ($LASTEXITCODE) { throw 'CodeQL download failed.' }
+          $expected = 'e24a28b245161c813923f295ab43df8e81a8fa53f275da8729ce9f6563ab37dd'
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expected) { throw 'CodeQL archive hash mismatch.' }
+          7z x $archive "-o$env:RUNNER_TEMP/whcp" -bd -bso0
+          if ($LASTEXITCODE) { throw 'CodeQL extraction failed.' }
+          $codeql = Join-Path $env:RUNNER_TEMP 'whcp/codeql/codeql.exe'
+          & $codeql pack download microsoft/cpp-queries@0.0.4 microsoft/windows-drivers@1.8.0
+          if ($LASTEXITCODE) { throw 'WHCP query pack download failed.' }
+      - name: Analyze the Release x64 driver and create its verification log
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio 2022 C++ tools were not found.' }
+          Import-Module (Join-Path $vs 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          $codeql = Join-Path $env:RUNNER_TEMP 'whcp/codeql/codeql.exe'
+          $database = Join-Path $env:RUNNER_TEMP 'timecard-db'
+          $driver = (Get-Location).Path
+          $build = 'msbuild.exe timecard.vcxproj /t:Rebuild /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:RunCodeAnalysis=true /nologo /v:minimal'
+          & $codeql database create $database --language=cpp "--source-root=$driver" "--command=$build"
+          if ($LASTEXITCODE) { throw 'CodeQL driver extraction failed.' }
+          $logs = New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'timecard-verification')
+          $sarif = Join-Path $logs.FullName 'timecard.sarif'
+          & $codeql database analyze $database 'microsoft/windows-drivers@1.8.0:windows-driver-suites/mustrun.qls' --format=sarifv2.1.0 "--output=$sarif" --threads=2
+          if ($LASTEXITCODE) { throw 'CodeQL driver analysis failed.' }
+          $dvl = Join-Path $env:RUNNER_TEMP 'dvl-kit/Microsoft.Windows.WDK.x64.10.0.28000.1761-preview/c/tools/dvl/dvl.exe'
+          Set-Location -LiteralPath $logs.FullName
+          & $dvl /manualCreate timecard X64 /sarifPath $logs.FullName
+          if ($LASTEXITCODE) { throw 'DVL generation failed.' }
+          $xml = [xml](Get-Content -Raw -LiteralPath timecard.DVL.XML)
+          if ($xml.OuterXml -notmatch 'CodeQL') { throw 'The DVL contains no CodeQL evidence.' }
+          Get-FileHash timecard.DVL.XML -Algorithm SHA256
+      - name: Upload the Windows 11 25H2 driver verification log
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TimeCard-25H2-x64-DVL
+          path: ${{ runner.temp }}/timecard-verification/timecard.DVL.XML
+          if-no-files-found: error
+          retention-days: 90
