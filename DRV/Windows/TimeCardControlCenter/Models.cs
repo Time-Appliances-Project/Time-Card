@@ -979,7 +979,7 @@ namespace TimeCardControlCenter
         public ImuSensorReading Imu { get; private set; }
         public uint BoardProfile { get; private set; }
         public uint Capabilities { get; private set; }
-        public bool IsCelestica { get { return BoardProfile == 3u; } }
+        public bool IsCelestica { get { return BoardProfile == 3u || BoardProfile == 4u; } }
         public BoardTemperatureReading[] BoardTemperatures { get; private set; }
         public Sht3xSensorReading HumiditySensor { get; private set; }
         public Icp10100SensorReading PressureSensor { get; private set; }
@@ -1938,9 +1938,15 @@ namespace TimeCardControlCenter
         {
             get
             {
-                return string.Format(CultureInfo.InvariantCulture, "{0}.{1}",
-                    ImageVersion >> 8, ImageVersion & 0xffu);
+                return FormatVersion(BoardProfile, ImageVersion);
             }
+        }
+        internal static string FormatVersion(uint board, uint version)
+        {
+            if (board == 4u)
+                return string.Format(CultureInfo.InvariantCulture, "0x{0:X8}", version);
+            return string.Format(CultureInfo.InvariantCulture, "{0}.{1}",
+                version >> 8, version & 0xffu);
         }
     }
 
@@ -2268,6 +2274,7 @@ namespace TimeCardControlCenter
             {
                 return BoardProfile == 2u ? "Orolia/Safran ART" :
                     BoardProfile == 3u ? "Celestica Time Card" :
+                    BoardProfile == 4u ? "WiWi Time Card" :
                     BoardProfile == 1u ? "OCP Time Card" : "Unknown Time Card";
             }
         }

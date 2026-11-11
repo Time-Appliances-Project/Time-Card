@@ -79,6 +79,8 @@ TimeCardI2cRead8(PDEVICE_CONTEXT context, ULONG offset)
      * FIFO occupancy, and receive-data registers are byte-wide; the dynamic
      * transmit register is 16-bit so its START/STOP flags reach bits 8/9.
      */
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+        return (UCHAR)READ_REGISTER_ULONG((PULONG)(context->I2c + offset));
     return READ_REGISTER_UCHAR((volatile UCHAR *)(context->I2c + offset));
 }
 
@@ -91,13 +93,19 @@ TimeCardI2cRead32(PDEVICE_CONTEXT context, ULONG offset)
 static VOID
 TimeCardI2cWrite8(PDEVICE_CONTEXT context, ULONG offset, UCHAR value)
 {
-    WRITE_REGISTER_UCHAR((volatile UCHAR *)(context->I2c + offset), value);
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+        WRITE_REGISTER_ULONG((PULONG)(context->I2c + offset), value);
+    else
+        WRITE_REGISTER_UCHAR((volatile UCHAR *)(context->I2c + offset), value);
 }
 
 static VOID
 TimeCardI2cWrite16(PDEVICE_CONTEXT context, ULONG offset, USHORT value)
 {
-    WRITE_REGISTER_USHORT((volatile USHORT *)(context->I2c + offset), value);
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+        WRITE_REGISTER_ULONG((PULONG)(context->I2c + offset), value);
+    else
+        WRITE_REGISTER_USHORT((volatile USHORT *)(context->I2c + offset), value);
 }
 
 static VOID
@@ -894,6 +902,31 @@ TimeCardI2cMuxSet(PDEVICE_CONTEXT context,
     return status;
 }
 
+static NTSTATUS
+TimeCardCheckWiwiR4006Locked(PDEVICE_CONTEXT context)
+{
+    static const UCHAR expected[] = { 'R', '4', '0', '0', '6' };
+    UCHAR id[sizeof(expected)];
+    ULONG control, interrupts;
+    NTSTATUS status;
+
+    if (context->BoardProfile != TIMECARD_BOARD_WIWI)
+        return STATUS_SUCCESS;
+    status = TimeCardI2cReadBytesLocked(context, 0x50, 1, 0x43, id,
+                                         sizeof(id), &control, &interrupts);
+    if (!NT_SUCCESS(status))
+        return status;
+    return RtlCompareMemory(id, expected, sizeof(id)) == sizeof(id) ?
+        STATUS_SUCCESS : STATUS_NOT_SUPPORTED;
+}
+
+static BOOLEAN
+TimeCardR4006PeripheralMap(PDEVICE_CONTEXT context)
+{
+    return context->BoardProfile == TIMECARD_BOARD_CELESTICA ||
+           context->BoardProfile == TIMECARD_BOARD_WIWI;
+}
+
 static BOOLEAN
 TimeCardBno08xHeaderValid(const UCHAR *header)
 {
@@ -1069,7 +1102,8 @@ TimeCardSensorBranchSelectLocked(PDEVICE_CONTEXT context, UCHAR *savedMask,
     if (!NT_SUCCESS(status))
         return status;
 
-    selectedMask = (UCHAR)context->I2cSensorMuxMask;
+    selectedMask = context->BoardProfile == TIMECARD_BOARD_WIWI ?
+        (1u << 1) : (UCHAR)context->I2cSensorMuxMask;
     if (selectedMask == 0) {
         context->I2cImuType = TIMECARD_IMU_TYPE_NONE;
         context->I2cImuAddress = 0;
@@ -1366,6 +1400,12 @@ TimeCardLedResolveAddressLocked(PDEVICE_CONTEXT context, ULONG *address,
     ULONG i;
     NTSTATUS status = STATUS_NO_SUCH_DEVICE;
 
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
+        *address = 0x34u;
+        return TimeCardI2cReadBytesLocked(context, *address, 1, 0, &deviceControl,
+                                          1, controllerStatus, interruptStatus);
+    }
+
     if (context->I2cLedAddress >= TIMECARD_LED_ADDRESS_MIN &&
         context->I2cLedAddress <= TIMECARD_LED_ADDRESS_MAX) {
         status = TimeCardI2cReadBytesLocked(
@@ -1496,14 +1536,14 @@ TimeCardLedSwapsRedGreen(PDEVICE_CONTEXT context)
 {
     /* Celestica drives green, red, blue on each consecutive output group. */
     return TimeCardLedUsesLegacyWiring(context) ||
-           context->BoardProfile == TIMECARD_BOARD_CELESTICA;
+           TimeCardR4006PeripheralMap(context);
 }
 
 static BOOLEAN
 TimeCardLedIsFitted(PDEVICE_CONTEXT context, ULONG logicalLed)
 {
     /* R4006 has one GPS indicator and four SMA indicators; OUT16-18 are NC. */
-    return context->BoardProfile != TIMECARD_BOARD_CELESTICA ||
+    return !TimeCardR4006PeripheralMap(context) ||
            logicalLed != TIMECARD_LED_GNSS2;
 }
 
@@ -1522,7 +1562,11 @@ TimeCardLedPhysicalIndex(PDEVICE_CONTEXT context, ULONG logicalLed)
         4u, 5u, 0u, 1u, 2u, 3u
     };
 
-    return context->BoardProfile == TIMECARD_BOARD_CELESTICA ?
+    /* R4006 WiWi front panel, logical order GNSS1, unused, SMA1..4. */
+    static const UCHAR wiwiMap[TIMECARD_LED_COUNT] = { 4u, 5u, 2u, 3u, 0u, 1u };
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+        return wiwiMap[logicalLed];
+    return TimeCardR4006PeripheralMap(context) ?
         celesticaMap[logicalLed] : TimeCardLedUsesLegacyWiring(context) ?
             legacyMap[logicalLed] : logicalLed;
 }
@@ -1564,7 +1608,7 @@ TimeCardLedDetectFaultsLocked(PDEVICE_CONTEXT context, ULONG address,
     if (!NT_SUCCESS(status))
         goto Disable;
     *openMask = TimeCardLedFaultMask(result);
-    if (context->BoardProfile == TIMECARD_BOARD_CELESTICA)
+    if (TimeCardR4006PeripheralMap(context))
         *openMask &= (1u << 15) - 1u;
 
     /* OSDE=10 selects short detection and replaces the result registers. */
@@ -1580,7 +1624,7 @@ TimeCardLedDetectFaultsLocked(PDEVICE_CONTEXT context, ULONG address,
         controllerStatus, interruptStatus);
     if (NT_SUCCESS(status))
         *shortMask = TimeCardLedFaultMask(result);
-    if (context->BoardProfile == TIMECARD_BOARD_CELESTICA)
+    if (TimeCardR4006PeripheralMap(context))
         *shortMask &= (1u << 15) - 1u;
 
 Disable:
@@ -1621,6 +1665,11 @@ TimeCardLedQuery(PDEVICE_CONTEXT context, ULONG led,
     if (!TimeCardLedIsFitted(context, led))
         return STATUS_SUCCESS;
     WdfWaitLockAcquire(context->RegisterLock, NULL);
+    status = TimeCardCheckWiwiR4006Locked(context);
+    if (!NT_SUCCESS(status)) {
+        WdfWaitLockRelease(context->RegisterLock);
+        return status;
+    }
     status = TimeCardSensorBranchSelectLocked(
         context, &savedMask, &changed,
         &controllerStatus, &interruptStatus);
@@ -1731,6 +1780,11 @@ TimeCardLedSet(PDEVICE_CONTEXT context,
     if (!TimeCardLedIsFitted(context, request->Led))
         return STATUS_SUCCESS;
     WdfWaitLockAcquire(context->RegisterLock, NULL);
+    status = TimeCardCheckWiwiR4006Locked(context);
+    if (!NT_SUCCESS(status)) {
+        WdfWaitLockRelease(context->RegisterLock);
+        return status;
+    }
     status = TimeCardSensorBranchSelectLocked(
         context, &savedMask, &changed,
         &controllerStatus, &interruptStatus);
@@ -2744,7 +2798,7 @@ TimeCardSensorQuery(PDEVICE_CONTEXT context,
     telemetry->Humidity.Address = TIMECARD_SENSOR_SHT3X_ADDRESS;
     telemetry->Pressure.Size = sizeof(telemetry->Pressure);
     telemetry->Pressure.Address = TIMECARD_SENSOR_ICP10100_ADDRESS;
-    if (context->BoardProfile == TIMECARD_BOARD_CELESTICA) {
+    if (TimeCardR4006PeripheralMap(context)) {
         telemetry->Capabilities =
             TIMECARD_SENSOR_CAP_LM75B | TIMECARD_SENSOR_CAP_SHT3X |
             TIMECARD_SENSOR_CAP_ICP10100 | TIMECARD_SENSOR_CAP_BNO08X;
@@ -2757,12 +2811,19 @@ TimeCardSensorQuery(PDEVICE_CONTEXT context,
     }
 
     WdfWaitLockAcquire(context->RegisterLock, NULL);
-    if (context->BoardProfile == TIMECARD_BOARD_CELESTICA) {
+    status = TimeCardCheckWiwiR4006Locked(context);
+    if (!NT_SUCCESS(status)) {
+        WdfWaitLockRelease(context->RegisterLock);
+        return status;
+    }
+    if (TimeCardR4006PeripheralMap(context)) {
         status = TimeCardI2cMuxReadLocked(
             context, &savedMask, &controllerStatus, &interruptStatus);
         telemetry->MuxChannelMask = savedMask;
-        if (!NT_SUCCESS(status))
-            goto Exit;
+        if (!NT_SUCCESS(status)) {
+            WdfWaitLockRelease(context->RegisterLock);
+            return status;
+        }
         telemetry->Flags = TIMECARD_SENSOR_FLAG_PRESENT;
 
         status = TimeCardI2cMuxWriteLocked(

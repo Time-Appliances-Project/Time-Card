@@ -1,21 +1,31 @@
 # Windows Time Card Driver
 
-The 1.44 signing package targets **Windows 11 desktop x64 (build 22000+)**
+The 1.45 signing package targets **Windows 11 desktop x64 (build 22000+)**
 with KMDF 1.33. It corrects the former Windows 10 INF declaration without
 downgrading the framework. Windows Server is excluded from this desktop INF.
 The ABI remains 15 and the 1.43 user-space applications remain compatible.
 An unsigned CAB is a signing input, not Microsoft approval or hardware
 certification. See [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
 
-This directory contains the Windows x64 KMDF driver for every PCI Time Card
-profile enumerated by the repository's Linux `ptp_ocp` driver:
+The Windows x64 KMDF driver supports these PCI identities.
 
 - Meta/Facebook OCP Time Card: `PCI\VEN_1D9B&DEV_0400`
 - Celestica OCP Time Card: `PCI\VEN_18D4&DEV_1008`
+- WiWi revision 02, `PCI\VEN_2163&DEV_1008&SUBSYS_000710EE&REV_02`
 - Orolia/Safran ART Time Card: `PCI\VEN_1AD7&DEV_A000`
 
 Windows does not provide a PHC class equivalent to Linux `/dev/ptpN`, so
 applications use the versioned IOCTL ABI through `timecardctl.exe`.
+
+### WiWi revision 02
+
+The driver validates the 64 MiB BAR0 and the 64-entry MSI-X configuration
+before accessing the FPGA. It uses the LitePCIe register map, 32-bit UART
+and AXI IIC transfers, and the full 32-bit FPGA build ID. Windows opens the
+interrupt gate for assigned, serviced UART and timing inputs while in D0.
+GNSS, atomic clock and NMEA UARTs are wired on the production image.
+R4006 LED and sensor operations require the board ID in EEPROM.
+Use the vendor programming procedure for WiWi flash updates.
 
 ## Features
 

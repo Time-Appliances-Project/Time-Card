@@ -2,6 +2,7 @@
 /* OCP TimeCard Windows KMDF driver: entry, PnP, and BAR discovery. */
 
 #include "timecard.h"
+#include <wdmguid.h>
 
 static int
 TimeCardHexDigit(WCHAR value)
@@ -100,6 +101,12 @@ TimeCardConfigureBoardProfile(PDEVICE_CONTEXT context)
         context->PciDeviceId == 0xa000u) {
         context->BoardProfile = TIMECARD_BOARD_ART;
         context->SubsystemMask = TIMECARD_SUBSYSTEM_MASK_ART;
+    } else if (context->PciVendorId == 0x2163u &&
+               context->PciDeviceId == 0x1008u) {
+        context->BoardProfile = TIMECARD_BOARD_WIWI;
+        context->SubsystemMask = TIMECARD_SUBSYSTEM_MASK_ALL &
+            ~(TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemGnss2) |
+              TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemFlash));
     } else if (context->PciVendorId == 0x18d4u &&
                context->PciDeviceId == 0x1008u) {
         context->BoardProfile = TIMECARD_BOARD_CELESTICA;
@@ -169,7 +176,8 @@ TimeCardUartMessageRangeRelevant(PDEVICE_CONTEXT context, ULONG first,
     ULONG port;
 
     for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
-        if (messages[port] != MAXULONG && messages[port] >= first &&
+        if (context->Uart[port] != NULL &&
+            messages[port] != MAXULONG && messages[port] >= first &&
             messages[port] - first < count) {
             return TRUE;
         }
@@ -183,13 +191,15 @@ TimeCardDeleteUartInterrupts(PDEVICE_CONTEXT context)
 {
     ULONG index;
 
-    for (index = 0; index < context->UartInterruptCount; ++index) {
+    for (index = 0; context->BoardProfile != TIMECARD_BOARD_WIWI &&
+         index < context->UartInterruptCount; ++index) {
         if (context->UartInterrupt[index] != NULL) {
             WdfObjectDelete(context->UartInterrupt[index]);
             context->UartInterrupt[index] = NULL;
         }
     }
     context->UartInterruptCount = 0;
+    context->WiwiIrqMask = 0;
     context->TimestampInterruptMask = 0u;
     context->SignalInterruptMask = 0u;
 }
@@ -212,6 +222,7 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
         PCM_PARTIAL_RESOURCE_DESCRIPTOR raw =
             WdfCmResourceListGetDescriptor(resourcesRaw, i);
         ULONG messageCount;
+        BOOLEAN relevant;
         NTSTATUS status;
         WDFINTERRUPT interrupt;
         PTIMECARD_UART_INTERRUPT_CONTEXT interruptContext;
@@ -227,12 +238,13 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
             raw->u.MessageInterrupt.Raw.MessageCount != 0) {
             messageCount = raw->u.MessageInterrupt.Raw.MessageCount;
         }
-        if (!TimeCardUartMessageRangeRelevant(
-                context, messageBase, messageCount)) {
+        relevant = TimeCardUartMessageRangeRelevant(context, messageBase, messageCount);
+        if (!relevant && context->BoardProfile != TIMECARD_BOARD_WIWI) {
             messageBase += messageCount;
             continue;
         }
-        if (context->UartInterruptCount >=
+        if (context->BoardProfile != TIMECARD_BOARD_WIWI &&
+            context->UartInterruptCount >=
             TIMECARD_UART_INTERRUPT_OBJECTS) {
             TimeCardDeleteUartInterrupts(context);
             return STATUS_INSUFFICIENT_RESOURCES;
@@ -244,7 +256,6 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
         config.AutomaticSerialization = FALSE;
         WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(
             &attributes, TIMECARD_UART_INTERRUPT_CONTEXT);
-        attributes.ParentObject = context->Device;
         status = WdfInterruptCreate(context->Device, &config, &attributes,
                                     &interrupt);
         if (!NT_SUCCESS(status)) {
@@ -254,14 +265,20 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
         interruptContext = UartInterruptGetContext(interrupt);
         interruptContext->DeviceContext = context;
         interruptContext->MessageBase = messageBase;
-        context->UartInterrupt[context->UartInterruptCount++] = interrupt;
+        if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
+            if (relevant && messageBase >= 32 && messageBase < 64)
+                context->WiwiIrqMask |= 1u << (messageBase - 32u);
+        } else {
+            context->UartInterrupt[context->UartInterruptCount] = interrupt;
+        }
+        ++context->UartInterruptCount;
         TimeCardTimestampMarkInterruptRange(
             context, messageBase, messageCount);
         TimeCardSignalMarkInterruptRange(
             context, messageBase, messageCount);
         messageBase += messageCount;
     }
-    return context->UartInterruptCount != 0 ?
+    return context->UartInterruptCount != 0 || context->BoardProfile == TIMECARD_BOARD_WIWI ?
         STATUS_SUCCESS : STATUS_NOT_FOUND;
 }
 
@@ -419,7 +436,8 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
      * 32 messages, while the current MSI-X image exposes 64. Older boards
      * commonly report PCI revision 00 and either 2 or 32 MSI messages.
      */
-    if (context->InterruptMessages > 32) {
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI ||
+        context->InterruptMessages > 32) {
         useMsix = TRUE;
     } else if (context->PciRevision != TIMECARD_PCI_REVISION_UNKNOWN) {
         useMsix = context->PciRevision >= 2;
@@ -562,6 +580,11 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
                                              dcfSlaveOffset) : NULL;
 
     for (i = 0; i < TIMECARD_UART_COUNT; ++i) {
+        if (context->BoardProfile == TIMECARD_BOARD_WIWI &&
+            i == TIMECARD_UART_GNSS2) {
+            context->Uart[i] = NULL;
+            continue;
+        }
         if (!TimeCardRangeFits(context->Bar0Length, uartOffsets[i], 0x20u))
             return STATUS_DEVICE_CONFIGURATION_ERROR;
         context->Uart[i] = context->Bar0Base + uartOffsets[i];
@@ -637,6 +660,13 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
         context->I2c = context->Bar0Base + context->I2cOffset;
     }
 
+    /* WiWi uses a different flash image header and programming protocol. */
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
+        context->FlashOffset = TIMECARD_OFFSET_NONE;
+        context->FlashFirmwareOffset = 0;
+        context->FlashController = 0;
+        return STATUS_SUCCESS;
+    }
     /* The Xilinx SPI controller owns the FPGA firmware region of SPI-NOR. */
     if (TimeCardRangeFits(context->Bar0Length, context->FlashOffset,
                           TIMECARD_REGISTER_WINDOW_SIZE)) {
@@ -686,6 +716,8 @@ TimeCardEvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT deviceInit)
     powerCallbacks.EvtDeviceReleaseHardware = TimeCardEvtReleaseHardware;
     powerCallbacks.EvtDeviceD0Entry = TimeCardEvtD0Entry;
     powerCallbacks.EvtDeviceD0Exit = TimeCardEvtD0Exit;
+    powerCallbacks.EvtDeviceD0EntryPostInterruptsEnabled = TimeCardEvtInterruptsEnabled;
+    powerCallbacks.EvtDeviceD0ExitPreInterruptsDisabled = TimeCardEvtInterruptsDisabling;
     WdfDeviceInitSetPnpPowerEventCallbacks(deviceInit, &powerCallbacks);
 
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, DEVICE_CONTEXT);
@@ -700,6 +732,8 @@ TimeCardEvtDeviceAdd(WDFDRIVER driver, PWDFDEVICE_INIT deviceInit)
     TimeCardGetPciIdentity(device, &context->PciVendorId,
                            &context->PciDeviceId,
                            &context->PciRevision);
+    if (context->PciVendorId == MAXUSHORT || context->PciDeviceId == MAXUSHORT)
+        return STATUS_DEVICE_CONFIGURATION_ERROR;
     TimeCardConfigureBoardProfile(context);
 
     WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
@@ -827,6 +861,89 @@ TimeCardEvtFileCleanup(WDFFILEOBJECT fileObject)
     WdfWaitLockRelease(context->RegisterLock);
 }
 
+/* The revision-02 interface has a 32-bit BAR0 and a 64-entry MSI-X table.
+ * Inspect PCI configuration through the bus driver before the first MMIO. */
+static NTSTATUS
+TimeCardReadWiwiBar(WDFDEVICE device, PULONG bar)
+{
+    BUS_INTERFACE_STANDARD bus;
+    PCI_COMMON_CONFIG cfg;
+    const UCHAR *bytes = (const UCHAR *)&cfg;
+    ULONG length, pos, hops;
+    NTSTATUS status = WdfFdoQueryForInterface(
+        device, &GUID_BUS_INTERFACE_STANDARD, (PINTERFACE)&bus,
+        sizeof(bus), 1, NULL);
+
+    if (!NT_SUCCESS(status))
+        return status;
+    length = bus.GetBusData(bus.Context, PCI_WHICHSPACE_CONFIG,
+                            &cfg, 0, sizeof(cfg));
+    bus.InterfaceDereference(bus.Context);
+    if (length != sizeof(cfg) || cfg.VendorID != 0x2163 ||
+        cfg.DeviceID != 0x1008 || cfg.RevisionID != 2 ||
+        (cfg.HeaderType & ~PCI_MULTIFUNCTION) != PCI_DEVICE_TYPE ||
+        cfg.BaseClass != 0x05 || cfg.SubClass != 0x80 || cfg.ProgIf != 0 ||
+        cfg.u.type0.SubVendorID != 0x10ee || cfg.u.type0.SubSystemID != 7 ||
+        (cfg.u.type0.BaseAddresses[0] & 7u) != 0 ||
+        !(cfg.Status & PCI_STATUS_CAPABILITIES_LIST))
+        return STATUS_DEVICE_CONFIGURATION_ERROR;
+
+    pos = cfg.u.type0.CapabilitiesPtr;
+    for (hops = 0; hops < 48 && pos >= PCI_COMMON_HDR_LENGTH &&
+         pos <= sizeof(cfg) - 4 && (pos & 3u) == 0; ++hops) {
+        if (bytes[pos] == PCI_CAPABILITY_ID_MSIX) {
+            USHORT control;
+            ULONG table, pba;
+
+            if (pos > sizeof(cfg) - 12)
+                break;
+            RtlCopyMemory(&control, bytes + pos + 2, sizeof(control));
+            RtlCopyMemory(&table, bytes + pos + 4, sizeof(table));
+            RtlCopyMemory(&pba, bytes + pos + 8, sizeof(pba));
+            if ((control & 0x7ffu) != 63 || table != 0x2000 || pba != 0x1808)
+                break;
+            *bar = cfg.u.type0.BaseAddresses[0] & ~0xfu;
+            return STATUS_SUCCESS;
+        }
+        pos = bytes[pos + 1];
+    }
+    return STATUS_DEVICE_CONFIGURATION_ERROR;
+}
+
+static NTSTATUS
+TimeCardSetWiwiIrqGate(PDEVICE_CONTEXT context, ULONG mask)
+{
+    volatile ULONG *gate;
+    if (context->BoardProfile != TIMECARD_BOARD_WIWI)
+        return STATUS_SUCCESS;
+    gate = (volatile ULONG *)(context->Bar0Base + TIMECARD_WIWI_IRQ_ENABLE);
+    /* LiteX places inputs 63:32 first. Windows polls XIIC and owns no SPI ISR. */
+    WRITE_REGISTER_ULONG(gate + 1, 0);
+    WRITE_REGISTER_ULONG(gate, mask);
+    if (READ_REGISTER_ULONG(gate) != mask || READ_REGISTER_ULONG(gate + 1) != 0)
+        return STATUS_DEVICE_HARDWARE_ERROR;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS
+TimeCardEvtInterruptsEnabled(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
+{
+    PDEVICE_CONTEXT context = DeviceGetContext(device);
+    NTSTATUS status;
+    UNREFERENCED_PARAMETER(previousState);
+    status = TimeCardSetWiwiIrqGate(context, context->WiwiIrqMask);
+    if (!NT_SUCCESS(status))
+        (VOID)TimeCardSetWiwiIrqGate(context, 0);
+    return status;
+}
+
+NTSTATUS
+TimeCardEvtInterruptsDisabling(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
+{
+    UNREFERENCED_PARAMETER(targetState);
+    return TimeCardSetWiwiIrqGate(DeviceGetContext(device), 0);
+}
+
 NTSTATUS
 TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
                            WDFCMRESLIST resourcesTranslated)
@@ -834,21 +951,40 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
     PDEVICE_CONTEXT context = DeviceGetContext(device);
     PHYSICAL_ADDRESS barStart;
     ULONG barLength = 0;
+    ULONG wiwiRawBar = 0;
     ULONG i;
     NTSTATUS status;
 
     barStart.QuadPart = 0;
     context->InterruptMessages =
         TimeCardCountInterruptMessages(resourcesRaw, resourcesTranslated);
-    TimeCardGetPciIdentity(device, &context->PciVendorId,
-                           &context->PciDeviceId,
-                           &context->PciRevision);
-    TimeCardConfigureBoardProfile(context);
 
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
+        status = TimeCardReadWiwiBar(device, &wiwiRawBar);
+        if (!NT_SUCCESS(status))
+            return status;
+    }
     for (i = 0; i < WdfCmResourceListGetCount(resourcesTranslated); ++i) {
         PCM_PARTIAL_RESOURCE_DESCRIPTOR descriptor;
 
         descriptor = WdfCmResourceListGetDescriptor(resourcesTranslated, i);
+        if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
+            PCM_PARTIAL_RESOURCE_DESCRIPTOR raw =
+                WdfCmResourceListGetDescriptor(resourcesRaw, i);
+
+            if (raw == NULL || descriptor == NULL)
+                return STATUS_DEVICE_CONFIGURATION_ERROR;
+            if (descriptor->Type == CmResourceTypeInterrupt &&
+                (raw->Type != CmResourceTypeInterrupt ||
+                 ((raw->Flags ^ descriptor->Flags) & CM_RESOURCE_INTERRUPT_MESSAGE) ||
+                 ((raw->Flags & CM_RESOURCE_INTERRUPT_MESSAGE) &&
+                  raw->u.MessageInterrupt.Raw.MessageCount != 1)))
+                return STATUS_DEVICE_CONFIGURATION_ERROR;
+            if (raw->Type != CmResourceTypeMemory ||
+                raw->u.Memory.Start.QuadPart != wiwiRawBar ||
+                raw->u.Memory.Length != TIMECARD_WIWI_BAR_LENGTH)
+                continue;
+        }
         if (descriptor != NULL && descriptor->Type == CmResourceTypeMemory &&
             descriptor->u.Memory.Length > barLength) {
             barStart = descriptor->u.Memory.Start;
@@ -856,6 +992,10 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
         }
     }
 
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI &&
+        (barLength != TIMECARD_WIWI_BAR_LENGTH ||
+         context->InterruptMessages > 64))
+        return STATUS_DEVICE_CONFIGURATION_ERROR;
     if (barLength == 0)
         return STATUS_DEVICE_CONFIGURATION_ERROR;
 
@@ -865,7 +1005,9 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
         return STATUS_INSUFFICIENT_RESOURCES;
     context->Bar0Length = barLength;
 
-    status = TimeCardSelectLayout(context);
+    status = TimeCardSetWiwiIrqGate(context, 0);
+    if (NT_SUCCESS(status))
+        status = TimeCardSelectLayout(context);
     if (!NT_SUCCESS(status)) {
         MmUnmapIoSpace((PVOID)context->Bar0Base, context->Bar0Length);
         context->Bar0Base = NULL;
@@ -879,6 +1021,8 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
     status = TimeCardCreateUartInterrupts(
         context, resourcesRaw, resourcesTranslated);
     if (!NT_SUCCESS(status)) {
+        if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+            return status; /* ReleaseHardware tears down the prepared mapping. */
         /* UART access remains available through the bounded polling path. */
         context->UartInterruptCount = 0;
         KdPrint(("timecard: UART interrupt capture unavailable, status 0x%08lx\n",

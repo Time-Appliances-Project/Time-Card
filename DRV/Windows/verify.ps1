@@ -22,7 +22,8 @@ try {
     pnputil.exe /scan-devices | Out-Host
     $devices = Get-PnpDevice -PresentOnly | Where-Object {
         $id = $_.InstanceId
-        $instances | Where-Object { $id -like $_ }
+        ($_.HardwareID -contains 'PCI\VEN_2163&DEV_1008&SUBSYS_000710EE&REV_02') -or
+            ($instances | Where-Object { $id -like $_ })
     }
     if (-not $devices) {
         throw 'A supported OCP Time Card PCI device is not present.'
@@ -54,6 +55,9 @@ try {
     $hasCelesticaProfile = $devices | Where-Object {
         $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
     }
+    $hasWiwiProfile = $devices | Where-Object {
+        $_.HardwareID -contains 'PCI\VEN_2163&DEV_1008&SUBSYS_000710EE&REV_02'
+    }
     $hasArtProfile = $devices | Where-Object {
         $_.InstanceId -like 'PCI\VEN_1AD7&DEV_A000*'
     }
@@ -75,13 +79,17 @@ try {
         'TIMECARD\UART_GNSS\*',
         'TIMECARD\UART_MAC\*',
         'TIMECARD\SMA\*',
-        'TIMECARD\I2C\*',
-        'TIMECARD\FLASH\*'
+        'TIMECARD\I2C\*'
     )
+    if ($hasFbProfile -or $hasArtProfile) {
+        $expectedChildren += 'TIMECARD\FLASH\*'
+    }
     if ($hasFbProfile) {
+        $expectedChildren += 'TIMECARD\UART_GNSS2\*'
+    }
+    if ($hasFbProfile -or $hasWiwiProfile) {
         $expectedChildren += @(
             'TIMECARD\TOD\*',
-            'TIMECARD\UART_GNSS2\*',
             'TIMECARD\UART_NMEA\*',
             'TIMECARD\TIMING_IO\*',
             'TIMECARD\PTM\*'
@@ -171,7 +179,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'timecardctl sma-status failed.' }
     & $tool i2c-status
     if ($LASTEXITCODE -ne 0) { throw 'timecardctl i2c-status failed.' }
-    if ($hasFbProfile) {
+    if ($hasFbProfile -or $hasWiwiProfile) {
         & $tool nmea-status
         if ($LASTEXITCODE -ne 0) { throw 'timecardctl nmea-status failed.' }
     }

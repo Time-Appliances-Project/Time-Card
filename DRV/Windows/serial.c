@@ -105,12 +105,20 @@ TimeCardEvtUartInterruptIsr(WDFINTERRUPT interrupt, ULONG messageId)
     PTIMECARD_UART_INTERRUPT_CONTEXT interruptContext =
         UartInterruptGetContext(interrupt);
     PDEVICE_CONTEXT context = interruptContext->DeviceContext;
-    ULONG globalMessageId = interruptContext->MessageBase + messageId;
+    /* WiWi has one descriptor per vector. Its object identifies the source. */
+    ULONG globalMessageId = context->BoardProfile == TIMECARD_BOARD_WIWI ?
+        interruptContext->MessageBase : interruptContext->MessageBase + messageId;
     ULONG port = TimeCardUartPortForMessage(context, globalMessageId);
     ULONG drained = 0;
     BOOLEAN handled;
     UCHAR lsr;
 
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
+        if (globalMessageId < 32u || globalMessageId >= 64u ||
+            !(context->WiwiIrqMask & (1u << (globalMessageId - 32u))))
+            return FALSE;
+        messageId = globalMessageId;
+    }
     handled = TimeCardHandleTimestampInterrupt(context, globalMessageId);
     handled = TimeCardHandleSignalInterrupt(context, globalMessageId) ||
         handled;
@@ -143,6 +151,8 @@ TimeCardEvtUartInterruptIsr(WDFINTERRUPT interrupt, ULONG messageId)
 static UCHAR
 TimeCardUartReadRegister(PDEVICE_CONTEXT context, ULONG port, ULONG reg)
 {
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+        return (UCHAR)READ_REGISTER_ULONG((PULONG)(context->Uart[port] + reg * 4u));
     return READ_REGISTER_UCHAR((PUCHAR)(context->Uart[port] + reg * 4u));
 }
 
@@ -150,7 +160,10 @@ static VOID
 TimeCardUartWriteRegister(PDEVICE_CONTEXT context, ULONG port, ULONG reg,
                           UCHAR value)
 {
-    WRITE_REGISTER_UCHAR((PUCHAR)(context->Uart[port] + reg * 4u), value);
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+        WRITE_REGISTER_ULONG((PULONG)(context->Uart[port] + reg * 4u), value);
+    else
+        WRITE_REGISTER_UCHAR((PUCHAR)(context->Uart[port] + reg * 4u), value);
 }
 
 static BOOLEAN

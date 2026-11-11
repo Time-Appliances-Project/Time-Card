@@ -98,12 +98,12 @@ def validate(folder):
     require(pe["pdbName"].lower() == "timecard.pdb", "Unexpected PDB name")
     raw = (folder / "timecard.inf").read_bytes()
     inf = raw.decode("utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig")
-    require(re.search(r"DriverVer\s*=\s*10/27/2026,1\.44\.0\.0", inf), "Wrong INF DriverVer")
+    require(re.search(r"DriverVer\s*=\s*11/11/2026,1\.45\.0\.0", inf), "Wrong INF DriverVer")
     require("[Standard.NTamd64.10.0.1..22000]" in inf, "Wrong INF OS target")
     require(re.search(r"KmdfLibraryVersion\s*=\s*1\.33", inf), "Wrong KMDF version")
     require((folder / "timecard.cat").stat().st_size > 0, "Empty catalog")
     hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(folder.iterdir())}
-    return {"status": "pass", "driverVersion": "1.44.0.0", "abi": 15, "pe": pe, "pdb": pdb,
+    return {"status": "pass", "driverVersion": "1.45.0.0", "abi": 15, "pe": pe, "pdb": pdb,
             "pdbMatches": True, "fileCount": len(expected), "sha256": hashes,
             "limitations": "Structural and identity checks only. Catalog generation is checked by WDK build logs. No Microsoft signing or hardware qualification."}
 

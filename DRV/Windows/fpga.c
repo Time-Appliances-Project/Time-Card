@@ -74,7 +74,8 @@ static BOOLEAN
 TimeCardStandardFpga(PDEVICE_CONTEXT context)
 {
     return context->BoardProfile == TIMECARD_BOARD_FB ||
-           context->BoardProfile == TIMECARD_BOARD_CELESTICA;
+           context->BoardProfile == TIMECARD_BOARD_CELESTICA ||
+           context->BoardProfile == TIMECARD_BOARD_WIWI;
 }
 
 static BOOLEAN
@@ -363,6 +364,11 @@ TimeCardFpgaImageQuery(PDEVICE_CONTEXT context,
     imageInfo->BoardProfile = context->BoardProfile;
     imageInfo->RegisterOffset = offset;
 
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
+        imageInfo->Flags |= TIMECARD_FPGA_IMAGE_FLAG_FPGA_FIRMWARE;
+        imageInfo->ImageVersion = rawVersion;
+        return STATUS_SUCCESS;
+    }
     decoded = rawVersion;
     if ((decoded & 0xffffu) == 0u) {
         decoded >>= 16;

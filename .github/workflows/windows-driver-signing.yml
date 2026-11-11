@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - windows/asix-signing-cab-20261027
+      - windows/wiwi-rev02
     paths:
       - DRV/Windows/**
       - .github/workflows/windows-driver-signing.yml
@@ -41,12 +42,18 @@ jobs:
             DRV/Windows/x64/Release/*.log
           if-no-files-found: warn
           retention-days: 30
+      - name: Upload lab diagnostic CLI
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TimeCard-1.45.0.0-x64-diagnostics
+          path: DRV/Windows/out/timecardctl.exe
+          if-no-files-found: error
       - name: Upload verified unsigned signing inputs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: TimeCard-1.44.0.0-x64-unsigned
+          name: TimeCard-1.45.0.0-x64-unsigned
           path: |
-            DRV/Windows/submission/TimeCard-1.44.0.0-x64.cab
+            DRV/Windows/submission/TimeCard-1.45.0.0-x64.cab
             DRV/Windows/submission/TimeCard/
             DRV/Windows/submission/SHA256SUMS.txt
           if-no-files-found: error

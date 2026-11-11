@@ -55,6 +55,8 @@ try {
         -not $replacementPending) {
         $presentController = Get-PnpDevice -PresentOnly | Where-Object {
             $_.InstanceId -like 'PCI\VEN_1D9B&DEV_0400*' -or
+            ($_.InstanceId -like 'PCI\VEN_2163&DEV_1008*' -and
+             $_.HardwareID -contains 'PCI\VEN_2163&DEV_1008&SUBSYS_000710EE&REV_02') -or
             $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*' -or
             $_.InstanceId -like 'PCI\VEN_1AD7&DEV_A000*'
         } | Select-Object -First 1

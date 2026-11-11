@@ -892,6 +892,7 @@ board_profile_name(unsigned long profile)
     switch (profile) {
     case TIMECARD_BOARD_PROFILE_FB: return "OCP/FPGA";
     case TIMECARD_BOARD_PROFILE_ART: return "Orolia/Safran ART";
+    case TIMECARD_BOARD_PROFILE_WIWI: return "WiWi";
     case TIMECARD_BOARD_PROFILE_CELESTICA: return "Celestica";
     default: return "Unknown";
     }
@@ -1318,11 +1319,13 @@ cmd_sensors(HANDLE handle)
            (unsigned long)telemetry.ControllerStatus,
            (unsigned long)telemetry.InterruptStatus);
     printf("Board profile:     %s\n",
+           telemetry.BoardProfile == TIMECARD_BOARD_PROFILE_WIWI ? "WiWi R4006" :
            telemetry.BoardProfile == TIMECARD_BOARD_PROFILE_CELESTICA ?
                "Celestica R4006" :
            telemetry.BoardProfile == TIMECARD_BOARD_PROFILE_ART ?
                "Orolia ART" : "Meta/Facebook");
-    if (telemetry.BoardProfile == TIMECARD_BOARD_PROFILE_CELESTICA) {
+    if (telemetry.BoardProfile == TIMECARD_BOARD_PROFILE_CELESTICA ||
+        telemetry.BoardProfile == TIMECARD_BOARD_PROFILE_WIWI) {
         unsigned long index;
         double pressurePa;
 
@@ -1438,7 +1441,8 @@ cmd_sensors(HANDLE handle)
                (long)telemetry.Imu.QuaternionY,
                (long)telemetry.Imu.QuaternionZ);
     }
-    if (telemetry.BoardProfile != TIMECARD_BOARD_PROFILE_CELESTICA) {
+    if (telemetry.BoardProfile != TIMECARD_BOARD_PROFILE_CELESTICA &&
+        telemetry.BoardProfile != TIMECARD_BOARD_PROFILE_WIWI) {
         if ((telemetry.Environment.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
             ++validCount;
         if ((telemetry.Rail12V.Flags & TIMECARD_SENSOR_FLAG_VALID) != 0)
@@ -1744,14 +1748,18 @@ cmd_fpga_status(HANDLE handle)
             handle, IOCTL_TIMECARD_FPGA_IMAGE_QUERY, NULL, 0,
             &image, sizeof(image), &returned, NULL);
         if (imageQueryOk && returned == sizeof(image)) {
-            printf("FPGA image identity:    %s %lu.%lu%s\n",
-                   (image.Flags &
-                    TIMECARD_FPGA_IMAGE_FLAG_FPGA_FIRMWARE) != 0 ?
-                       "FPGA" : "SOM",
-                   (unsigned long)(image.ImageVersion >> 8),
-                   (unsigned long)(image.ImageVersion & 0xffu),
-                   (image.Flags & TIMECARD_FPGA_IMAGE_FLAG_LOADER) != 0 ?
-                       " (loader encoding)" : "");
+            if (image.BoardProfile == TIMECARD_BOARD_PROFILE_WIWI) {
+                printf("FPGA image build:       0x%08lx\n", (unsigned long)image.RawVersion);
+            } else {
+                printf("FPGA image identity:    %s %lu.%lu%s\n",
+                       (image.Flags &
+                        TIMECARD_FPGA_IMAGE_FLAG_FPGA_FIRMWARE) != 0 ?
+                           "FPGA" : "SOM",
+                       (unsigned long)(image.ImageVersion >> 8),
+                       (unsigned long)(image.ImageVersion & 0xffu),
+                       (image.Flags & TIMECARD_FPGA_IMAGE_FLAG_LOADER) != 0 ?
+                           " (loader encoding)" : "");
+            }
             printf("Image raw/tag/register: 0x%08lx / %lu / 0x%08lx\n",
                    (unsigned long)image.RawVersion,
                    (unsigned long)image.ImageTag,

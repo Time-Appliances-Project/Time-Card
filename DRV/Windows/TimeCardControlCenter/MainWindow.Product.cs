@@ -272,13 +272,12 @@ namespace TimeCardControlCenter
             {
                 ProfileDescriptionText.Text = string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}\nCompatibility: board profile {1}, layout {2}, {3} image {4}.{5} (tag {6}, raw 0x{7:X8}).",
+                    "{0}\nCompatibility: board profile {1}, layout {2}, {3} image {4} (tag {5}, raw 0x{6:X8}).",
                     profile.Description,
                     profile.FpgaImageBoardProfile,
                     profile.FpgaImageLayout,
                     profile.FpgaImageLoaderEncoding ? "loader-encoded" : "application",
-                    profile.FpgaImageVersion >> 8,
-                    profile.FpgaImageVersion & 0xffu,
+                    FpgaImageInfo.FormatVersion(profile.FpgaImageBoardProfile, profile.FpgaImageVersion),
                     profile.FpgaImageTag,
                     profile.FpgaImageRawVersion);
             }
@@ -504,22 +503,20 @@ namespace TimeCardControlCenter
                         SetProfileBusy(false, string.Format(
                             CultureInfo.InvariantCulture,
                             "Profile FPGA image mismatch: expected board/layout {0}/{1}, " +
-                            "{2} image {3}.{4}, tag {5}, raw 0x{6:X8}; live card is " +
-                            "board/layout {7}/{8}, {9} image {10}.{11}, tag {12}, " +
-                            "raw 0x{13:X8}. No configuration was written.",
+                            "{2} image {3}, tag {4}, raw 0x{5:X8}; live card is " +
+                            "board/layout {6}/{7}, {8} image {9}, tag {10}, " +
+                            "raw 0x{11:X8}. No configuration was written.",
                             profile.FpgaImageBoardProfile,
                             profile.FpgaImageLayout,
                             profile.FpgaImageLoaderEncoding ? "loader-encoded" :
                                 "application",
-                            profile.FpgaImageVersion >> 8,
-                            profile.FpgaImageVersion & 0xffu,
+                            FpgaImageInfo.FormatVersion(profile.FpgaImageBoardProfile, profile.FpgaImageVersion),
                             profile.FpgaImageTag,
                             profile.FpgaImageRawVersion,
                             image.BoardProfile,
                             image.Layout,
                             image.IsLoader ? "loader-encoded" : "application",
-                            image.ImageVersion >> 8,
-                            image.ImageVersion & 0xffu,
+                            image.VersionText,
                             image.ImageTag,
                             image.RawVersion));
                         return false;
