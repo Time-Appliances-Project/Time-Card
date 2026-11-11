@@ -867,7 +867,7 @@ static NTSTATUS
 TimeCardReadWiwiBar(WDFDEVICE device, PULONG bar)
 {
     BUS_INTERFACE_STANDARD bus;
-    PCI_COMMON_CONFIG cfg;
+    PCI_COMMON_CONFIG cfg = {0};
     const UCHAR *bytes = (const UCHAR *)&cfg;
     ULONG length, pos, hops;
     NTSTATUS status = WdfFdoQueryForInterface(
