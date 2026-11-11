@@ -355,7 +355,8 @@ TimeCardFpgaImageQuery(PDEVICE_CONTEXT context,
     rawVersion = READ_REGISTER_ULONG(
         (PULONG)(context->Bar0Base + offset));
     WdfWaitLockRelease(context->RegisterLock);
-    if (rawVersion == 0u || rawVersion == MAXULONG)
+    if (rawVersion == MAXULONG ||
+        (rawVersion == 0u && context->BoardProfile != TIMECARD_BOARD_WIWI))
         return STATUS_NOT_SUPPORTED;
 
     imageInfo->Flags = TIMECARD_FPGA_IMAGE_FLAG_PRESENT;

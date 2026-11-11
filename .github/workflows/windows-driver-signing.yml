@@ -58,3 +58,14 @@ jobs:
             DRV/Windows/submission/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 90
+      - name: Build dedicated lab test package
+        shell: pwsh
+        working-directory: DRV/Windows
+        run: ./tools/build-hlk-test-package.ps1
+      - name: Upload lab test package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TimeCard-1.45.0.0-x64-HLK-test
+          path: DRV/Windows/hlk-test/
+          if-no-files-found: error
+          retention-days: 90
