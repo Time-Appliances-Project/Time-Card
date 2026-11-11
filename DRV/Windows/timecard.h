@@ -326,6 +326,15 @@ typedef struct _TIMECARD_TIMESTAMP_REG {
     ULONG Data;
 } TIMECARD_TIMESTAMP_REG, *PTIMECARD_TIMESTAMP_REG;
 
+/* Internal snapshot used to make compound UART/MMIO updates transactional. */
+typedef struct _TIMECARD_UART_HARDWARE_STATE {
+    UCHAR DivisorLow;
+    UCHAR DivisorHigh;
+    UCHAR LineControl;
+    UCHAR InterruptEnable;
+    UCHAR ModemControl;
+} TIMECARD_UART_HARDWARE_STATE, *PTIMECARD_UART_HARDWARE_STATE;
+
 typedef struct _DEVICE_CONTEXT {
     WDFDEVICE Device;
     volatile UCHAR *Bar0Base;
@@ -432,6 +441,8 @@ typedef struct _DEVICE_CONTEXT {
     WDFWAITLOCK RegisterLock;
     WDFINTERRUPT UartInterrupt[TIMECARD_UART_INTERRUPT_OBJECTS];
     ULONG UartInterruptCount;
+    TIMECARD_UART_HARDWARE_STATE WiwiUartState[TIMECARD_UART_COUNT];
+    ULONG WiwiSavedUarts;
     ULONG WiwiIrqMask; /* Upper half of the 64-input LitePCIe gate. */
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
@@ -441,15 +452,6 @@ typedef struct _TIMECARD_UART_INTERRUPT_CONTEXT {
     PDEVICE_CONTEXT DeviceContext;
     ULONG MessageBase;
 } TIMECARD_UART_INTERRUPT_CONTEXT, *PTIMECARD_UART_INTERRUPT_CONTEXT;
-
-/* Internal snapshot used to make compound UART/MMIO updates transactional. */
-typedef struct _TIMECARD_UART_HARDWARE_STATE {
-    UCHAR DivisorLow;
-    UCHAR DivisorHigh;
-    UCHAR LineControl;
-    UCHAR InterruptEnable;
-    UCHAR ModemControl;
-} TIMECARD_UART_HARDWARE_STATE, *PTIMECARD_UART_HARDWARE_STATE;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(TIMECARD_UART_INTERRUPT_CONTEXT,
                                    UartInterruptGetContext)

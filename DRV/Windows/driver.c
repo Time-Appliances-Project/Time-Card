@@ -1106,6 +1106,22 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 
     UNREFERENCED_PARAMETER(previousState);
 
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
+        ULONG port;
+
+        status = TimeCardSetWiwiIrqGate(context, 0);
+        if (!NT_SUCCESS(status))
+            return status;
+        for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
+            if (context->WiwiSavedUarts & (1u << port)) {
+                status = TimeCardUartRestoreHardware(
+                    context, port, &context->WiwiUartState[port]);
+                if (!NT_SUCCESS(status))
+                    return status;
+            }
+        }
+        context->WiwiSavedUarts = 0;
+    }
     if (context->BoardProfile == TIMECARD_BOARD_ART) {
         /*
          * ART board-config bit zero selects the direct FPGA mRO-50 bridge
@@ -1156,10 +1172,24 @@ TimeCardEvtD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
 {
     PDEVICE_CONTEXT context = DeviceGetContext(device);
 
-    TimeCardUartDisableInterrupts(context);
+    if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
+        ULONG port;
+
+        /* The global gate is closed and the ISRs are disconnected here. */
+        context->WiwiSavedUarts = 0;
+        if (targetState != WdfPowerDeviceD3Final) {
+            for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
+                if (context->Uart[port] != NULL &&
+                    NT_SUCCESS(TimeCardUartSnapshotHardware(
+                        context, port, &context->WiwiUartState[port])))
+                    context->WiwiSavedUarts |= 1u << port;
+            }
+        }
+    } else {
+        TimeCardUartDisableInterrupts(context);
+    }
     TimeCardTimestampPowerDown(context);
     TimeCardSignalInterruptPowerDown(context);
     TimeCardPhaseSuspend(context);
-    UNREFERENCED_PARAMETER(targetState);
     return STATUS_SUCCESS;
 }
