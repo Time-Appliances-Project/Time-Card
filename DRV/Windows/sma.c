@@ -444,6 +444,11 @@ TimeCardSmaSet(PDEVICE_CONTEXT context,
         !TimeCardSmaInputFunctionValid(request->Function))
         return STATUS_INVALID_PARAMETER;
     if (request->Direction == TIMECARD_SMA_DIRECTION_OUTPUT &&
+        request->Function == TIMECARD_SMA_OUTPUT_GNSS2 &&
+        (context->SubsystemMask &
+         TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemGnss2)) == 0u)
+        return STATUS_NOT_SUPPORTED;
+    if (request->Direction == TIMECARD_SMA_DIRECTION_OUTPUT &&
         !TimeCardSmaOutputFunctionValid(request->Function))
         return STATUS_INVALID_PARAMETER;
 

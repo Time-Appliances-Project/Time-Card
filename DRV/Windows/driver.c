@@ -110,7 +110,8 @@ TimeCardConfigureBoardProfile(PDEVICE_CONTEXT context)
     } else if (context->PciVendorId == 0x18d4u &&
                context->PciDeviceId == 0x1008u) {
         context->BoardProfile = TIMECARD_BOARD_CELESTICA;
-        context->SubsystemMask = TIMECARD_SUBSYSTEM_MASK_ALL;
+        context->SubsystemMask = TIMECARD_SUBSYSTEM_MASK_ALL &
+            ~TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemGnss2);
     } else {
         /*
          * Meta/Facebook uses the two fb resource maps from Linux. Keep that
@@ -566,8 +567,9 @@ TimeCardSelectLayout(PDEVICE_CONTEXT context)
                                              dcfSlaveOffset) : NULL;
 
     for (i = 0; i < TIMECARD_UART_COUNT; ++i) {
-        if (context->BoardProfile == TIMECARD_BOARD_WIWI &&
-            i == TIMECARD_UART_GNSS2) {
+        if (i == TIMECARD_UART_GNSS2 &&
+            (context->SubsystemMask &
+             TIMECARD_SUBSYSTEM_BIT(TimeCardSubsystemGnss2)) == 0u) {
             context->Uart[i] = NULL;
             continue;
         }

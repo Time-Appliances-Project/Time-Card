@@ -14,8 +14,8 @@ if ($inf -notmatch 'KmdfLibraryVersion\s*=\s*1\.33' -or
     $project -notmatch '<_NT_TARGET_VERSION>0xA00000B</_NT_TARGET_VERSION>') {
     throw 'Framework, library baseline, and INF must agree.'
 }
-if ($inf -notmatch 'DriverVer\s*=\s*11/11/2026,1\.47\.0\.0' -or
-    $resource -notmatch 'FILEVERSION 1,47,0,0' -or
+if ($inf -notmatch 'DriverVer\s*=\s*11/11/2026,1\.48\.0\.0' -or
+    $resource -notmatch 'FILEVERSION 1,48,0,0' -or
     $header -notmatch 'TIMECARD_ABI_VERSION 15u') {
     throw 'Driver version/resource/ABI contract mismatch.'
 }
@@ -29,4 +29,4 @@ if ($resource -notmatch 'VALUE "ProductName", "Time Card"' -or
 foreach ($id in @('PCI\VEN_1D9B&DEV_0400','PCI\VEN_18D4&DEV_1008','PCI\VEN_2163&DEV_1008&SUBSYS_000710EE&REV_02','PCI\VEN_1AD7&DEV_A000')) {
     if (-not $inf.Contains($id)) { throw "PCI identity missing: $id" }
 }
-Write-Host 'Signing metadata checks passed: 1.47.0.0, ABI 15, Windows 11 desktop x64, KMDF 1.33.'
+Write-Host 'Signing metadata checks passed: 1.48.0.0, ABI 15, Windows 11 desktop x64, KMDF 1.33.'

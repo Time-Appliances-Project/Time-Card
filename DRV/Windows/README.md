@@ -1,11 +1,15 @@
 # Windows Time Card Driver
 
-The 1.47 signing package targets **Windows 11 desktop x64 (build 22000+)**
+The 1.48 signing package targets **Windows 11 desktop x64 (build 22000+)**
 with KMDF 1.33. It corrects the former Windows 10 INF declaration without
 downgrading the framework. Windows Server is excluded from this desktop INF.
 The ABI remains 15 and the 1.43 user-space applications remain compatible.
 An unsigned CAB is a signing input, not Microsoft approval or hardware
 certification. See [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
+
+Version 1.48 exposes the second GNSS UART only on the Meta card. Celestica
+has one GNSS receiver. Its Windows profile keeps flash and the other board
+functions, and no longer maps the unused UART or enumerates its child.
 
 Version 1.47 shuts down timestamp and signal interrupts in D0Exit, while
 the PCI registers are accessible. ReleaseHardware clears the driver's
@@ -470,8 +474,10 @@ hierarchy-disabled setting:
 
 Subsystem enumeration is enabled by default for every newly installed
 supported card. The controller therefore appears with only the functions
-implemented by that board. Meta/Facebook and Celestica expose the full eleven
-children. Orolia ART exposes seven: PHC, primary GNSS UART, mRO-50/atomic UART,
+implemented by that board. Meta/Facebook has two GNSS receivers and exposes
+eleven children. Celestica has one receiver and exposes ten children. WiWi
+has one receiver and exposes nine children; it does not expose flash.
+Orolia ART exposes seven: PHC, primary GNSS UART, mRO-50/atomic UART,
 SMA I/O, timestamp inputs, OpenCores I2C/EEPROM, and Altera SPI flash. It does
 not advertise the absent Meta ToD/NMEA, GNSS2, signal-generator, or PTM cores.
 Verify it with:
@@ -560,7 +566,8 @@ timecardctl led-set 1 0 180 30 96
 timecardctl led-test
 ```
 
-UART ports are `0=GNSS`, `1=GNSS2`, `2=atomic clock`, and `3=NMEA`.
+UART ports are `0=GNSS`, `1=GNSS2` (Meta only), `2=atomic clock`, and
+`3=NMEA` (where fitted). Port numbers do not shift on single-receiver boards.
 
 Do not copy the example `0x12345678` contract word. Read the installed card's
 raw word with `fpga-contract-status`, verify the exact bitstream build manifest,

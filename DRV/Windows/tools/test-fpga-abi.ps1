@@ -166,8 +166,8 @@ Assert-Match $fpga 'context->Layout\s*==\s*TIMECARD_LAYOUT_MSI[\s\S]*TIMECARD_IM
     'ART-safe image query restricted to the two static layouts'
 Assert-Match $fpga 'TimeCardFpgaImageQuery[\s\S]*!TimeCardStandardFpga\(context\)[\s\S]*return STATUS_NOT_SUPPORTED' `
     'image query restricted to trusted standard board profiles'
-Assert-Match $fpga 'rawVersion\s*==\s*0u\s*\|\|\s*rawVersion\s*==\s*MAXULONG' `
-    'invalid image word rejection'
+Assert-Match $fpga 'rawVersion\s*==\s*MAXULONG\s*\|\|\s*\(rawVersion\s*==\s*0u\s*&&\s*context->BoardProfile\s*!=\s*TIMECARD_BOARD_WIWI\)\)\s*return STATUS_NOT_SUPPORTED' `
+    'reject all-ones image words and reject zero except for the raw WiWi build ID'
 Assert-Match $fpga '\(decoded\s*&\s*0xffffu\)\s*==\s*0u[\s\S]*decoded\s*>>=\s*16[\s\S]*TIMECARD_FPGA_IMAGE_FLAG_LOADER' `
     'Linux-compatible loader encoding decode'
 Assert-Match $fpga 'ImageTag\s*=\s*decoded\s*>>\s*15[\s\S]*ImageVersion\s*=\s*decoded\s*&\s*0x7fffu' `

@@ -48,13 +48,13 @@ try {
         throw 'The complete Windows feature set requires ABI 15 or newer. Reboot or restart the controller to finish the driver replacement.'
     }
 
-    $hasFbProfile = $devices | Where-Object {
-        $_.InstanceId -like 'PCI\VEN_1D9B&DEV_0400*' -or
-        $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
+    $hasMetaProfile = $devices | Where-Object {
+        $_.InstanceId -like 'PCI\VEN_1D9B&DEV_0400*'
     }
     $hasCelesticaProfile = $devices | Where-Object {
         $_.InstanceId -like 'PCI\VEN_18D4&DEV_1008*'
     }
+    $hasStandardProfile = $hasMetaProfile -or $hasCelesticaProfile
     $hasWiwiProfile = $devices | Where-Object {
         $_.HardwareID -contains 'PCI\VEN_2163&DEV_1008&SUBSYS_000710EE&REV_02'
     }
@@ -81,13 +81,13 @@ try {
         'TIMECARD\SMA\*',
         'TIMECARD\I2C\*'
     )
-    if ($hasFbProfile -or $hasArtProfile) {
+    if ($hasStandardProfile -or $hasArtProfile) {
         $expectedChildren += 'TIMECARD\FLASH\*'
     }
-    if ($hasFbProfile) {
+    if ($hasMetaProfile) {
         $expectedChildren += 'TIMECARD\UART_GNSS2\*'
     }
-    if ($hasFbProfile -or $hasWiwiProfile) {
+    if ($hasStandardProfile -or $hasWiwiProfile) {
         $expectedChildren += @(
             'TIMECARD\TOD\*',
             'TIMECARD\UART_NMEA\*',
@@ -149,6 +149,19 @@ try {
                 throw "Time Card child is not healthy: $($child.InstanceId)"
             }
         }
+        # A Meta receiver must not mask a phantom Celestica receiver on a
+        # workstation with both cards. Check actual parent instance IDs.
+        $gnss2Parents = @($timeCardDevices | Where-Object InstanceId -Like 'TIMECARD\UART_GNSS2\*' |
+            ForEach-Object {
+                (Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_Parent).Data
+            })
+        foreach ($device in $devices) {
+            $expected = if ($device.InstanceId -like 'PCI\VEN_1D9B&DEV_0400*') { 1 } else { 0 }
+            $actual = @($gnss2Parents | Where-Object { $_ -eq $device.InstanceId }).Count
+            if ($actual -ne $expected) {
+                throw "Expected $expected secondary GNSS receiver(s) on $($device.InstanceId), found $actual."
+            }
+        }
     }
     $capabilityOutput = & $tool capabilities 2>&1
     $capabilityExitCode = $LASTEXITCODE
@@ -179,7 +192,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'timecardctl sma-status failed.' }
     & $tool i2c-status
     if ($LASTEXITCODE -ne 0) { throw 'timecardctl i2c-status failed.' }
-    if ($hasFbProfile -or $hasWiwiProfile) {
+    if ($hasStandardProfile -or $hasWiwiProfile) {
         & $tool nmea-status
         if ($LASTEXITCODE -ne 0) { throw 'timecardctl nmea-status failed.' }
     }
