@@ -34,6 +34,10 @@ In the [Doc folder](../../../SOM/FPGA/Doc) are all relevant documents about the 
 * TimeCardProduction.bit to flash the FPGA (volatile)
 * Factory_TimeCardProduction.bin to load the SPI flash via JTAG (Golden Image + Update Image)
 * TimeCardProduction.bin to updated the SPI flash via SPI starting @ 0x00400000 (Update Image only)
+* LitePCIe: Production image with the LitePCIe core (MSI-X, PTM), PCI ID 18d4:1008
+* LitePCIe/WiWi: WiWi variant of the LitePCIe image, PCI ID 2163:1008
+
+The compatibility rule for the PCI Revision ID is described in [FPGA Binary Sources](../README.md#pci-revision-id).
     
 ## Firmware upgrade
 ```
