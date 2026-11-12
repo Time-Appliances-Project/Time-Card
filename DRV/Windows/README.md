@@ -1,6 +1,8 @@
 # Windows Time Card Driver
 
-The 1.48 signing package targets **Windows 11 desktop x64 (build 22000+)**
+Windows driver author: Ahmad Byagowi
+
+The 1.49 signing package targets **Windows 11 desktop x64 (build 22000+)**
 with KMDF 1.33. It corrects the former Windows 10 INF declaration without
 downgrading the framework. Windows Server is excluded from this desktop INF.
 The ABI remains 15 and the 1.43 user-space applications remain compatible.

@@ -19,7 +19,7 @@ try {
         SourceCommit = (& git rev-parse HEAD)
         Configuration = 'Release'
         Platform = 'x64'
-        DriverVersion = '1.48.0.0'
+        DriverVersion = '1.49.0.0'
         Abi = 15
         Kmdf = '1.33'
         MinimumDesktopBuild = 22000
@@ -41,13 +41,17 @@ try {
     & cl /nologo /W4 /WX /O2 /Iinclude /Foout\timecardctl.obj /Feout\timecardctl.exe tools\timecardctl.c
     if ($LASTEXITCODE -ne 0) { throw 'Diagnostic CLI build failed.' }
     & (Join-Path $windows 'package-release.ps1')
+    $driverInfo = (Get-Item -LiteralPath 'submission\TimeCard\timecard.sys').VersionInfo
+    if ($driverInfo.Comments -cne 'Windows driver author: Ahmad Byagowi') {
+        throw 'The packaged driver is missing its Windows author credit.'
+    }
     & python (Join-Path $PSScriptRoot 'validate-signing-package.py') `
         (Join-Path $windows 'submission\TimeCard') `
         --output (Join-Path $evidence 'binary-validation.json')
     if ($LASTEXITCODE -ne 0) { throw 'PE/PDB package validation failed.' }
     $submission = Join-Path $windows 'submission'
     $files = @(Get-ChildItem -LiteralPath (Join-Path $submission 'TimeCard') -File)
-    $files += Get-Item -LiteralPath (Join-Path $submission 'TimeCard-1.48.0.0-x64.cab')
+    $files += Get-Item -LiteralPath (Join-Path $submission 'TimeCard-1.49.0.0-x64.cab')
     $hashes = foreach ($file in $files | Sort-Object FullName) {
         $relative = $file.FullName.Substring($submission.Length + 1).Replace('\', '/')
         '{0}  {1}' -f (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $relative
