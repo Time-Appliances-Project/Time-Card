@@ -1,11 +1,17 @@
 # Windows Time Card Driver
 
-The 1.46 signing package targets **Windows 11 desktop x64 (build 22000+)**
+The 1.47 signing package targets **Windows 11 desktop x64 (build 22000+)**
 with KMDF 1.33. It corrects the former Windows 10 INF declaration without
 downgrading the framework. Windows Server is excluded from this desktop INF.
 The ABI remains 15 and the 1.43 user-space applications remain compatible.
 An unsigned CAB is a signing input, not Microsoft approval or hardware
 certification. See [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
+
+Version 1.47 shuts down timestamp and signal interrupts in D0Exit, while
+the PCI registers are accessible. ReleaseHardware clears the driver's
+state and unmaps the BAR. KMDF releases interrupt objects created in
+PrepareHardware. If only part of an interrupt set can be created, the
+driver returns the error so KMDF can unwind it before the device starts.
 
 The Windows x64 KMDF driver supports these PCI identities.
 

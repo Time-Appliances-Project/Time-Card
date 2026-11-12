@@ -187,17 +187,9 @@ TimeCardUartMessageRangeRelevant(PDEVICE_CONTEXT context, ULONG first,
 }
 
 static VOID
-TimeCardDeleteUartInterrupts(PDEVICE_CONTEXT context)
+TimeCardResetInterruptState(PDEVICE_CONTEXT context)
 {
-    ULONG index;
-
-    for (index = 0; context->BoardProfile != TIMECARD_BOARD_WIWI &&
-         index < context->UartInterruptCount; ++index) {
-        if (context->UartInterrupt[index] != NULL) {
-            WdfObjectDelete(context->UartInterrupt[index]);
-            context->UartInterrupt[index] = NULL;
-        }
-    }
+    /* KMDF deletes interrupts created in PrepareHardware after ReleaseHardware. */
     context->UartInterruptCount = 0;
     context->WiwiIrqMask = 0;
     context->TimestampInterruptMask = 0u;
@@ -214,8 +206,7 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
     ULONG messageBase = 0;
     ULONG i;
 
-    RtlZeroMemory(context->UartInterrupt, sizeof(context->UartInterrupt));
-    context->UartInterruptCount = 0;
+    TimeCardResetInterruptState(context);
     for (i = 0; i < WdfCmResourceListGetCount(resourcesTranslated); ++i) {
         PCM_PARTIAL_RESOURCE_DESCRIPTOR translated =
             WdfCmResourceListGetDescriptor(resourcesTranslated, i);
@@ -246,7 +237,6 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
         if (context->BoardProfile != TIMECARD_BOARD_WIWI &&
             context->UartInterruptCount >=
             TIMECARD_UART_INTERRUPT_OBJECTS) {
-            TimeCardDeleteUartInterrupts(context);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
@@ -258,18 +248,14 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
             &attributes, TIMECARD_UART_INTERRUPT_CONTEXT);
         status = WdfInterruptCreate(context->Device, &config, &attributes,
                                     &interrupt);
-        if (!NT_SUCCESS(status)) {
-            TimeCardDeleteUartInterrupts(context);
+        if (!NT_SUCCESS(status))
             return status;
-        }
         interruptContext = UartInterruptGetContext(interrupt);
         interruptContext->DeviceContext = context;
         interruptContext->MessageBase = messageBase;
         if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
             if (relevant && messageBase >= 32 && messageBase < 64)
                 context->WiwiIrqMask |= 1u << (messageBase - 32u);
-        } else {
-            context->UartInterrupt[context->UartInterruptCount] = interrupt;
         }
         ++context->UartInterruptCount;
         TimeCardTimestampMarkInterruptRange(
@@ -1021,7 +1007,10 @@ TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
     status = TimeCardCreateUartInterrupts(
         context, resourcesRaw, resourcesTranslated);
     if (!NT_SUCCESS(status)) {
-        if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+        /* A partially created set belongs to KMDF until ReleaseHardware.
+         * Do not start with those interrupts connected in polling mode. */
+        if (context->BoardProfile == TIMECARD_BOARD_WIWI ||
+            context->UartInterruptCount != 0)
             return status; /* ReleaseHardware tears down the prepared mapping. */
         /* UART access remains available through the bounded polling path. */
         context->UartInterruptCount = 0;
@@ -1048,10 +1037,10 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
     ULONG i;
 
     UNREFERENCED_PARAMETER(resourcesTranslated);
-    TimeCardTimestampPowerDown(context);
-    TimeCardSignalInterruptPowerDown(context);
+    /* D0Exit quiesces the cores while registers are accessible. At resource
+     * release the PCI function can already be powered off or removed. */
     context->HardwareReady = FALSE;
-    TimeCardDeleteUartInterrupts(context);
+    TimeCardResetInterruptState(context);
     context->Regs = NULL;
     context->PpsMaster = NULL;
     context->PpsSlave = NULL;

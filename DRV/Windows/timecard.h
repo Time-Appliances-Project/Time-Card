@@ -439,7 +439,6 @@ typedef struct _DEVICE_CONTEXT {
     ULONG PhaseOscillatorError;
     WDFDEVICE ChildDevices[TIMECARD_SUBSYSTEM_COUNT];
     WDFWAITLOCK RegisterLock;
-    WDFINTERRUPT UartInterrupt[TIMECARD_UART_INTERRUPT_OBJECTS];
     ULONG UartInterruptCount;
     TIMECARD_UART_HARDWARE_STATE WiwiUartState[TIMECARD_UART_COUNT];
     ULONG WiwiSavedUarts;
