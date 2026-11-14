@@ -611,6 +611,8 @@ TimeCardTimestampPowerDown(PDEVICE_CONTEXT context)
         WRITE_REGISTER_ULONG((PULONG)&reg->Enable, 0u);
         WRITE_REGISTER_ULONG((PULONG)&reg->Interrupt,
                              TIMECARD_TIMESTAMP_IRQ_MASK);
+        /* Flush this source's posted shutdown writes before disconnect. */
+        (VOID)READ_REGISTER_ULONG((PULONG)&reg->InterruptMask);
         TimeCardTimestampQueueClear(context, channel, FALSE);
     }
     WdfWaitLockRelease(context->RegisterLock);

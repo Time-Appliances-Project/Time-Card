@@ -449,6 +449,8 @@ TimeCardUartMaskSynchronized(WDFINTERRUPT interrupt, WDFCONTEXT accessContext)
     TimeCardUartWriteRegister(context, port, UART_IER, 0);
     if (lcr & UART_LCR_DLAB)
         TimeCardUartWriteRegister(context, port, UART_LCR, lcr);
+    /* Complete posted mask writes before Windows disconnects the vector. */
+    (VOID)TimeCardUartReadRegister(context, port, UART_LCR);
     return TRUE;
 }
 

@@ -372,6 +372,8 @@ TimeCardPhaseSuspend(PDEVICE_CONTEXT context)
         WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, 0u);
         WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Interrupt, 1u);
         WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Interrupt, 1u);
+        (VOID)READ_REGISTER_ULONG(
+            (PULONG)&context->PhaseOscillator->InterruptMask);
     }
     WdfWaitLockRelease(context->RegisterLock);
 }

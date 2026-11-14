@@ -189,9 +189,12 @@ TimeCardSignalInterruptPowerDown(PDEVICE_CONTEXT context)
     for (generator = 0; generator < TIMECARD_SIGNAL_COUNT; ++generator) {
         if (context->Signal[generator] != NULL &&
             TimeCardSignalLayoutSupported(READ_REGISTER_ULONG(
-                (PULONG)&context->Signal[generator]->Version)))
+                (PULONG)&context->Signal[generator]->Version))) {
             WRITE_REGISTER_ULONG(
                 (PULONG)&context->Signal[generator]->InterruptMask, 0u);
+            (VOID)READ_REGISTER_ULONG(
+                (PULONG)&context->Signal[generator]->InterruptMask);
+        }
     }
     WdfWaitLockRelease(context->RegisterLock);
 }
