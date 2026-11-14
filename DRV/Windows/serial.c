@@ -75,6 +75,11 @@ typedef struct _TIMECARD_UART_REGISTER_ACCESS {
     TIMECARD_UART_HARDWARE_STATE State;
 } TIMECARD_UART_REGISTER_ACCESS, *PTIMECARD_UART_REGISTER_ACCESS;
 
+static EVT_WDF_INTERRUPT_SYNCHRONIZE TimeCardUartSnapshotSynchronized;
+static EVT_WDF_INTERRUPT_SYNCHRONIZE TimeCardUartRestoreSynchronized;
+static EVT_WDF_INTERRUPT_SYNCHRONIZE TimeCardUartConfigureSynchronized;
+static EVT_WDF_INTERRUPT_SYNCHRONIZE TimeCardUartMaskSynchronized;
+
 /* RegisterLock serializes callers. The framework's ISR lock prevents an
  * interrupt from treating the divisor latch as a receive register. Outside
  * the connected interval there is no ISR to synchronize with. */
