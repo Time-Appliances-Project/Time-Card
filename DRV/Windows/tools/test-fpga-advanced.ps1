@@ -367,9 +367,9 @@ Assert-Sequence $timestamp @(
     'STATUS_DEVICE_DATA_ERROR') `
     'timestamp configuration does not restore its prior state on failure'
 
-Write-Host '=== 1.49 driver / 1.43 compatible user-space metadata ==='
-Assert-Match $inf 'DriverVer\s*=\s*11/12/2026,1\.49\.0\.0' `
-    'INF version is not 1.49.0.0'
+Write-Host '=== 1.50 driver / 1.43 compatible user-space metadata ==='
+Assert-Match $inf 'DriverVer\s*=\s*11/13/2026,1\.50\.0\.0' `
+    'INF version is not 1.50.0.0'
 Assert-Match $inf 'Standard,NTamd64\.10\.0\.1\.\.22000' `
     'INF must target Windows 11 desktop x64 with KMDF 1.33'
 Assert-NotMatch $inf '19041' 'INF must not claim Windows 10 support'
@@ -389,7 +389,7 @@ Assert-Match $serviceAssembly `
 Assert-Match $serviceRuntime `
     'ServiceVersion\s*=\s*"1\.43\.0"' `
     'oscillatord monitoring version is not 1.43.0'
-Assert-Match $ptp 'DriverVersion\s*=\s*0x00010031u' `
-    'runtime driver version is not 1.49'
+Assert-Match $ptp 'DriverVersion\s*=\s*0x00010032u' `
+    'runtime driver version is not 1.50'
 
 Write-Host "Advanced FPGA static tests passed ($assertions assertions; no hardware accessed)."

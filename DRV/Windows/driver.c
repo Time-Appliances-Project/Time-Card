@@ -214,7 +214,7 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
         PCM_PARTIAL_RESOURCE_DESCRIPTOR raw =
             WdfCmResourceListGetDescriptor(resourcesRaw, i);
         ULONG messageCount;
-        BOOLEAN relevant;
+        ULONG offset;
         NTSTATUS status;
         WDFINTERRUPT interrupt;
         PTIMECARD_UART_INTERRUPT_CONTEXT interruptContext;
@@ -230,39 +230,33 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
             raw->u.MessageInterrupt.Raw.MessageCount != 0) {
             messageCount = raw->u.MessageInterrupt.Raw.MessageCount;
         }
-        relevant = TimeCardUartMessageRangeRelevant(context, messageBase, messageCount);
-        if (!relevant && context->BoardProfile != TIMECARD_BOARD_WIWI) {
-            messageBase += messageCount;
-            continue;
-        }
-        if (context->BoardProfile != TIMECARD_BOARD_WIWI &&
-            context->UartInterruptCount >=
-            TIMECARD_UART_INTERRUPT_OBJECTS) {
-            return STATUS_INSUFFICIENT_RESOURCES;
-        }
-
+        /* KMDF assigns one object per message. A multi-message MSI resource
+         * describes all of its messages in one descriptor. Claim them in
+         * order, including unused entries, so the object and FPGA indices
+         * still agree when PnP changes the allocation on restart. */
+        if (messageCount > 64u - messageBase)
+            return STATUS_DEVICE_CONFIGURATION_ERROR;
         WDF_INTERRUPT_CONFIG_INIT(&config, TimeCardEvtUartInterruptIsr, NULL);
         config.InterruptRaw = raw;
         config.InterruptTranslated = translated;
         config.AutomaticSerialization = FALSE;
         WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(
             &attributes, TIMECARD_UART_INTERRUPT_CONTEXT);
-        status = WdfInterruptCreate(context->Device, &config, &attributes,
-                                    &interrupt);
-        if (!NT_SUCCESS(status))
-            return status;
-        interruptContext = UartInterruptGetContext(interrupt);
-        interruptContext->DeviceContext = context;
-        interruptContext->MessageBase = messageBase;
-        if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
-            if (relevant && messageBase >= 32 && messageBase < 64)
-                context->WiwiIrqMask |= 1u << (messageBase - 32u);
+        for (offset = 0; offset < messageCount; ++offset) {
+            status = WdfInterruptCreate(context->Device, &config, &attributes,
+                                        &interrupt);
+            if (!NT_SUCCESS(status))
+                return status;
+            interruptContext = UartInterruptGetContext(interrupt);
+            interruptContext->DeviceContext = context;
+            interruptContext->MessageIndex = messageBase + offset;
+            ++context->UartInterruptCount;
         }
-        ++context->UartInterruptCount;
-        TimeCardTimestampMarkInterruptRange(
-            context, messageBase, messageCount);
-        TimeCardSignalMarkInterruptRange(
-            context, messageBase, messageCount);
+        if (context->BoardProfile == TIMECARD_BOARD_WIWI && messageBase >= 32u &&
+            TimeCardUartMessageRangeRelevant(context, messageBase, messageCount))
+            context->WiwiIrqMask |= 1u << (messageBase - 32u);
+        TimeCardTimestampMarkInterruptRange(context, messageBase, messageCount);
+        TimeCardSignalMarkInterruptRange(context, messageBase, messageCount);
         messageBase += messageCount;
     }
     return context->UartInterruptCount != 0 || context->BoardProfile == TIMECARD_BOARD_WIWI ?
@@ -1091,28 +1085,29 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 {
     PDEVICE_CONTEXT context = DeviceGetContext(device);
     TIMECARD_UART_CONFIG uartConfig;
-    TIMECARD_PHASE_CONTROL phaseRequest;
-    TIMECARD_PHASE_CONTROL phaseResponse;
+    ULONG savedUarts = context->SavedUarts;
+    ULONG port;
     NTSTATUS status;
 
     UNREFERENCED_PARAMETER(previousState);
 
     if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
-        ULONG port;
-
         status = TimeCardSetWiwiIrqGate(context, 0);
         if (!NT_SUCCESS(status))
             return status;
-        for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
-            if (context->WiwiSavedUarts & (1u << port)) {
-                status = TimeCardUartRestoreHardware(
-                    context, port, &context->WiwiUartState[port]);
-                if (!NT_SUCCESS(status))
-                    return status;
-            }
-        }
-        context->WiwiSavedUarts = 0;
     }
+    for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
+        if (savedUarts & (1u << port)) {
+            /* PnP can grant fewer vectors on this start. */
+            if (!TimeCardUartHasInterrupt(context, port))
+                context->SavedUartState[port].InterruptEnable = 0;
+            status = TimeCardUartRestoreHardware(
+                context, port, &context->SavedUartState[port]);
+            if (!NT_SUCCESS(status))
+                return status;
+        }
+    }
+    context->SavedUarts = 0;
     if (context->BoardProfile == TIMECARD_BOARD_ART) {
         /*
          * ART board-config bit zero selects the direct FPGA mRO-50 bridge
@@ -1132,27 +1127,17 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
          * no fixed baud for the ART GNSS UART. Preserve the gateware divisor
          * so cards populated with different receiver images remain usable.
          */
-        uartConfig.Port = TIMECARD_UART_MAC;
-        uartConfig.Baud = 9600u;
-        status = TimeCardUartConfigure(context, &uartConfig);
-        if (!NT_SUCCESS(status)) {
-            KdPrint(("timecard: ART mRO-50 UART initialization unavailable, "
-                     "status 0x%08lx\n", status));
+        if (!(savedUarts & (1u << TIMECARD_UART_MAC))) {
+            uartConfig.Port = TIMECARD_UART_MAC;
+            uartConfig.Baud = 9600u;
+            status = TimeCardUartConfigure(context, &uartConfig);
+            if (!NT_SUCCESS(status)) {
+                KdPrint(("timecard: ART mRO-50 UART initialization unavailable, "
+                         "status 0x%08lx\n", status));
+            }
         }
     }
-    if (context->PhaseCaptureEnabled) {
-        RtlZeroMemory(&phaseRequest, sizeof(phaseRequest));
-        phaseRequest.Size = sizeof(phaseRequest);
-        phaseRequest.Action = TIMECARD_PHASE_CONTROL_ENABLE;
-        phaseRequest.ReferencePolarity = context->PhaseReferencePolarity;
-        phaseRequest.OscillatorPolarity = context->PhaseOscillatorPolarity;
-        status = TimeCardPhaseControl(
-            context, &phaseRequest, &phaseResponse);
-        if (!NT_SUCCESS(status)) {
-            KdPrint(("timecard: phase capture resume unavailable, "
-                     "status 0x%08lx\n", status));
-        }
-    }
+    TimeCardPhaseResume(context);
     TimeCardTimestampPowerUp(context);
     TimeCardSignalInterruptPowerUp(context);
     return STATUS_SUCCESS;
@@ -1162,23 +1147,20 @@ NTSTATUS
 TimeCardEvtD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
 {
     PDEVICE_CONTEXT context = DeviceGetContext(device);
+    ULONG port;
 
-    if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
-        ULONG port;
-
-        /* The global gate is closed and the ISRs are disconnected here. */
-        context->WiwiSavedUarts = 0;
-        if (targetState != WdfPowerDeviceD3Final) {
-            for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
-                if (context->Uart[port] != NULL &&
-                    NT_SUCCESS(TimeCardUartSnapshotHardware(
-                        context, port, &context->WiwiUartState[port])))
-                    context->WiwiSavedUarts |= 1u << port;
-            }
+    /* The framework has disconnected the ISRs. Preserve each UART's
+     * divisor, modem control and interrupt enable across a PnP stop. */
+    context->SavedUarts = 0;
+    if (targetState != WdfPowerDeviceD3Final) {
+        for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
+            if (context->Uart[port] != NULL &&
+                NT_SUCCESS(TimeCardUartSnapshotHardware(
+                    context, port, &context->SavedUartState[port])))
+                context->SavedUarts |= 1u << port;
         }
-    } else {
-        TimeCardUartDisableInterrupts(context);
     }
+    TimeCardUartDisableInterrupts(context);
     TimeCardTimestampPowerDown(context);
     TimeCardSignalInterruptPowerDown(context);
     TimeCardPhaseSuspend(context);

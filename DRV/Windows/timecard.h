@@ -96,7 +96,6 @@ extern const GUID GUID_DEVINTERFACE_TIMECARD;
 #define TIMECARD_REGISTER_WINDOW_SIZE   0x00010000u
 #define TIMECARD_UART_CLOCK_HZ          50000000u
 #define TIMECARD_UART_RX_RING_SIZE      8192u
-#define TIMECARD_UART_INTERRUPT_OBJECTS 16u
 #define TIMECARD_SUBSYSTEM_COUNT        11u
 #define TIMECARD_PCI_REVISION_UNKNOWN   0xffu
 #define TIMECARD_OFFSET_NONE            MAXULONG
@@ -424,6 +423,7 @@ typedef struct _DEVICE_CONTEXT {
     USHORT PciDeviceId;
     UCHAR PciRevision;
     BOOLEAN HardwareReady;
+    BOOLEAN PhaseInD0; /* RegisterLock protects cleanup across power changes. */
     BOOLEAN HierarchyCreated;
     BOOLEAN PhaseCaptureEnabled;
     WDFFILEOBJECT DisciplineOwner;
@@ -440,8 +440,8 @@ typedef struct _DEVICE_CONTEXT {
     WDFDEVICE ChildDevices[TIMECARD_SUBSYSTEM_COUNT];
     WDFWAITLOCK RegisterLock;
     ULONG UartInterruptCount;
-    TIMECARD_UART_HARDWARE_STATE WiwiUartState[TIMECARD_UART_COUNT];
-    ULONG WiwiSavedUarts;
+    TIMECARD_UART_HARDWARE_STATE SavedUartState[TIMECARD_UART_COUNT];
+    ULONG SavedUarts;
     ULONG WiwiIrqMask; /* Upper half of the 64-input LitePCIe gate. */
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
@@ -449,7 +449,7 @@ WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, DeviceGetContext)
 
 typedef struct _TIMECARD_UART_INTERRUPT_CONTEXT {
     PDEVICE_CONTEXT DeviceContext;
-    ULONG MessageBase;
+    ULONG MessageIndex;
 } TIMECARD_UART_INTERRUPT_CONTEXT, *PTIMECARD_UART_INTERRUPT_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(TIMECARD_UART_INTERRUPT_CONTEXT,
@@ -622,6 +622,7 @@ NTSTATUS TimeCardUartObserve(PDEVICE_CONTEXT context,
                              const TIMECARD_UART_OBSERVE *request,
                              TIMECARD_UART_OBSERVE *response);
 EVT_WDF_INTERRUPT_ISR TimeCardEvtUartInterruptIsr;
+BOOLEAN TimeCardUartHasInterrupt(PDEVICE_CONTEXT context, ULONG port);
 VOID TimeCardUartDisableInterrupts(PDEVICE_CONTEXT context);
 
 NTSTATUS TimeCardSmaQuery(PDEVICE_CONTEXT context,
@@ -687,6 +688,7 @@ VOID TimeCardRecordPhaseTimestamp(PDEVICE_CONTEXT context, ULONG channel,
                                   ULONG seconds);
 /* RegisterLock must be held by the caller. */
 VOID TimeCardPhaseDisableLocked(PDEVICE_CONTEXT context);
+VOID TimeCardPhaseResume(PDEVICE_CONTEXT context);
 VOID TimeCardPhaseSuspend(PDEVICE_CONTEXT context);
 NTSTATUS TimeCardAdjustPhc(PDEVICE_CONTEXT context,
                            const TIMECARD_PHC_ADJUST *request,

@@ -54,7 +54,7 @@ TimeCardUartPortForMessage(PDEVICE_CONTEXT context, ULONG messageId)
     return TIMECARD_UART_NO_PORT;
 }
 
-static BOOLEAN
+BOOLEAN
 TimeCardUartHasInterrupt(PDEVICE_CONTEXT context, ULONG port)
 {
     ULONG message;
@@ -105,35 +105,22 @@ TimeCardEvtUartInterruptIsr(WDFINTERRUPT interrupt, ULONG messageId)
     PTIMECARD_UART_INTERRUPT_CONTEXT interruptContext =
         UartInterruptGetContext(interrupt);
     PDEVICE_CONTEXT context = interruptContext->DeviceContext;
-    /* WiWi has one descriptor per vector. Its object identifies the source. */
-    ULONG globalMessageId = context->BoardProfile == TIMECARD_BOARD_WIWI ?
-        interruptContext->MessageBase : interruptContext->MessageBase + messageId;
+    ULONG globalMessageId = interruptContext->MessageIndex;
     ULONG port = TimeCardUartPortForMessage(context, globalMessageId);
     ULONG drained = 0;
     BOOLEAN handled;
     UCHAR lsr;
 
+    UNREFERENCED_PARAMETER(messageId);
     if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
         if (globalMessageId < 32u || globalMessageId >= 64u ||
             !(context->WiwiIrqMask & (1u << (globalMessageId - 32u))))
             return FALSE;
-        messageId = globalMessageId;
     }
     handled = TimeCardHandleTimestampInterrupt(context, globalMessageId);
     handled = TimeCardHandleSignalInterrupt(context, globalMessageId) ||
         handled;
 
-    /*
-     * A few PCI stacks report a global MSI-X message number even when the
-     * CM_RESOURCE descriptor describes only one vector. Accept both forms.
-     */
-    if (port == TIMECARD_UART_NO_PORT && messageId != globalMessageId)
-        port = TimeCardUartPortForMessage(context, messageId);
-    if (!handled && messageId != globalMessageId)
-        handled = TimeCardHandleTimestampInterrupt(context, messageId);
-    if (messageId != globalMessageId)
-        handled = TimeCardHandleSignalInterrupt(context, messageId) ||
-            handled;
     if (port == TIMECARD_UART_NO_PORT || !TimeCardUartValid(context, port))
         return handled;
     lsr = TimeCardUartReadRegister(context, port, UART_LSR);
@@ -370,8 +357,16 @@ TimeCardUartDisableInterrupts(PDEVICE_CONTEXT context)
         return;
     WdfWaitLockAcquire(context->RegisterLock, NULL);
     for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
-        if (context->Uart[port] != NULL)
-            TimeCardUartWriteRegister(context, port, UART_IER, 0);
+        UCHAR lcr;
+
+        if (context->Uart[port] == NULL)
+            continue;
+        lcr = TimeCardUartReadRegister(context, port, UART_LCR);
+        if (lcr & UART_LCR_DLAB)
+            TimeCardUartWriteRegister(context, port, UART_LCR, lcr & ~UART_LCR_DLAB);
+        TimeCardUartWriteRegister(context, port, UART_IER, 0);
+        if (lcr & UART_LCR_DLAB)
+            TimeCardUartWriteRegister(context, port, UART_LCR, lcr);
     }
     WdfWaitLockRelease(context->RegisterLock);
 }

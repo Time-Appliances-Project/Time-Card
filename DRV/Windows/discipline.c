@@ -244,6 +244,47 @@ TimeCardPhaseQuery(PDEVICE_CONTEXT context, TIMECARD_PHASE_SAMPLE *sample)
     return STATUS_SUCCESS;
 }
 
+static VOID
+TimeCardPhaseEnableLocked(PDEVICE_CONTEXT context, ULONG referencePolarity,
+                          ULONG oscillatorPolarity)
+{
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask,
+                         0u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask,
+                         0u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Enable, 0u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, 0u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Interrupt, 1u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Interrupt, 1u);
+    InterlockedExchange(&context->PhaseReferenceSequence, 0);
+    InterlockedExchange(&context->PhaseOscillatorSequence, 0);
+    context->PhaseReferenceCounter = 0u;
+    context->PhaseOscillatorCounter = 0u;
+    RtlZeroMemory(&context->PhaseReferenceTime,
+                  sizeof(context->PhaseReferenceTime));
+    RtlZeroMemory(&context->PhaseOscillatorTime,
+                  sizeof(context->PhaseOscillatorTime));
+    context->PhaseReferenceError = 0u;
+    context->PhaseOscillatorError = 0u;
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Polarity,
+                         referencePolarity);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Polarity,
+                         oscillatorPolarity);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Interrupt, 1u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Interrupt, 1u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Enable, 1u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, 1u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask,
+                         1u);
+    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask,
+                         1u);
+    context->PhaseCaptureEnabled = TRUE;
+    context->PhaseReferencePolarity =
+        (UCHAR)referencePolarity;
+    context->PhaseOscillatorPolarity =
+        (UCHAR)oscillatorPolarity;
+}
+
 NTSTATUS
 TimeCardPhaseControl(PDEVICE_CONTEXT context,
                      const TIMECARD_PHASE_CONTROL *request,
@@ -271,41 +312,8 @@ TimeCardPhaseControl(PDEVICE_CONTEXT context,
             WdfWaitLockRelease(context->RegisterLock);
             return STATUS_DEVICE_BUSY;
         }
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask,
-                             0u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask,
-                             0u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Enable, 0u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, 0u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Interrupt, 1u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Interrupt, 1u);
-        InterlockedExchange(&context->PhaseReferenceSequence, 0);
-        InterlockedExchange(&context->PhaseOscillatorSequence, 0);
-        context->PhaseReferenceCounter = 0u;
-        context->PhaseOscillatorCounter = 0u;
-        RtlZeroMemory(&context->PhaseReferenceTime,
-                      sizeof(context->PhaseReferenceTime));
-        RtlZeroMemory(&context->PhaseOscillatorTime,
-                      sizeof(context->PhaseOscillatorTime));
-        context->PhaseReferenceError = 0u;
-        context->PhaseOscillatorError = 0u;
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Polarity,
-                             request->ReferencePolarity);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Polarity,
-                             request->OscillatorPolarity);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Interrupt, 1u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Interrupt, 1u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Enable, 1u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, 1u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask,
-                             1u);
-        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask,
-                             1u);
-        context->PhaseCaptureEnabled = TRUE;
-        context->PhaseReferencePolarity =
-            (UCHAR)request->ReferencePolarity;
-        context->PhaseOscillatorPolarity =
-            (UCHAR)request->OscillatorPolarity;
+        TimeCardPhaseEnableLocked(context, request->ReferencePolarity,
+                                  request->OscillatorPolarity);
     } else {
         TimeCardPhaseDisableLocked(context);
     }
@@ -328,7 +336,7 @@ TimeCardPhaseDisableLocked(PDEVICE_CONTEXT context)
      * and file cleanup must disarm capture and clear ownership as one atomic
      * transition so a replacement owner cannot be disabled by stale cleanup.
      */
-    if (TimeCardPhaseAvailable(context)) {
+    if (context->PhaseInD0 && TimeCardPhaseAvailable(context)) {
         WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask,
                              0u);
         WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask,
@@ -342,17 +350,29 @@ TimeCardPhaseDisableLocked(PDEVICE_CONTEXT context)
 }
 
 VOID
+TimeCardPhaseResume(PDEVICE_CONTEXT context)
+{
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    context->PhaseInD0 = TRUE;
+    if (context->PhaseCaptureEnabled && TimeCardPhaseAvailable(context))
+        TimeCardPhaseEnableLocked(context, context->PhaseReferencePolarity,
+                                  context->PhaseOscillatorPolarity);
+    WdfWaitLockRelease(context->RegisterLock);
+}
+
+VOID
 TimeCardPhaseSuspend(PDEVICE_CONTEXT context)
 {
-    if (!TimeCardPhaseAvailable(context))
-        return;
     WdfWaitLockAcquire(context->RegisterLock, NULL);
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask, 0u);
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask, 0u);
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Enable, 0u);
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, 0u);
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Interrupt, 1u);
-    WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Interrupt, 1u);
+    context->PhaseInD0 = FALSE;
+    if (TimeCardPhaseAvailable(context)) {
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->InterruptMask, 0u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->InterruptMask, 0u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Enable, 0u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Enable, 0u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseReference->Interrupt, 1u);
+        WRITE_REGISTER_ULONG((PULONG)&context->PhaseOscillator->Interrupt, 1u);
+    }
     WdfWaitLockRelease(context->RegisterLock);
 }
 

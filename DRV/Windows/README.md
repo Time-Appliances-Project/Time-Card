@@ -2,12 +2,17 @@
 
 Windows driver author: Ahmad Byagowi
 
-The 1.49 signing package targets **Windows 11 desktop x64 (build 22000+)**
+The 1.50 signing package targets **Windows 11 desktop x64 (build 22000+)**
 with KMDF 1.33. It corrects the former Windows 10 INF declaration without
 downgrading the framework. Windows Server is excluded from this desktop INF.
 The ABI remains 15 and the 1.43 user-space applications remain compatible.
 An unsigned CAB is a signing input, not Microsoft approval or hardware
 certification. See [PRODUCTION_SIGNING.md](PRODUCTION_SIGNING.md).
+
+Version 1.50 claims each assigned MSI or MSI-X message and dispatches it by
+the registered FPGA source index. On a PnP stop or sleep transition, the
+driver saves the UART configuration and restores it against the new interrupt
+allocation. An ART phase-capture lease can be closed while the card is asleep.
 
 Version 1.48 exposes the second GNSS UART only on the Meta card. Celestica
 has one GNSS receiver. Its Windows profile keeps flash and the other board

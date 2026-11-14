@@ -45,15 +45,15 @@ jobs:
       - name: Upload lab diagnostic CLI
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: TimeCard-1.49.0.0-x64-diagnostics
+          name: TimeCard-1.50.0.0-x64-diagnostics
           path: DRV/Windows/out/timecardctl.exe
           if-no-files-found: error
       - name: Upload verified unsigned signing inputs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: TimeCard-1.49.0.0-x64-unsigned
+          name: TimeCard-1.50.0.0-x64-unsigned
           path: |
-            DRV/Windows/submission/TimeCard-1.49.0.0-x64.cab
+            DRV/Windows/submission/TimeCard-1.50.0.0-x64.cab
             DRV/Windows/submission/TimeCard/
             DRV/Windows/submission/SHA256SUMS.txt
           if-no-files-found: error
@@ -65,7 +65,7 @@ jobs:
       - name: Upload lab test package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: TimeCard-1.49.0.0-x64-HLK-test
+          name: TimeCard-1.50.0.0-x64-HLK-test
           path: DRV/Windows/hlk-test/
           if-no-files-found: error
           retention-days: 90
