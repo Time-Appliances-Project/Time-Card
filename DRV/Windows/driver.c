@@ -192,6 +192,8 @@ TimeCardResetInterruptState(PDEVICE_CONTEXT context)
 {
     /* KMDF deletes interrupts created in PrepareHardware after ReleaseHardware. */
     context->UartInterruptCount = 0;
+    context->InterruptsConnected = FALSE;
+    RtlZeroMemory(context->UartInterrupt, sizeof(context->UartInterrupt));
     context->WiwiIrqMask = 0;
     context->TimestampInterruptMask = 0u;
     context->SignalInterruptMask = 0u;
@@ -250,6 +252,7 @@ TimeCardCreateUartInterrupts(PDEVICE_CONTEXT context,
             interruptContext = UartInterruptGetContext(interrupt);
             interruptContext->DeviceContext = context;
             interruptContext->MessageIndex = messageBase + offset;
+            context->UartInterrupt[messageBase + offset] = interrupt;
             ++context->UartInterruptCount;
         }
         if (context->BoardProfile == TIMECARD_BOARD_WIWI && messageBase >= 32u &&
@@ -908,25 +911,6 @@ TimeCardSetWiwiIrqGate(PDEVICE_CONTEXT context, ULONG mask)
 }
 
 NTSTATUS
-TimeCardEvtInterruptsEnabled(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
-{
-    PDEVICE_CONTEXT context = DeviceGetContext(device);
-    NTSTATUS status;
-    UNREFERENCED_PARAMETER(previousState);
-    status = TimeCardSetWiwiIrqGate(context, context->WiwiIrqMask);
-    if (!NT_SUCCESS(status))
-        (VOID)TimeCardSetWiwiIrqGate(context, 0);
-    return status;
-}
-
-NTSTATUS
-TimeCardEvtInterruptsDisabling(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
-{
-    UNREFERENCED_PARAMETER(targetState);
-    return TimeCardSetWiwiIrqGate(DeviceGetContext(device), 0);
-}
-
-NTSTATUS
 TimeCardEvtPrepareHardware(WDFDEVICE device, WDFCMRESLIST resourcesRaw,
                            WDFCMRESLIST resourcesTranslated)
 {
@@ -1081,7 +1065,7 @@ TimeCardEvtReleaseHardware(WDFDEVICE device,
 }
 
 NTSTATUS
-TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
+TimeCardEvtInterruptsEnabled(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
 {
     PDEVICE_CONTEXT context = DeviceGetContext(device);
     TIMECARD_UART_CONFIG uartConfig;
@@ -1090,11 +1074,12 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
     NTSTATUS status;
 
     UNREFERENCED_PARAMETER(previousState);
+    context->InterruptsConnected = TRUE;
 
     if (context->BoardProfile == TIMECARD_BOARD_WIWI) {
         status = TimeCardSetWiwiIrqGate(context, 0);
         if (!NT_SUCCESS(status))
-            return status;
+            goto RestoreFailed;
     }
     for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
         if (savedUarts & (1u << port)) {
@@ -1104,10 +1089,9 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
             status = TimeCardUartRestoreHardware(
                 context, port, &context->SavedUartState[port]);
             if (!NT_SUCCESS(status))
-                return status;
+                goto RestoreFailed;
         }
     }
-    context->SavedUarts = 0;
     if (context->BoardProfile == TIMECARD_BOARD_ART) {
         /*
          * ART board-config bit zero selects the direct FPGA mRO-50 bridge
@@ -1140,17 +1124,31 @@ TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
     TimeCardPhaseResume(context);
     TimeCardTimestampPowerUp(context);
     TimeCardSignalInterruptPowerUp(context);
-    return STATUS_SUCCESS;
+    status = TimeCardSetWiwiIrqGate(context, context->WiwiIrqMask);
+    if (NT_SUCCESS(status)) {
+        context->SavedUarts = 0;
+        return STATUS_SUCCESS;
+    }
+
+RestoreFailed:
+    (VOID)TimeCardSetWiwiIrqGate(context, 0);
+    TimeCardUartDisableInterrupts(context);
+    TimeCardTimestampPowerDown(context);
+    TimeCardSignalInterruptPowerDown(context);
+    TimeCardPhaseSuspend(context);
+    context->InterruptsConnected = FALSE;
+    return status;
 }
 
 NTSTATUS
-TimeCardEvtD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
+TimeCardEvtInterruptsDisabling(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
 {
     PDEVICE_CONTEXT context = DeviceGetContext(device);
     ULONG port;
+    NTSTATUS status = TimeCardSetWiwiIrqGate(context, 0);
 
-    /* The framework has disconnected the ISRs. Preserve each UART's
-     * divisor, modem control and interrupt enable across a PnP stop. */
+    /* Save and mask the sources while their handlers are still connected.
+     * UART divisor access is synchronized with its ISR in serial.c. */
     context->SavedUarts = 0;
     if (targetState != WdfPowerDeviceD3Final) {
         for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
@@ -1160,6 +1158,38 @@ TimeCardEvtD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
                 context->SavedUarts |= 1u << port;
         }
     }
+    TimeCardUartDisableInterrupts(context);
+    TimeCardTimestampPowerDown(context);
+    TimeCardSignalInterruptPowerDown(context);
+    TimeCardPhaseSuspend(context);
+    context->InterruptsConnected = FALSE;
+    return status;
+}
+
+NTSTATUS
+TimeCardEvtD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousState)
+{
+    PDEVICE_CONTEXT context = DeviceGetContext(device);
+    NTSTATUS status;
+
+    UNREFERENCED_PARAMETER(previousState);
+    context->InterruptsConnected = FALSE;
+    /* Keep sources masked until all framework interrupt objects connect. */
+    status = TimeCardSetWiwiIrqGate(context, 0);
+    if (NT_SUCCESS(status))
+        TimeCardUartDisableInterrupts(context);
+    return status;
+}
+
+NTSTATUS
+TimeCardEvtD0Exit(WDFDEVICE device, WDF_POWER_DEVICE_STATE targetState)
+{
+    PDEVICE_CONTEXT context = DeviceGetContext(device);
+
+    UNREFERENCED_PARAMETER(targetState);
+    context->InterruptsConnected = FALSE;
+    /* Also quiesce a partially completed D0 entry on its failure path. */
+    (VOID)TimeCardSetWiwiIrqGate(context, 0);
     TimeCardUartDisableInterrupts(context);
     TimeCardTimestampPowerDown(context);
     TimeCardSignalInterruptPowerDown(context);

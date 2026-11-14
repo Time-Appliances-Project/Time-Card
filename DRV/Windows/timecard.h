@@ -423,6 +423,7 @@ typedef struct _DEVICE_CONTEXT {
     USHORT PciDeviceId;
     UCHAR PciRevision;
     BOOLEAN HardwareReady;
+    BOOLEAN InterruptsConnected;
     BOOLEAN PhaseInD0; /* RegisterLock protects cleanup across power changes. */
     BOOLEAN HierarchyCreated;
     BOOLEAN PhaseCaptureEnabled;
@@ -440,6 +441,7 @@ typedef struct _DEVICE_CONTEXT {
     WDFDEVICE ChildDevices[TIMECARD_SUBSYSTEM_COUNT];
     WDFWAITLOCK RegisterLock;
     ULONG UartInterruptCount;
+    WDFINTERRUPT UartInterrupt[64];
     TIMECARD_UART_HARDWARE_STATE SavedUartState[TIMECARD_UART_COUNT];
     ULONG SavedUarts;
     ULONG WiwiIrqMask; /* Upper half of the 64-input LitePCIe gate. */

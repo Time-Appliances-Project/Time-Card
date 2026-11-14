@@ -68,6 +68,40 @@ TimeCardUartHasInterrupt(PDEVICE_CONTEXT context, ULONG port)
     return FALSE;
 }
 
+typedef struct _TIMECARD_UART_REGISTER_ACCESS {
+    PDEVICE_CONTEXT Context;
+    ULONG Port;
+    ULONG Divisor;
+    TIMECARD_UART_HARDWARE_STATE State;
+} TIMECARD_UART_REGISTER_ACCESS, *PTIMECARD_UART_REGISTER_ACCESS;
+
+/* RegisterLock serializes callers. The framework's ISR lock prevents an
+ * interrupt from treating the divisor latch as a receive register. Outside
+ * the connected interval there is no ISR to synchronize with. */
+static VOID
+TimeCardUartSynchronize(PTIMECARD_UART_REGISTER_ACCESS access,
+                        PFN_WDF_INTERRUPT_SYNCHRONIZE callback)
+{
+    PDEVICE_CONTEXT context = access->Context;
+    WDFINTERRUPT interrupt = NULL;
+    ULONG message;
+
+    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    if (context->InterruptsConnected) {
+        for (message = 0; message < context->UartInterruptCount; ++message) {
+            if (TimeCardUartPortForMessage(context, message) == access->Port) {
+                interrupt = context->UartInterrupt[message];
+                break;
+            }
+        }
+    }
+    if (interrupt != NULL)
+        (VOID)WdfInterruptSynchronize(interrupt, callback, access);
+    else
+        (VOID)callback(NULL, access);
+    WdfWaitLockRelease(context->RegisterLock);
+}
+
 static VOID
 TimeCardUartRingPush(PDEVICE_CONTEXT context, ULONG port, UCHAR value)
 {
@@ -176,15 +210,15 @@ TimeCardUartPause(VOID)
     KeDelayExecutionThread(KernelMode, FALSE, &interval);
 }
 
-NTSTATUS
-TimeCardUartSnapshotHardware(
-    PDEVICE_CONTEXT context, ULONG port,
-    PTIMECARD_UART_HARDWARE_STATE state)
+static BOOLEAN
+TimeCardUartSnapshotSynchronized(WDFINTERRUPT interrupt, WDFCONTEXT accessContext)
 {
-    if (!TimeCardUartValid(context, port) || state == NULL)
-        return STATUS_INVALID_DEVICE_STATE;
+    PTIMECARD_UART_REGISTER_ACCESS access = accessContext;
+    PDEVICE_CONTEXT context = access->Context;
+    ULONG port = access->Port;
+    TIMECARD_UART_HARDWARE_STATE *state = &access->State;
 
-    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    UNREFERENCED_PARAMETER(interrupt);
     state->LineControl = TimeCardUartReadRegister(context, port, UART_LCR);
     TimeCardUartWriteRegister(context, port, UART_LCR,
                               state->LineControl & ~UART_LCR_DLAB);
@@ -202,19 +236,35 @@ TimeCardUartSnapshotHardware(
                               state->InterruptEnable);
     TimeCardUartWriteRegister(context, port, UART_LCR,
                               state->LineControl);
-    WdfWaitLockRelease(context->RegisterLock);
-    return STATUS_SUCCESS;
+    return TRUE;
 }
 
 NTSTATUS
-TimeCardUartRestoreHardware(
+TimeCardUartSnapshotHardware(
     PDEVICE_CONTEXT context, ULONG port,
-    const TIMECARD_UART_HARDWARE_STATE *state)
+    PTIMECARD_UART_HARDWARE_STATE state)
 {
+    TIMECARD_UART_REGISTER_ACCESS access;
+
     if (!TimeCardUartValid(context, port) || state == NULL)
         return STATUS_INVALID_DEVICE_STATE;
 
-    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    access.Context = context;
+    access.Port = port;
+    TimeCardUartSynchronize(&access, TimeCardUartSnapshotSynchronized);
+    *state = access.State;
+    return STATUS_SUCCESS;
+}
+
+static BOOLEAN
+TimeCardUartRestoreSynchronized(WDFINTERRUPT interrupt, WDFCONTEXT accessContext)
+{
+    PTIMECARD_UART_REGISTER_ACCESS access = accessContext;
+    PDEVICE_CONTEXT context = access->Context;
+    ULONG port = access->Port;
+    const TIMECARD_UART_HARDWARE_STATE *state = &access->State;
+
+    UNREFERENCED_PARAMETER(interrupt);
     TimeCardUartWriteRegister(context, port, UART_LCR,
                               state->LineControl & ~UART_LCR_DLAB);
     TimeCardUartWriteRegister(context, port, UART_IER, 0u);
@@ -229,14 +279,60 @@ TimeCardUartRestoreHardware(
                               state->InterruptEnable);
     TimeCardUartWriteRegister(context, port, UART_LCR,
                               state->LineControl);
-    WdfWaitLockRelease(context->RegisterLock);
+    return TRUE;
+}
+
+NTSTATUS
+TimeCardUartRestoreHardware(
+    PDEVICE_CONTEXT context, ULONG port,
+    const TIMECARD_UART_HARDWARE_STATE *state)
+{
+    TIMECARD_UART_REGISTER_ACCESS access;
+
+    if (!TimeCardUartValid(context, port) || state == NULL)
+        return STATUS_INVALID_DEVICE_STATE;
+
+    access.Context = context;
+    access.Port = port;
+    access.State = *state;
+    TimeCardUartSynchronize(&access, TimeCardUartRestoreSynchronized);
     return STATUS_SUCCESS;
+}
+
+static BOOLEAN
+TimeCardUartConfigureSynchronized(WDFINTERRUPT interrupt, WDFCONTEXT accessContext)
+{
+    PTIMECARD_UART_REGISTER_ACCESS access = accessContext;
+    PDEVICE_CONTEXT context = access->Context;
+    ULONG port = access->Port;
+    ULONG divisor = access->Divisor;
+
+    UNREFERENCED_PARAMETER(interrupt);
+    TimeCardUartWriteRegister(context, port, UART_IER, 0);
+    TimeCardUartWriteRegister(context, port, UART_LCR,
+                              UART_LCR_DLAB);
+    TimeCardUartWriteRegister(context, port, UART_DLL,
+                              (UCHAR)divisor);
+    TimeCardUartWriteRegister(context, port, UART_DLM,
+                              (UCHAR)(divisor >> 8));
+    TimeCardUartWriteRegister(context, port, UART_LCR, UART_LCR_8N1);
+    TimeCardUartWriteRegister(context, port, UART_FCR, UART_FCR_INIT);
+    TimeCardUartWriteRegister(context, port, UART_MCR, UART_MCR_INIT);
+    InterlockedExchange(&context->UartRxHead[port], 0);
+    InterlockedExchange(&context->UartRxTail[port], 0);
+    InterlockedExchange(&context->UartRxLineStatus[port], 0);
+    InterlockedExchange(&context->UartRxDropped[port], 0);
+    if (TimeCardUartHasInterrupt(context, port))
+        TimeCardUartWriteRegister(
+            context, port, UART_IER, UART_IER_RDI);
+    return TRUE;
 }
 
 NTSTATUS
 TimeCardUartConfigure(PDEVICE_CONTEXT context,
                       const TIMECARD_UART_CONFIG *config)
 {
+    TIMECARD_UART_REGISTER_ACCESS access;
     ULONG divisor;
 
     if (!TimeCardUartValid(context, config->Port))
@@ -249,25 +345,10 @@ TimeCardUartConfigure(PDEVICE_CONTEXT context,
     if (divisor == 0 || divisor > 0xffffu)
         return STATUS_INVALID_PARAMETER;
 
-    WdfWaitLockAcquire(context->RegisterLock, NULL);
-    TimeCardUartWriteRegister(context, config->Port, UART_IER, 0);
-    TimeCardUartWriteRegister(context, config->Port, UART_LCR,
-                              UART_LCR_DLAB);
-    TimeCardUartWriteRegister(context, config->Port, UART_DLL,
-                              (UCHAR)divisor);
-    TimeCardUartWriteRegister(context, config->Port, UART_DLM,
-                              (UCHAR)(divisor >> 8));
-    TimeCardUartWriteRegister(context, config->Port, UART_LCR, UART_LCR_8N1);
-    TimeCardUartWriteRegister(context, config->Port, UART_FCR, UART_FCR_INIT);
-    TimeCardUartWriteRegister(context, config->Port, UART_MCR, UART_MCR_INIT);
-    InterlockedExchange(&context->UartRxHead[config->Port], 0);
-    InterlockedExchange(&context->UartRxTail[config->Port], 0);
-    InterlockedExchange(&context->UartRxLineStatus[config->Port], 0);
-    InterlockedExchange(&context->UartRxDropped[config->Port], 0);
-    if (TimeCardUartHasInterrupt(context, config->Port))
-        TimeCardUartWriteRegister(
-            context, config->Port, UART_IER, UART_IER_RDI);
-    WdfWaitLockRelease(context->RegisterLock);
+    access.Context = context;
+    access.Port = config->Port;
+    access.Divisor = divisor;
+    TimeCardUartSynchronize(&access, TimeCardUartConfigureSynchronized);
     return STATUS_SUCCESS;
 }
 
@@ -348,27 +429,39 @@ TimeCardUartRead(PDEVICE_CONTEXT context,
     return transfer->Length != 0 ? STATUS_SUCCESS : STATUS_IO_TIMEOUT;
 }
 
+static BOOLEAN
+TimeCardUartMaskSynchronized(WDFINTERRUPT interrupt, WDFCONTEXT accessContext)
+{
+    PTIMECARD_UART_REGISTER_ACCESS access = accessContext;
+    PDEVICE_CONTEXT context = access->Context;
+    ULONG port = access->Port;
+    UCHAR lcr;
+
+    UNREFERENCED_PARAMETER(interrupt);
+    lcr = TimeCardUartReadRegister(context, port, UART_LCR);
+    if (lcr & UART_LCR_DLAB)
+        TimeCardUartWriteRegister(context, port, UART_LCR, lcr & ~UART_LCR_DLAB);
+    TimeCardUartWriteRegister(context, port, UART_IER, 0);
+    if (lcr & UART_LCR_DLAB)
+        TimeCardUartWriteRegister(context, port, UART_LCR, lcr);
+    return TRUE;
+}
+
 VOID
 TimeCardUartDisableInterrupts(PDEVICE_CONTEXT context)
 {
+    TIMECARD_UART_REGISTER_ACCESS access;
     ULONG port;
 
     if (!context->HardwareReady)
         return;
-    WdfWaitLockAcquire(context->RegisterLock, NULL);
+    access.Context = context;
     for (port = 0; port < TIMECARD_UART_COUNT; ++port) {
-        UCHAR lcr;
-
         if (context->Uart[port] == NULL)
             continue;
-        lcr = TimeCardUartReadRegister(context, port, UART_LCR);
-        if (lcr & UART_LCR_DLAB)
-            TimeCardUartWriteRegister(context, port, UART_LCR, lcr & ~UART_LCR_DLAB);
-        TimeCardUartWriteRegister(context, port, UART_IER, 0);
-        if (lcr & UART_LCR_DLAB)
-            TimeCardUartWriteRegister(context, port, UART_LCR, lcr);
+        access.Port = port;
+        TimeCardUartSynchronize(&access, TimeCardUartMaskSynchronized);
     }
-    WdfWaitLockRelease(context->RegisterLock);
 }
 
 NTSTATUS

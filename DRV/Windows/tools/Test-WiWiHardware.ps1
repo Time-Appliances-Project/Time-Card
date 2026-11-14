@@ -12,7 +12,7 @@ if ($cards.Count -ne 1 -or $cards[0].HardwareID -notcontains $wiwi) {
 }
 $card = $cards[0]
 $driver = Get-CimInstance Win32_PnPSignedDriver | Where-Object DeviceID -EQ $card.InstanceId
-if ($card.Status -ne 'OK' -or $driver.DriverVersion -ne '1.50.0.0') {
+if ($card.Status -ne 'OK' -or $driver.DriverVersion -ne '1.51.0.0') {
     throw "WiWi status $($card.Status), bound driver $($driver.DriverVersion), INF $($driver.InfName)"
 }
 $label = (Get-PnpDeviceProperty -InstanceId $card.InstanceId -KeyName 'DEVPKEY_Device_DeviceDesc').Data
@@ -39,7 +39,7 @@ $status = Read-Card status
 $cap = Read-Card capabilities
 $fpga = Read-Card fpga-status
 Write-Output $status $cap $fpga
-if ($status -notmatch '(?m)^Driver:\s+1\.50\s*$' -or
+if ($status -notmatch '(?m)^Driver:\s+1\.51\s*$' -or
     $status -notmatch 'Register layout:\s+MSI-X' -or $status -notmatch 'BAR length:\s+0x04000000' -or
     $status -notmatch 'Clock offset:\s+0x03000000' -or $cap -notmatch 'Board profile:\s+WiWi' -or
     $fpga -notmatch 'FPGA image build:\s+0x[0-9a-f]{8}') { throw 'Unexpected runtime profile or FPGA mapping.' }
