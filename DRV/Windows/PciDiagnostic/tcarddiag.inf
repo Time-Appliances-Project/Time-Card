@@ -1,0 +1,51 @@
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%Provider%
+DriverVer=11/14/2026,0.1.0.0
+CatalogFile=tcarddiag.cat
+PnpLockdown=1
+
+[Manufacturer]
+%Provider%=Models,NTamd64.10.0...22000
+
+[Models.NTamd64.10.0...22000]
+%DeviceDesc%=Diagnostic,PCI\VEN_2163&DEV_1008&SUBSYS_000710EE&REV_02
+
+[DestinationDirs]
+Diagnostic.Copy=13
+
+[SourceDisksNames]
+1=%DiskName%,,,
+
+[SourceDisksFiles]
+tcarddiag.sys=1
+
+[Diagnostic.NT]
+CopyFiles=Diagnostic.Copy
+
+[Diagnostic.Copy]
+tcarddiag.sys
+
+[Diagnostic.NT.Services]
+AddService=tcarddiag,0x00000002,Diagnostic.Service
+
+[Diagnostic.Service]
+DisplayName=%ServiceDesc%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\tcarddiag.sys
+
+[Diagnostic.NT.Wdf]
+KmdfService=tcarddiag,Diagnostic.Wdf
+
+[Diagnostic.Wdf]
+KmdfLibraryVersion=1.33
+
+[Strings]
+Provider="Time Card Lab"
+DeviceDesc="Time Card PCI Diagnostic (WiWi)"
+ServiceDesc="Time Card PCI Diagnostic"
+DiskName="Time Card PCI diagnostic lab package"

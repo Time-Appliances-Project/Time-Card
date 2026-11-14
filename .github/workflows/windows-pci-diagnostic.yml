@@ -1,0 +1,47 @@
+name: Windows PCI rebalance diagnostic
+
+on:
+  push:
+    branches:
+      - windows/pci-rebalance-diagnostic
+    paths:
+      - DRV/Windows/PciDiagnostic/**
+      - .github/workflows/windows-pci-diagnostic.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lab-diagnostic:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Restore pinned SDK and WDK
+        shell: pwsh
+        working-directory: DRV/Windows
+        run: |
+          nuget restore packages.config -PackagesDirectory packages -NonInteractive -Source https://api.nuget.org/v3/index.json
+          if ($LASTEXITCODE) { throw 'Kit restore failed' }
+      - name: Build and test-sign the isolated diagnostic
+        shell: pwsh
+        run: ./DRV/Windows/PciDiagnostic/Build.ps1
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TimeCard-PCI-diagnostic-build-evidence
+          path: |
+            DRV/Windows/PciDiagnostic/build.log
+            DRV/Windows/PciDiagnostic/x64/Release/*.log
+          if-no-files-found: warn
+      - name: Upload lab diagnostic
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TimeCard-PCI-diagnostic-0.1.0.0-x64
+          path: DRV/Windows/PciDiagnostic/lab-package/
+          if-no-files-found: error
+          retention-days: 30
