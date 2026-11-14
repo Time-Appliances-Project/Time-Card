@@ -174,10 +174,12 @@ TimeCardEvtUartInterruptIsr(WDFINTERRUPT interrupt, ULONG messageId)
     return handled || drained != 0;
 }
 
+/* LitePCIe returns DWORD completions for the MSI-X CSR map. Keep UART
+ * register transactions DWORD-wide and use their low eight data bits. */
 static UCHAR
 TimeCardUartReadRegister(PDEVICE_CONTEXT context, ULONG port, ULONG reg)
 {
-    if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+    if (context->Layout == TIMECARD_LAYOUT_MSIX)
         return (UCHAR)READ_REGISTER_ULONG((PULONG)(context->Uart[port] + reg * 4u));
     return READ_REGISTER_UCHAR((PUCHAR)(context->Uart[port] + reg * 4u));
 }
@@ -186,7 +188,7 @@ static VOID
 TimeCardUartWriteRegister(PDEVICE_CONTEXT context, ULONG port, ULONG reg,
                           UCHAR value)
 {
-    if (context->BoardProfile == TIMECARD_BOARD_WIWI)
+    if (context->Layout == TIMECARD_LAYOUT_MSIX)
         WRITE_REGISTER_ULONG((PULONG)(context->Uart[port] + reg * 4u), value);
     else
         WRITE_REGISTER_UCHAR((PUCHAR)(context->Uart[port] + reg * 4u), value);

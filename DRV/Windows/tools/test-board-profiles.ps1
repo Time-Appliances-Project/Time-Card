@@ -220,8 +220,8 @@ Assert-Match $driverSource 'TimeCardReadWiwiBar\(device,[\s\S]*MmMapIoSpaceEx' `
     'WiWi PCI validation must precede BAR mapping'
 Assert-Match $driverSource 'TimeCardSetWiwiIrqGate\(context, 0\);[\s\S]{0,100}TimeCardSelectLayout' `
     'WiWi gate must be closed before peripheral initialization'
-Assert-Match $serialSource 'TIMECARD_BOARD_WIWI[\s\S]{0,60}READ_REGISTER_ULONG' `
-    'WiWi UART reads require DWORD cycles'
+Assert-Match $serialSource 'TIMECARD_LAYOUT_MSIX[\s\S]{0,60}READ_REGISTER_ULONG' `
+    'MSI-X UART reads require DWORD cycles'
 Assert-Match $i2cSource 'TimeCardI2cWrite16[\s\S]{0,175}WRITE_REGISTER_ULONG' `
     'WiWi dynamic START and STOP require a DWORD write'
 Write-Host 'Board-profile tests passed (4 PCI identities, Celestica sensors, ART map/timestamp child, transports, resilient hierarchy policy, UART buffering, and capability gating).'
