@@ -430,7 +430,7 @@
                                                     </Grid.RowDefinitions>
                                                     <Grid>
                                                         <TextBlock Text="OFFSET TO SYSTEM CLOCK" Style="{StaticResource Label}" />
-                                                        <TextBlock x:Name="OffsetHistoryValueText" Text="&#x2014;"
+                                                        <TextBlock x:Name="OffsetHistoryValueText" Text="-"
                                                                    HorizontalAlignment="Right" Foreground="{DynamicResource CyanBrush}"
                                                                    FontFamily="Segoe UI Semibold" FontSize="12" />
                                                     </Grid>
@@ -461,7 +461,7 @@
                                                     </Grid.RowDefinitions>
                                                     <Grid>
                                                         <TextBlock Text="SAMPLE WINDOW" Style="{StaticResource Label}" />
-                                                        <TextBlock x:Name="SamplingHistoryValueText" Text="&#x2014;"
+                                                        <TextBlock x:Name="SamplingHistoryValueText" Text="-"
                                                                    HorizontalAlignment="Right" Foreground="{DynamicResource GoldBrush}"
                                                                    FontFamily="Segoe UI Semibold" FontSize="12" />
                                                     </Grid>
@@ -601,7 +601,7 @@
                                                 </Grid.RowDefinitions>
                                                 <Grid>
                                                     <TextBlock Text="MEASURED OFFSET HISTORY" Style="{StaticResource Label}" />
-                                                    <TextBlock x:Name="ClockOffsetHistoryValueText" Text="&#x2014;"
+                                                    <TextBlock x:Name="ClockOffsetHistoryValueText" Text="-"
                                                                HorizontalAlignment="Right" Foreground="{DynamicResource CyanBrush}"
                                                                FontFamily="Segoe UI Semibold" FontSize="12" />
                                                 </Grid>
@@ -642,7 +642,7 @@
                                                 </Grid.RowDefinitions>
                                                 <Grid>
                                                     <TextBlock Text="SAMPLING UNCERTAINTY HISTORY" Style="{StaticResource Label}" />
-                                                    <TextBlock x:Name="ClockSamplingHistoryValueText" Text="&#x2014;"
+                                                    <TextBlock x:Name="ClockSamplingHistoryValueText" Text="-"
                                                                HorizontalAlignment="Right" Foreground="{DynamicResource GoldBrush}"
                                                                FontFamily="Segoe UI Semibold" FontSize="12" />
                                                 </Grid>
@@ -2371,7 +2371,7 @@
                                             </Grid.RowDefinitions>
                                             <Grid>
                                                 <TextBlock Text="SENSOR READ TIME" Style="{StaticResource Label}" FontSize="9" />
-                                                <TextBlock x:Name="SensorsSamplingDurationText" Text="&#x2014; ms"
+                                                <TextBlock x:Name="SensorsSamplingDurationText" Text="- ms"
                                                            HorizontalAlignment="Right" Foreground="{DynamicResource CyanBrush}"
                                                            FontFamily="Segoe UI Semibold" FontSize="11" />
                                             </Grid>
@@ -2404,10 +2404,10 @@
                                     <TextBlock x:Name="BmeDetailText" Grid.Column="1" Text="BME280/BMP280 &#x00B7; 0x76/0x77 &#x00B7; NOT SAMPLED" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" VerticalAlignment="Center" />
                                 </Grid>
                                 <UniformGrid Columns="4">
-                                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="TEMPERATURE" Style="{StaticResource Label}" /><TextBlock x:Name="BmeTemperatureText" Text="&#x2014; &#x00B0;C" Style="{StaticResource MetricValue}" Margin="0,8,0,0" /><TextBlock Text="Ambient board sensor" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Border>
-                                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="RELATIVE HUMIDITY" Style="{StaticResource Label}" /><TextBlock x:Name="BmeHumidityText" Text="&#x2014; %" Style="{StaticResource MetricValue}" Margin="0,8,0,0" /><TextBlock Text="Compensated RH" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Border>
-                                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="PRESSURE" Style="{StaticResource Label}" /><TextBlock x:Name="BmePressureText" Text="&#x2014; hPa" Style="{StaticResource MetricValue}" Margin="0,8,0,0" /><TextBlock Text="Absolute pressure" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Border>
-                                    <Border Style="{StaticResource MetricCard}" Margin="0"><StackPanel><TextBlock Text="DEW POINT" Style="{StaticResource Label}" /><TextBlock x:Name="BmeDewPointText" Text="&#x2014; &#x00B0;C" Style="{StaticResource MetricValue}" Margin="0,8,0,0" /><TextBlock Text="Calculated from T + RH" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Border>
+                                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="TEMPERATURE" Style="{StaticResource Label}" /><TextBlock x:Name="BmeTemperatureText" Text="- &#x00B0;C" Style="{StaticResource MetricValue}" Margin="0,8,0,0" /><TextBlock Text="Ambient board sensor" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Border>
+                                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="RELATIVE HUMIDITY" Style="{StaticResource Label}" /><TextBlock x:Name="BmeHumidityText" Text="- %" Style="{StaticResource MetricValue}" Margin="0,8,0,0" /><TextBlock Text="Compensated RH" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Border>
+                                    <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="PRESSURE" Style="{StaticResource Label}" /><TextBlock x:Name="BmePressureText" Text="- hPa" Style="{StaticResource MetricValue}" Margin="0,8,0,0" /><TextBlock Text="Absolute pressure" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Border>
+                                    <Border Style="{StaticResource MetricCard}" Margin="0"><StackPanel><TextBlock Text="DEW POINT" Style="{StaticResource Label}" /><TextBlock x:Name="BmeDewPointText" Text="- &#x00B0;C" Style="{StaticResource MetricValue}" Margin="0,8,0,0" /><TextBlock Text="Calculated from T + RH" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,5,0,0" /></StackPanel></Border>
                                 </UniformGrid>
                             </StackPanel>
 
@@ -2419,25 +2419,25 @@
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="156">
                                         <StackPanel>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Rail12TitleText" Text="+12 V input" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Rail12StatusText" Grid.Column="1" Text="0x40" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" /></Grid>
-                                            <TextBlock x:Name="Rail12VoltageText" Text="&#x2014; V" Style="{StaticResource MetricValue}" Margin="0,10,0,8" />
-                                            <Grid x:Name="Rail12SecondaryGrid"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail12CurrentText" Text="&#x2014; A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail12PowerText" Text="&#x2014; W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
-                                            <TextBlock x:Name="Rail12DetailText" Text="Shunt &#x2014; mV" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,10,0,0" />
+                                            <TextBlock x:Name="Rail12VoltageText" Text="- V" Style="{StaticResource MetricValue}" Margin="0,10,0,8" />
+                                            <Grid x:Name="Rail12SecondaryGrid"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail12CurrentText" Text="- A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail12PowerText" Text="- W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
+                                            <TextBlock x:Name="Rail12DetailText" Text="Shunt - mV" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,10,0,0" />
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="156">
                                         <StackPanel>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Rail5TitleText" Text="+5 V rail" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Rail5StatusText" Grid.Column="1" Text="0x41" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" /></Grid>
-                                            <TextBlock x:Name="Rail5VoltageText" Text="&#x2014; V" Style="{StaticResource MetricValue}" Margin="0,10,0,8" />
-                                            <Grid x:Name="Rail5SecondaryGrid"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail5CurrentText" Text="&#x2014; A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail5PowerText" Text="&#x2014; W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
-                                            <TextBlock x:Name="Rail5DetailText" Text="Shunt &#x2014; mV" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,10,0,0" />
+                                            <TextBlock x:Name="Rail5VoltageText" Text="- V" Style="{StaticResource MetricValue}" Margin="0,10,0,8" />
+                                            <Grid x:Name="Rail5SecondaryGrid"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail5CurrentText" Text="- A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail5PowerText" Text="- W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
+                                            <TextBlock x:Name="Rail5DetailText" Text="Shunt - mV" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,10,0,0" />
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="156" Margin="0,0,0,14">
                                         <StackPanel>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Rail3V3TitleText" Text="+3.3 V rail" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Rail3V3StatusText" Grid.Column="1" Text="0x44" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="10" /></Grid>
-                                            <TextBlock x:Name="Rail3V3VoltageText" Text="&#x2014; V" Style="{StaticResource MetricValue}" Margin="0,10,0,8" />
-                                            <Grid x:Name="Rail3V3SecondaryGrid"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail3V3CurrentText" Text="&#x2014; A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail3V3PowerText" Text="&#x2014; W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
-                                            <TextBlock x:Name="Rail3V3DetailText" Text="Shunt &#x2014; mV" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,10,0,0" />
+                                            <TextBlock x:Name="Rail3V3VoltageText" Text="- V" Style="{StaticResource MetricValue}" Margin="0,10,0,8" />
+                                            <Grid x:Name="Rail3V3SecondaryGrid"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="CURRENT" Style="{StaticResource Label}" /><TextBlock x:Name="Rail3V3CurrentText" Text="- A" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="POWER" Style="{StaticResource Label}" /><TextBlock x:Name="Rail3V3PowerText" Text="- W" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel></Grid>
+                                            <TextBlock x:Name="Rail3V3DetailText" Text="Shunt - mV" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,10,0,0" />
                                         </StackPanel>
                                     </Border>
                                 </UniformGrid>
@@ -2458,12 +2458,12 @@
                                         <StackPanel>
                                             <TextBlock Text="FUSED ORIENTATION" Style="{StaticResource Label}" />
                                             <UniformGrid Columns="3" Margin="0,12,0,14">
-                                                <StackPanel><TextBlock Text="HEADING" Style="{StaticResource Label}" /><TextBlock x:Name="ImuHeadingText" Text="&#x2014;&#x00B0;" Style="{StaticResource MetricValue}" Margin="0,5,0,0" /></StackPanel>
-                                                <StackPanel><TextBlock Text="ROLL" Style="{StaticResource Label}" /><TextBlock x:Name="ImuRollText" Text="&#x2014;&#x00B0;" Style="{StaticResource MetricValue}" Margin="0,5,0,0" /></StackPanel>
-                                                <StackPanel><TextBlock Text="PITCH" Style="{StaticResource Label}" /><TextBlock x:Name="ImuPitchText" Text="&#x2014;&#x00B0;" Style="{StaticResource MetricValue}" Margin="0,5,0,0" /></StackPanel>
+                                                <StackPanel><TextBlock Text="HEADING" Style="{StaticResource Label}" /><TextBlock x:Name="ImuHeadingText" Text="-&#x00B0;" Style="{StaticResource MetricValue}" Margin="0,5,0,0" /></StackPanel>
+                                                <StackPanel><TextBlock Text="ROLL" Style="{StaticResource Label}" /><TextBlock x:Name="ImuRollText" Text="-&#x00B0;" Style="{StaticResource MetricValue}" Margin="0,5,0,0" /></StackPanel>
+                                                <StackPanel><TextBlock Text="PITCH" Style="{StaticResource Label}" /><TextBlock x:Name="ImuPitchText" Text="-&#x00B0;" Style="{StaticResource MetricValue}" Margin="0,5,0,0" /></StackPanel>
                                             </UniformGrid>
                                             <TextBlock Text="QUATERNION (W, X, Y, Z)" Style="{StaticResource Label}" />
-                                            <TextBlock x:Name="ImuQuaternionText" Text="&#x2014;, &#x2014;, &#x2014;, &#x2014;" FontFamily="Cascadia Mono, Consolas" FontSize="14" Margin="0,7,0,0" />
+                                            <TextBlock x:Name="ImuQuaternionText" Text="-, -, -, -" FontFamily="Cascadia Mono, Consolas" FontSize="14" Margin="0,7,0,0" />
                                         </StackPanel>
                                     </Border>
                                     <Border Grid.Column="1" Style="{StaticResource Panel}" Padding="12" Margin="0,0,14,0"
@@ -2499,12 +2499,12 @@
                                     <Border Grid.Column="2" Style="{StaticResource Panel}" Padding="18">
                                         <StackPanel>
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="SENSOR HEALTH" Style="{StaticResource Label}" /><TextBlock x:Name="ImuStatusText" Grid.Column="1" Text="NOT SAMPLED" Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" /></Grid>
-                                            <TextBlock x:Name="ImuTemperatureText" Text="&#x2014; &#x00B0;C" Style="{StaticResource MetricValue}" Margin="0,10,0,10" />
+                                            <TextBlock x:Name="ImuTemperatureText" Text="- &#x00B0;C" Style="{StaticResource MetricValue}" Margin="0,10,0,10" />
                                             <UniformGrid Columns="4">
-                                                <StackPanel><TextBlock Text="SYS" Style="{StaticResource Label}" /><TextBlock x:Name="ImuSystemCalibrationText" Text="&#x2014;/3" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel>
-                                                <StackPanel><TextBlock Text="GYR" Style="{StaticResource Label}" /><TextBlock x:Name="ImuGyroCalibrationText" Text="&#x2014;/3" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel>
-                                                <StackPanel><TextBlock Text="ACC" Style="{StaticResource Label}" /><TextBlock x:Name="ImuAccelCalibrationText" Text="&#x2014;/3" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel>
-                                                <StackPanel><TextBlock Text="MAG" Style="{StaticResource Label}" /><TextBlock x:Name="ImuMagCalibrationText" Text="&#x2014;/3" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel>
+                                                <StackPanel><TextBlock Text="SYS" Style="{StaticResource Label}" /><TextBlock x:Name="ImuSystemCalibrationText" Text="-/3" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel>
+                                                <StackPanel><TextBlock Text="GYR" Style="{StaticResource Label}" /><TextBlock x:Name="ImuGyroCalibrationText" Text="-/3" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel>
+                                                <StackPanel><TextBlock Text="ACC" Style="{StaticResource Label}" /><TextBlock x:Name="ImuAccelCalibrationText" Text="-/3" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel>
+                                                <StackPanel><TextBlock Text="MAG" Style="{StaticResource Label}" /><TextBlock x:Name="ImuMagCalibrationText" Text="-/3" FontFamily="Segoe UI Semibold" Margin="0,4,0,0" /></StackPanel>
                                             </UniformGrid>
                                             <TextBlock Text="Calibration improves while the board moves through varied orientations." Foreground="{DynamicResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0" />
                                         </StackPanel>
@@ -2513,12 +2513,12 @@
                             </StackPanel>
 
                             <UniformGrid Grid.Row="5" Columns="3" Margin="0,14,0,0">
-                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112"><StackPanel><TextBlock Text="ACCELERATION &#x00B7; M/S&#x00B2;" Style="{StaticResource Label}" /><TextBlock x:Name="ImuAccelerationText" Text="X &#x2014;   Y &#x2014;   Z &#x2014;" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Includes gravity" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112"><StackPanel><TextBlock Text="GYROSCOPE &#x00B7; &#x00B0;/S" Style="{StaticResource Label}" /><TextBlock x:Name="ImuGyroscopeText" Text="X &#x2014;   Y &#x2014;   Z &#x2014;" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Angular velocity" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112" Margin="0,0,0,14"><StackPanel><TextBlock Text="MAGNETIC FIELD &#x00B7; &#x03BC;T" Style="{StaticResource Label}" /><TextBlock x:Name="ImuMagneticText" Text="X &#x2014;   Y &#x2014;   Z &#x2014;" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Three-axis magnetometer" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112"><StackPanel><TextBlock Text="LINEAR ACCELERATION &#x00B7; M/S&#x00B2;" Style="{StaticResource Label}" /><TextBlock x:Name="ImuLinearAccelerationText" Text="X &#x2014;   Y &#x2014;   Z &#x2014;" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Gravity removed" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112"><StackPanel><TextBlock Text="GRAVITY VECTOR &#x00B7; M/S&#x00B2;" Style="{StaticResource Label}" /><TextBlock x:Name="ImuGravityText" Text="X &#x2014;   Y &#x2014;   Z &#x2014;" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Fused gravity estimate" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112" Margin="0,0,0,14"><StackPanel><TextBlock Text="DEVICE STATUS" Style="{StaticResource Label}" /><TextBlock x:Name="ImuRawStatusText" Text="Mode &#x2014; &#x00B7; Status &#x2014;" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock x:Name="ImuClockText" Text="Clock source not sampled" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112"><StackPanel><TextBlock Text="ACCELERATION &#x00B7; M/S&#x00B2;" Style="{StaticResource Label}" /><TextBlock x:Name="ImuAccelerationText" Text="X -   Y -   Z -" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Includes gravity" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112"><StackPanel><TextBlock Text="GYROSCOPE &#x00B7; &#x00B0;/S" Style="{StaticResource Label}" /><TextBlock x:Name="ImuGyroscopeText" Text="X -   Y -   Z -" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Angular velocity" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112" Margin="0,0,0,14"><StackPanel><TextBlock Text="MAGNETIC FIELD &#x00B7; &#x03BC;T" Style="{StaticResource Label}" /><TextBlock x:Name="ImuMagneticText" Text="X -   Y -   Z -" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Three-axis magnetometer" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112"><StackPanel><TextBlock Text="LINEAR ACCELERATION &#x00B7; M/S&#x00B2;" Style="{StaticResource Label}" /><TextBlock x:Name="ImuLinearAccelerationText" Text="X -   Y -   Z -" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Gravity removed" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112"><StackPanel><TextBlock Text="GRAVITY VECTOR &#x00B7; M/S&#x00B2;" Style="{StaticResource Label}" /><TextBlock x:Name="ImuGravityText" Text="X -   Y -   Z -" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock Text="Fused gravity estimate" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource SubsystemCard}" MinHeight="112" Margin="0,0,0,14"><StackPanel><TextBlock Text="DEVICE STATUS" Style="{StaticResource Label}" /><TextBlock x:Name="ImuRawStatusText" Text="Mode - &#x00B7; Status -" FontFamily="Cascadia Mono, Consolas" FontSize="13" Margin="0,9,0,0" /><TextBlock x:Name="ImuClockText" Text="Clock source not sampled" Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,7,0,0" /></StackPanel></Border>
                             </UniformGrid>
                         </Grid>
                     </ScrollViewer>
@@ -2552,9 +2552,9 @@
 
                             <UniformGrid Grid.Row="2" Columns="4" Margin="0,0,0,20">
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="CONTROLLER" Style="{StaticResource Label}" /><TextBlock x:Name="I2cControllerStateText" Text="NOT QUERIED" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cControllerDetailText" Text="Waiting for a driver sample" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" /></StackPanel></Border>
-                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="BUS STATE" Style="{StaticResource Label}" /><TextBlock x:Name="I2cBusStateText" Text="&#x2014;" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cBusDetailText" Text="No sample" Foreground="{DynamicResource MutedBrush}" /></StackPanel></Border>
-                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="REGISTER WINDOW" Style="{StaticResource Label}" /><TextBlock x:Name="I2cOffsetText" Text="&#x2014;" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cRegisterText" Text="CR &#x2014; &#x00B7; SR &#x2014;" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" /></StackPanel></Border>
-                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="DISCOVERED" Style="{StaticResource Label}" /><TextBlock x:Name="I2cDeviceCountText" Text="&#x2014;" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cScanResultText" Text="Known devices not probed" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="BUS STATE" Style="{StaticResource Label}" /><TextBlock x:Name="I2cBusStateText" Text="-" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cBusDetailText" Text="No sample" Foreground="{DynamicResource MutedBrush}" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="REGISTER WINDOW" Style="{StaticResource Label}" /><TextBlock x:Name="I2cOffsetText" Text="-" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cRegisterText" Text="CR - &#x00B7; SR -" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="DISCOVERED" Style="{StaticResource Label}" /><TextBlock x:Name="I2cDeviceCountText" Text="-" Style="{StaticResource MetricValue}" FontSize="21" Margin="0,8,0,5" /><TextBlock x:Name="I2cScanResultText" Text="Known devices not probed" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" /></StackPanel></Border>
                             </UniformGrid>
 
                             <Grid Grid.Row="3" Margin="0,0,0,18">
@@ -2643,7 +2643,7 @@
                                             <TextBlock Text="ACK map" Style="{StaticResource Label}" Margin="0,12,0,5" />
                                             <TextBlock x:Name="I2cAddressMapText" Text="Run a scan to map addresses 0x08&#x2013;0x77." Foreground="{DynamicResource CyanBrush}" FontFamily="Cascadia Mono, Consolas" TextWrapping="Wrap" />
                                             <Border Background="#050C14" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,14,0,0">
-                                                <StackPanel><TextBlock Text="CONTROLLER DIAGNOSTICS" Style="{StaticResource Label}" /><TextBlock x:Name="I2cDiagnosticsText" Text="CR &#x2014;  SR &#x2014;&#x0A;ISR &#x2014;  IER &#x2014;&#x0A;No transaction recorded." Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" Margin="0,7,0,0" TextWrapping="Wrap" /></StackPanel>
+                                                <StackPanel><TextBlock Text="CONTROLLER DIAGNOSTICS" Style="{StaticResource Label}" /><TextBlock x:Name="I2cDiagnosticsText" Text="CR -  SR -&#x0A;ISR -  IER -&#x0A;No transaction recorded." Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" Margin="0,7,0,0" TextWrapping="Wrap" /></StackPanel>
                                             </Border>
                                         </StackPanel>
                                     </Border>

@@ -671,10 +671,10 @@ namespace TimeCardControlCenter
             SamplingHistoryChart.Clear();
             ClockOffsetHistoryChart.Clear();
             ClockSamplingHistoryChart.Clear();
-            OffsetHistoryValueText.Text = "\u2014";
-            SamplingHistoryValueText.Text = "\u2014";
-            ClockOffsetHistoryValueText.Text = "\u2014";
-            ClockSamplingHistoryValueText.Text = "\u2014";
+            OffsetHistoryValueText.Text = "-";
+            SamplingHistoryValueText.Text = "-";
+            ClockOffsetHistoryValueText.Text = "-";
+            ClockSamplingHistoryValueText.Text = "-";
             OffsetHistoryScaleText.Text = "WAITING FOR SAMPLES";
             SamplingHistoryScaleText.Text = "WAITING FOR SAMPLES";
             ClockOffsetHistoryScaleText.Text = "WAITING FOR SAMPLES";
@@ -2909,7 +2909,7 @@ namespace TimeCardControlCenter
                 "ART FPGA bridge" : "ART FPGA " + lastSnapshot.ClockVersion;
             AtomicHardwareText.Text = "PCI 1AD7:A000";
 
-            AtomicRuntimeText.Text = status.IsPresent ? "FPGA bridge active" : "\u2014";
+            AtomicRuntimeText.Text = status.IsPresent ? "FPGA bridge active" : "-";
             AtomicLocktimeText.Text = "Not exposed";
             AtomicPpsDetectedText.Text = "Not exposed";
             AtomicDisciplineStateText.Text = status.IsEnabled ?
@@ -2918,10 +2918,10 @@ namespace TimeCardControlCenter
                 status.Control.ToString("X8", CultureInfo.InvariantCulture);
             AtomicEffectiveTuningText.Text = status.IsFineValid ?
                 status.FineAdjustment.ToString(CultureInfo.InvariantCulture) :
-                "\u2014";
+                "-";
             AtomicDisciplineTuningText.Text = status.IsCoarseValid ?
                 status.CoarseAdjustment.ToString(CultureInfo.InvariantCulture) :
-                "\u2014";
+                "-";
             AtomicLastCorrectionText.Text = "Board config 0x" +
                 status.BoardConfig.ToString("X8", CultureInfo.InvariantCulture);
             AtomicMroFineTextBox.Text = status.FineAdjustment.ToString(
