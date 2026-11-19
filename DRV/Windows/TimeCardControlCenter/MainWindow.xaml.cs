@@ -58,6 +58,8 @@ namespace TimeCardControlCenter
         private bool smaUpdatingUi;
         private bool timingRefreshing;
         private bool sensorsRefreshing;
+        private readonly bool use3DPreview = !SystemParameters.IsRemoteSession &&
+            (RenderCapability.Tier >> 16) > 0;
         private QuaternionRotation3D imuCubeRotation;
         private Quaternion imuCubeCurrent = Quaternion.Identity;
         private readonly DispatcherTimer imuCubeShowcaseTimer;
@@ -265,7 +267,17 @@ namespace TimeCardControlCenter
         public MainWindow()
         {
             InitializeComponent();
-            InitializeImuCube();
+            // Remote and software-only sessions use 2D visuals. WPF's 3D
+            // software rasterizer can stall native DLL loading after UAC.
+            if (!use3DPreview)
+            {
+                AnimatedTimeCardLogo.Visibility = Visibility.Collapsed;
+                StaticTimeCardLogo.Visibility = Visibility.Visible;
+                ImuOrientationViewport.Visibility = Visibility.Collapsed;
+                ImuOrientationFallback.Visibility = Visibility.Visible;
+            }
+            else
+                InitializeImuCube();
             imuCubeShowcaseTimer = new DispatcherTimer
             {
                 Interval = TimeSpan.FromMilliseconds(40)
@@ -7391,7 +7403,7 @@ namespace TimeCardControlCenter
 
         private void StartImuCubeShowcase()
         {
-            if (imuCubeShowcaseActive)
+            if (!use3DPreview || imuCubeShowcaseActive)
                 return;
             imuCubeShowcaseActive = true;
             imuCubeShowcaseClock.Restart();

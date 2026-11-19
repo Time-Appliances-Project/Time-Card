@@ -184,6 +184,8 @@
                                         </Ellipse.RenderTransform>
                                         <Ellipse.Effect><BlurEffect Radius="7" /></Ellipse.Effect>
                                     </Ellipse>
+                                    <Image x:Name="StaticTimeCardLogo" Source="Assets/timecard-logo.png"
+                                           Stretch="Uniform" Visibility="Collapsed" />
                                     <Viewport3D x:Name="AnimatedTimeCardLogo" ClipToBounds="True"
                                                 IsHitTestVisible="False" RenderOptions.EdgeMode="Aliased">
                                         <Viewport3D.Camera>
@@ -2476,6 +2478,10 @@
                                                 <TextBlock x:Name="ImuVisualizationStatusText" Grid.Column="1" Text="WAITING"
                                                            Foreground="{DynamicResource MutedBrush}" FontFamily="Segoe UI Semibold" FontSize="10" />
                                             </Grid>
+                                            <TextBlock x:Name="ImuOrientationFallback" Grid.Row="1" Visibility="Collapsed"
+                                                       Text="Heading, roll, and pitch remain available above. The 3D preview is available in a local session with graphics acceleration."
+                                                       TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource MutedBrush}" Margin="16" />
                                             <Viewport3D x:Name="ImuOrientationViewport" Grid.Row="1" Margin="0,2,0,0"
                                                         ClipToBounds="True" IsHitTestVisible="False">
                                                 <Viewport3D.Camera>

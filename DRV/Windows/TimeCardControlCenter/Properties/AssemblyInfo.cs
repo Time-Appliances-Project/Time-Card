@@ -10,5 +10,5 @@ using System.Windows;
 [assembly: AssemblyMetadata("Author", "Ahmad Byagowi")]
 [assembly: ComVisible(false)]
 [assembly: ThemeInfo(ResourceDictionaryLocation.None, ResourceDictionaryLocation.SourceAssembly)]
-[assembly: AssemblyVersion("1.52.5.0")]
-[assembly: AssemblyFileVersion("1.52.5.0")]
+[assembly: AssemblyVersion("1.52.6.0")]
+[assembly: AssemblyFileVersion("1.52.6.0")]
