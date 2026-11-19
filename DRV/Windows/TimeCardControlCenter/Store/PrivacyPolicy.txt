@@ -1,0 +1,15 @@
+TimeCardControlCenter privacy policy
+Draft for publication, 19 November 2026
+Author and contact: Ahmad Byagowi, clk@wiwistamp.com
+
+TimeCardControlCenter displays and configures supported Time Card hardware on your Windows computer. The application does not contain an advertising service, an analytics service, or an automatic upload facility.
+
+Hardware information is processed locally. Depending on the connected hardware and selected workspace, this can include device identifiers, clock readings, sensor readings, GNSS coordinates and satellite data, serial traffic, and diagnostic messages. Settings and profiles are stored in your Windows user profile. Native oscillator support can cache its bundled library locally, including in a protected Program Files directory when elevated.
+
+Recording, capture, diagnostic exports, and support bundles create files only when you request them. These files can contain sensitive device, location, and session information. Review exported files before sharing them. Delete files you no longer need using Windows file management. Removing the app may leave exported files and shared service data in place.
+
+The optional oscillatord client connects to the service endpoint you configure. Requests can include a service authentication token and requested control operations. Service responses can include hardware and timing information. Choose a trusted endpoint and network. This connection is separate from any Microsoft Store services.
+
+No application account is required. Microsoft may process installation, Store, or Windows diagnostic information under Microsoft's own privacy terms. This policy covers TimeCardControlCenter, not Windows, Microsoft Store, device firmware, or separately installed services.
+
+Questions or privacy requests can be sent to clk@wiwistamp.com. Changes to this policy will be dated in future releases.

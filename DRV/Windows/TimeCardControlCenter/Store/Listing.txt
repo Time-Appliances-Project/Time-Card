@@ -1,0 +1,22 @@
+Name: TimeCardControlCenter
+Suggested category: Developer tools
+Author: Ahmad Byagowi
+Support contact: clk@wiwistamp.com
+
+Short description
+Monitor and manage your Time Card hardware from Windows.
+
+Description
+TimeCardControlCenter brings Time Card clock readings, hardware status, GNSS information, supported timing interfaces, and engineering diagnostics into one Windows dashboard.
+
+Choose a connected card, inspect its precision hardware clock, compare it with Windows time, explore available subsystems, and record or export local diagnostic data. Multiple connected cards retain separate identities and workspaces. A synthetic demo is available without hardware.
+
+Features depend on the card model, FPGA firmware, connected instruments, and installed driver. The application supports the Time Card driver ABI 15, including WiWi revision 02, Meta, Celestica, and Orolia/Safran ART profiles. Not every board exposes the same registers or peripherals.
+
+Requirements
+Windows 10 version 2004 or later, x64; a supported Time Card PCIe device and a separately installed compatible driver for live hardware use. Administrator approval is required to access the hardware driver. GNSS reception requires an appropriate antenna and reception conditions. Demo mode does not require a card.
+
+Release notes
+Version 1.52.1 adds Time Card product naming and Ahmad Byagowi author metadata, retains WiWi ABI 15 support, and corrects capability and identity presentation for installed boards.
+
+Do not publish until the actual Partner Center identity, privacy-policy URL, support URL, screenshots, age rating, availability, and elevation-capability approval have been completed and the packaged application has passed installation, update, removal, standard-user, elevation, and Windows App Certification Kit checks.

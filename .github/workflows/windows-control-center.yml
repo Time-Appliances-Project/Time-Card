@@ -36,13 +36,21 @@ jobs:
           .\tools\test-ublox-decoder.ps1
           .\tools\test-ublox-f9t.ps1
           .\tools\test-board-profiles.ps1
+          .\tools\test-multi-card-control-center.ps1
       - name: Package Control Center
         shell: powershell
         working-directory: DRV/Windows
         run: .\package-control-center.ps1 -SkipBuild
+      - name: Validate qualification MSIX
+        shell: powershell
+        working-directory: DRV/Windows
+        run: .\package-control-center-store.ps1 -SkipBuild -QualificationPackage -IdentityName TimeCardControlCenter.Qualification -Publisher 'CN=TimeCardControlCenterQualification' -PublisherDisplayName 'Ahmad Byagowi'
       - name: Upload Control Center package
         uses: actions/upload-artifact@v4
         with:
           name: TimeCardControlCenter-x64
-          path: DRV/Windows/out/TimeCardControlCenter-*-x64.zip
+          path: |
+            DRV/Windows/out/TimeCardControlCenter-*-x64.zip
+            DRV/Windows/out/TimeCardControlCenter-*-qualification-unsigned.msix
+            DRV/Windows/out/TimeCardControlCenter-*-qualification-unsigned.msix.json
           if-no-files-found: error

@@ -1,0 +1,19 @@
+TimeCardControlCenter Microsoft Store preparation
+
+The application is a full-trust x64 WPF desktop hardware companion. The Time Card kernel driver is distributed separately. The Microsoft-signed driver package must remain unchanged.
+
+The driver currently restricts its device interfaces to administrators and SYSTEM. The app starts as the interactive user, supports a hardware-free demo, and requests UAC approval when the user chooses hardware access. An MSIX submission therefore declares runFullTrust and allowElevation. Microsoft approval for allowElevation must be obtained before representing the package as Store ready. Do not weaken the certified driver's device ACL or add a bypass to avoid this review.
+
+Proposed elevation justification
+TimeCardControlCenter is the configuration and diagnostic companion for dedicated PCIe timing hardware. Its existing WHCP-signed kernel driver restricts access to administrators because its public typed IOCTL interface includes hardware clock adjustment, timing output routing, and explicitly confirmed firmware operations. Elevation occurs through Windows UAC and is requested explicitly. The application can open without elevation and provides demo and diagnostic UI without silently installing or changing the driver. The Store package does not install a kernel driver. Please review allowElevation for this hardware management scenario.
+
+Packaging
+Run package-control-center-store.ps1 using the exact Identity Name, Publisher distinguished name, and Publisher Display Name assigned to the new product in Partner Center. The script creates a schema-validated unsigned MSIX; it does not accept agreements, trust a certificate, publish an app, or assert that Store review has passed. QualificationPackage marks a test identity package that must not be submitted as the production product.
+
+Before submission
+Reserve the product name under the intended publisher. Replace draft privacy text with an approved published policy and provide its HTTPS URL. Complete listing screenshots from the polished build, age ratings, supported hardware requirements, availability, and restricted-capability explanations. Test the final identity-bound package on standard-user and administrator accounts, with no card, one card, and multiple supported cards; verify settings, native library loading, UAC relaunch, local exports, update, and removal. Run WACK and retain its report. Review all public listing and metadata before publishing.
+
+Official references
+https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/app-capability-declarations
+https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msi/app-package-requirements
+https://learn.microsoft.com/en-us/windows/apps/publish/get-started
