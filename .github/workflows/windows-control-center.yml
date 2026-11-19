@@ -1,6 +1,7 @@
 name: Windows Control Center
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - "DRV/Windows/**"
@@ -35,3 +36,13 @@ jobs:
           .\tools\test-ublox-decoder.ps1
           .\tools\test-ublox-f9t.ps1
           .\tools\test-board-profiles.ps1
+      - name: Package Control Center
+        shell: powershell
+        working-directory: DRV/Windows
+        run: .\package-control-center.ps1 -SkipBuild
+      - name: Upload Control Center package
+        uses: actions/upload-artifact@v4
+        with:
+          name: TimeCardControlCenter-x64
+          path: DRV/Windows/out/TimeCardControlCenter-*-x64.zip
+          if-no-files-found: error

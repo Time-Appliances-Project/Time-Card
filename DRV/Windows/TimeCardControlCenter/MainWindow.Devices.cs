@@ -534,7 +534,7 @@ namespace TimeCardControlCenter
 
         private string ActiveDeviceDisplayName()
         {
-            return activeDevice == null ? "OCP Time Card Controller" :
+            return activeDevice == null ? "Time Card Controller" :
                 activeDevice.DisplayName;
         }
 

@@ -364,7 +364,7 @@ namespace TimeCardControlCenter
 
         private async void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            Log("OCP Time Card Control Center started.");
+            Log("TimeCardControlCenter started.");
             string capturePath = StartupArgumentValue(startupArguments, "--capture");
             if (!productSettings.DemoMode && string.IsNullOrWhiteSpace(capturePath) && !HasAdministratorAccess())
             {
@@ -590,9 +590,9 @@ namespace TimeCardControlCenter
                 snapshot.GnssFixOk ? "Receiver reports a valid fix" :
                 "Fix not currently asserted";
             SatellitesSeenText.Text = snapshot.GnssTelemetryAvailable ?
-                snapshot.SeenSatellites.ToString(CultureInfo.InvariantCulture) : "—";
+                snapshot.SeenSatellites.ToString(CultureInfo.InvariantCulture) : "-";
             SatellitesLockedText.Text = snapshot.GnssTelemetryAvailable ?
-                snapshot.LockedSatellites.ToString(CultureInfo.InvariantCulture) : "—";
+                snapshot.LockedSatellites.ToString(CultureInfo.InvariantCulture) : "-";
             SatelliteValidityText.Text = !snapshot.GnssTelemetryAvailable ?
                 "Satellite summary is not available" :
                 snapshot.SatelliteDataValid ? "Satellite count is valid" :
@@ -1775,12 +1775,12 @@ namespace TimeCardControlCenter
                 "Constellations unavailable" : snapshot.ConstellationSummary +
                 string.Format(CultureInfo.InvariantCulture, " · C/N₀ {0:N1} dB-Hz", snapshot.AverageCno);
             UbloxUtcText.Text = snapshot.Utc.HasValue ?
-                snapshot.Utc.Value.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) : "—";
+                snapshot.Utc.Value.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) : "-";
             UbloxTimeAccuracyText.Text = snapshot.Utc.HasValue ?
                 "Estimated accuracy " + FormatNanoseconds(snapshot.TimeAccuracyNanoseconds) :
                 "UTC date/time not resolved";
             UbloxAccuracyText.Text = !snapshot.FixValid &&
-                snapshot.HorizontalAccuracyMillimeters == 0 ? "—" :
+                snapshot.HorizontalAccuracyMillimeters == 0 ? "-" :
                 (snapshot.HorizontalAccuracyMillimeters < 1000 ?
                     snapshot.HorizontalAccuracyMillimeters.ToString("N0", CultureInfo.InvariantCulture) + " mm" :
                     (snapshot.HorizontalAccuracyMillimeters / 1000.0).ToString("N3", CultureInfo.InvariantCulture) + " m");
@@ -3020,7 +3020,7 @@ namespace TimeCardControlCenter
             bool locked;
             long progress;
             AtomicLockText.Text = snapshot.TryBoolean("Locked", out locked) ?
-                (locked ? "LOCKED" : "ACQUIRING") : "—";
+                (locked ? "LOCKED" : "ACQUIRING") : "-";
             AtomicLockText.Foreground = snapshot.TryBoolean("Locked", out locked) && locked ?
                 (Brush)FindResource("AccentBrush") : (Brush)FindResource("GoldBrush");
             AtomicLockDetailText.Text = snapshot.TryInt64("LockProgress", out progress) ?
@@ -3029,7 +3029,7 @@ namespace TimeCardControlCenter
 
             double temperature;
             AtomicTemperatureText.Text = snapshot.TryDouble("Temperature", out temperature) ?
-                (temperature / 1000.0).ToString("N2", CultureInfo.InvariantCulture) + " °C" : "—";
+                (temperature / 1000.0).ToString("N2", CultureInfo.InvariantCulture) + " °C" : "-";
             double laserTemperature;
             AtomicTemperatureDetailText.Text = snapshot.TryDouble("LaserTempSet", out laserTemperature) ?
                 "Laser setpoint " + (laserTemperature / 1000.0).ToString("N2", CultureInfo.InvariantCulture) + " °C" :
@@ -3037,7 +3037,7 @@ namespace TimeCardControlCenter
 
             double supply;
             AtomicSupplyText.Text = snapshot.TryDouble("PowerSupply", out supply) ?
-                (supply / 1000.0).ToString("N3", CultureInfo.InvariantCulture) + " V" : "—";
+                (supply / 1000.0).ToString("N3", CultureInfo.InvariantCulture) + " V" : "-";
             double analog;
             AtomicSupplyDetailText.Text = snapshot.TryDouble("AnalogTuning", out analog) ?
                 "Analog input " + analog.ToString("N0", CultureInfo.InvariantCulture) + " mV" :
@@ -3053,18 +3053,18 @@ namespace TimeCardControlCenter
             }
             else
             {
-                AtomicAlarmText.Text = "—";
+                AtomicAlarmText.Text = "-";
                 AtomicAlarmDetailText.Text = "Alarm word unavailable";
             }
 
             long seconds;
             AtomicRuntimeText.Text = snapshot.TryInt64("TotalRuntime", out seconds) ?
-                FormatDuration(seconds) : "—";
+                FormatDuration(seconds) : "-";
             AtomicLocktimeText.Text = snapshot.TryInt64("TotalLocktime", out seconds) ?
-                FormatDuration(seconds) : "—";
+                FormatDuration(seconds) : "-";
             bool flag;
             AtomicPpsDetectedText.Text = snapshot.TryBoolean("PpsInDetected", out flag) ?
-                (flag ? "DETECTED" : "NOT DETECTED") : "—";
+                (flag ? "DETECTED" : "NOT DETECTED") : "-";
             bool disciplining;
             bool disciplineLocked;
             bool jamSyncing;
@@ -3434,7 +3434,7 @@ namespace TimeCardControlCenter
         private static string AtomicValue(Sa53Snapshot snapshot, string name)
         {
             string value = snapshot.Value(name);
-            return string.IsNullOrWhiteSpace(value) ? "—" : value;
+            return string.IsNullOrWhiteSpace(value) ? "-" : value;
         }
 
         private static void SetAtomicText(TextBox box, string value)
@@ -3447,13 +3447,13 @@ namespace TimeCardControlCenter
         {
             double value;
             return snapshot.TryDouble(name, out value) ?
-                value.ToString("N0", CultureInfo.InvariantCulture) + unit : "—";
+                value.ToString("N0", CultureInfo.InvariantCulture) + unit : "-";
         }
 
         private static string FormatDuration(long seconds)
         {
             if (seconds < 0)
-                return "—";
+                return "-";
             TimeSpan duration = TimeSpan.FromSeconds(seconds);
             if (duration.TotalDays >= 1)
                 return string.Format(CultureInfo.InvariantCulture, "{0:N0} d {1:00}:{2:00}:{3:00}",
@@ -4184,7 +4184,7 @@ namespace TimeCardControlCenter
                     CultureInfo.InvariantCulture);
             controls.Value.Text = state.IsValid ?
                 state.FrequencyHz.ToString("N0", CultureInfo.InvariantCulture) + " Hz" :
-                "— Hz";
+                "- Hz";
             controls.Status.Text = state.HasError ? "ERROR" :
                 state.HasOverrun ? "OVERRUN" :
                 state.IsValid ? "VALID" :
@@ -4265,7 +4265,7 @@ namespace TimeCardControlCenter
             FrequencyCounterControls controls = frequencyCounterControls[counter - 1];
             controls.Status.Text = status;
             controls.Status.Foreground = (Brush)FindResource("GoldBrush");
-            controls.Value.Text = "— Hz";
+            controls.Value.Text = "- Hz";
             controls.Seconds.IsEnabled = false;
             controls.Route.IsEnabled = false;
             controls.Apply.IsEnabled = false;
@@ -5166,11 +5166,11 @@ namespace TimeCardControlCenter
             I2cControllerStateText.Text = state;
             I2cControllerStateText.Foreground = warningBrush;
             I2cControllerDetailText.Text = detail;
-            I2cBusStateText.Text = "—";
+            I2cBusStateText.Text = "-";
             I2cBusDetailText.Text = "No controller sample";
-            I2cOffsetText.Text = "—";
-            I2cRegisterText.Text = "CR — · SR —";
-            I2cDeviceCountText.Text = "—";
+            I2cOffsetText.Text = "-";
+            I2cRegisterText.Text = "CR - · SR -";
+            I2cDeviceCountText.Text = "-";
             I2cScanResultText.Text = detail;
             I2cAddressMapText.Text = "Bus map unavailable.";
             I2cDiagnosticsText.Text = detail;
@@ -6489,9 +6489,9 @@ namespace TimeCardControlCenter
             lastFlashStatus = null;
             FlashControllerText.Text = "QUERYING";
             FlashControllerText.Foreground = (Brush)FindResource("CyanBrush");
-            FlashJedecText.Text = "—";
-            FlashCapacityText.Text = "—";
-            FlashRegionText.Text = "—";
+            FlashJedecText.Text = "-";
+            FlashCapacityText.Text = "-";
+            FlashRegionText.Text = "-";
             if (client == null || lastSnapshot == null)
             {
                 FlashControllerText.Text = "NOT CONNECTED";
@@ -6518,10 +6518,10 @@ namespace TimeCardControlCenter
                     status.IsSupported ? "AccentBrush" : "GoldBrush");
                 FlashJedecText.Text = status.IsIdentified ? string.Format(
                     CultureInfo.InvariantCulture, "0x{0:X6}", status.JedecId) : "NOT IDENTIFIED";
-                FlashCapacityText.Text = status.CapacityBytes == 0 ? "—" :
+                FlashCapacityText.Text = status.CapacityBytes == 0 ? "-" :
                     string.Format(CultureInfo.InvariantCulture, "{0:N0} MiB",
                         status.CapacityBytes / 1048576.0);
-                FlashRegionText.Text = status.CapacityBytes <= status.FirmwareOffset ? "—" :
+                FlashRegionText.Text = status.CapacityBytes <= status.FirmwareOffset ? "-" :
                     string.Format(CultureInfo.InvariantCulture, "0x{0:X8} · {1:N0} MiB",
                         status.FirmwareOffset,
                         (status.CapacityBytes - status.FirmwareOffset) / 1048576.0);
@@ -6633,7 +6633,7 @@ namespace TimeCardControlCenter
                 selectedFlashIsRaw = false;
                 FlashImagePathText.Text = "Image rejected";
                 FlashImageDetailText.Text = ex.Message;
-                FlashHashText.Text = "SHA-256 —";
+                FlashHashText.Text = "SHA-256 -";
                 UpdateFlashStartState();
                 MessageBox.Show(this, ex.Message, "Invalid firmware image",
                     MessageBoxButton.OK, MessageBoxImage.Error);
@@ -7086,17 +7086,17 @@ namespace TimeCardControlCenter
                 pressure.TemperatureCelsius;
             BmeTemperatureText.Text = hasTemperature ?
                 temperature.ToString("F1", CultureInfo.InvariantCulture) + " °C" :
-                "— °C";
+                "- °C";
             BmeHumidityText.Text = humidity.IsValid ?
                 humidity.HumidityPercent.ToString("F1",
-                    CultureInfo.InvariantCulture) + " %" : "— %";
+                    CultureInfo.InvariantCulture) + " %" : "- %";
             BmePressureText.Text = pressure.IsValid &&
                 pressure.HasCompensatedPressure ?
                 pressure.PressureHectopascals.ToString("F1",
-                    CultureInfo.InvariantCulture) + " hPa" : "— hPa";
+                    CultureInfo.InvariantCulture) + " hPa" : "- hPa";
             BmeDewPointText.Text = humidity.IsValid ?
                 humidity.DewPointCelsius.ToString("F1",
-                    CultureInfo.InvariantCulture) + " °C" : "— °C";
+                    CultureInfo.InvariantCulture) + " °C" : "- °C";
             BmeDetailText.Text = string.Format(CultureInfo.InvariantCulture,
                 "SHT3x 0x44 {0} · ICP-10100 0x63 {1}",
                 humidity.IsValid ? "CRC OK" : humidity.IsPresent ? "INVALID" : "NO ACK",
@@ -7128,7 +7128,7 @@ namespace TimeCardControlCenter
         {
             value.Text = sensor.IsValid ?
                 sensor.TemperatureCelsius.ToString("F1",
-                    CultureInfo.InvariantCulture) + " °C" : "— °C";
+                    CultureInfo.InvariantCulture) + " °C" : "- °C";
             detail.Text = sensor.IsValid ?
                 string.Format(CultureInfo.InvariantCulture,
                     "Raw 0x{0:X4} · TCA9546A CH0",
@@ -7143,10 +7143,10 @@ namespace TimeCardControlCenter
 
         private void SetEnvironmentUnavailable(string detail)
         {
-            BmeTemperatureText.Text = "— °C";
-            BmeHumidityText.Text = "— %";
-            BmePressureText.Text = "— hPa";
-            BmeDewPointText.Text = "— °C";
+            BmeTemperatureText.Text = "- °C";
+            BmeHumidityText.Text = "- %";
+            BmePressureText.Text = "- hPa";
+            BmeDewPointText.Text = "- °C";
             BmeDetailText.Text = detail;
             BmeDetailText.Foreground = (Brush)FindResource("GoldBrush");
         }
@@ -7159,9 +7159,9 @@ namespace TimeCardControlCenter
             Brush warning = (Brush)FindResource("GoldBrush");
             if (!rail.IsValid)
             {
-                voltage.Text = "— V";
-                current.Text = "— A";
-                power.Text = "— W";
+                voltage.Text = "- V";
+                current.Text = "- A";
+                power.Text = "- W";
                 detail.Text = rail.IsPresent ? "I2C ACK; sample unavailable" :
                     "No I2C ACK; device not fitted or not powered";
                 status.Text = string.Format(CultureInfo.InvariantCulture,
@@ -7212,20 +7212,20 @@ namespace TimeCardControlCenter
                 {
                     UpdateImuCubeOrientation(Quaternion.Identity, false);
                 }
-                ImuHeadingText.Text = "—°";
-                ImuRollText.Text = "—°";
-                ImuPitchText.Text = "—°";
-                ImuQuaternionText.Text = "—, —, —, —";
-                ImuTemperatureText.Text = "— °C";
-                ImuSystemCalibrationText.Text = "—/3";
-                ImuGyroCalibrationText.Text = "—/3";
-                ImuAccelCalibrationText.Text = "—/3";
-                ImuMagCalibrationText.Text = "—/3";
-                ImuAccelerationText.Text = "X —   Y —   Z —";
-                ImuGyroscopeText.Text = "X —   Y —   Z —";
-                ImuMagneticText.Text = "X —   Y —   Z —";
-                ImuLinearAccelerationText.Text = "X —   Y —   Z —";
-                ImuGravityText.Text = "X —   Y —   Z —";
+                ImuHeadingText.Text = "-°";
+                ImuRollText.Text = "-°";
+                ImuPitchText.Text = "-°";
+                ImuQuaternionText.Text = "-, -, -, -";
+                ImuTemperatureText.Text = "- °C";
+                ImuSystemCalibrationText.Text = "-/3";
+                ImuGyroCalibrationText.Text = "-/3";
+                ImuAccelCalibrationText.Text = "-/3";
+                ImuMagCalibrationText.Text = "-/3";
+                ImuAccelerationText.Text = "X -   Y -   Z -";
+                ImuGyroscopeText.Text = "X -   Y -   Z -";
+                ImuMagneticText.Text = "X -   Y -   Z -";
+                ImuLinearAccelerationText.Text = "X -   Y -   Z -";
+                ImuGravityText.Text = "X -   Y -   Z -";
                 ImuStatusText.Text = imu.IsPresent ? "INITIALIZING" :
                     "NOT PRESENT";
                 ImuStatusText.Foreground = warning;
@@ -7259,7 +7259,7 @@ namespace TimeCardControlCenter
             UpdateImuCubeFromReading(imu);
             ImuTemperatureText.Text = imu.HasTemperature ?
                 imu.TemperatureCelsius.ToString("F1",
-                    CultureInfo.InvariantCulture) + " °C" : "— °C";
+                    CultureInfo.InvariantCulture) + " °C" : "- °C";
             ImuSystemCalibrationText.Text = imu.SystemCalibration + "/3";
             ImuGyroCalibrationText.Text = imu.GyroscopeCalibration + "/3";
             ImuAccelCalibrationText.Text = imu.AccelerometerCalibration + "/3";
@@ -7496,7 +7496,7 @@ namespace TimeCardControlCenter
 
         private static string FormatSensorVector(SensorVector3 vector)
         {
-            return vector == null ? "X —   Y —   Z —" :
+            return vector == null ? "X -   Y -   Z -" :
                 string.Format(CultureInfo.InvariantCulture,
                     "X {0,7:F3}   Y {1,7:F3}   Z {2,7:F3}",
                     vector.X, vector.Y, vector.Z);

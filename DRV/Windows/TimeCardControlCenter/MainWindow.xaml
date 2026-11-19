@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:TimeCardControlCenter"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="OCP Time Card Control Center"
+        Title="TimeCardControlCenter"
         Width="1440" Height="900" MinWidth="1180" MinHeight="720"
         WindowStartupLocation="CenterScreen" WindowStyle="None"
         Background="#07111F" AllowsTransparency="False"
@@ -91,7 +91,7 @@
                             <Image Source="Assets/timecard-app-icon.png" Margin="3" />
                         </Border>
                         <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
-                            <TextBlock Text="OCP TIME CARD" FontFamily="Segoe UI Semibold" FontSize="13" />
+                            <TextBlock Text="TIME CARD" FontFamily="Segoe UI Semibold" FontSize="13" />
                             <TextBlock Text="CONTROL CENTER" Foreground="{DynamicResource MutedBrush}" FontSize="9" />
                         </StackPanel>
                     </StackPanel>
@@ -168,7 +168,7 @@
                         </Grid.RowDefinitions>
                         <StackPanel x:Name="SidebarLogoPanel">
                             <Border Margin="16,0,16,16" Background="#07111F" BorderBrush="{DynamicResource BorderBrush}"
-                                    BorderThickness="1" CornerRadius="12" Padding="10,7" ToolTip="OCP Time Card">
+                                    BorderThickness="1" CornerRadius="12" Padding="10,7" ToolTip="Time Card">
                                 <Grid Height="72" ClipToBounds="True">
                                     <Ellipse x:Name="LogoDepthShadow" Height="12" Margin="28,53,28,0"
                                              VerticalAlignment="Top" Opacity="0.20" IsHitTestVisible="False"
@@ -357,28 +357,28 @@
                                 <Border Style="{StaticResource MetricPanel}">
                                     <StackPanel>
                                         <TextBlock Text="CLOCK STATE" Style="{StaticResource Label}" />
-                                        <TextBlock x:Name="SyncStatusText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                        <TextBlock x:Name="SyncStatusText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                         <TextBlock x:Name="SyncDetailText" Text="Awaiting telemetry" Foreground="{DynamicResource MutedBrush}" />
                                     </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource MetricPanel}">
                                     <StackPanel>
                                         <TextBlock Text="GNSS FIX" Style="{StaticResource Label}" />
-                                        <TextBlock x:Name="GnssFixMetricText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                        <TextBlock x:Name="GnssFixMetricText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                         <TextBlock x:Name="SatelliteText" Text="Satellite data pending" Foreground="{DynamicResource MutedBrush}" />
                                     </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource MetricPanel}">
                                     <StackPanel>
                                         <TextBlock Text="PCIe INTERRUPTS" Style="{StaticResource Label}" />
-                                        <TextBlock x:Name="InterruptText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                        <TextBlock x:Name="InterruptText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                         <TextBlock x:Name="LayoutText" Text="Register layout pending" Foreground="{DynamicResource MutedBrush}" />
                                     </StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource Panel}" MinHeight="124">
                                     <StackPanel>
                                         <TextBlock Text="CLOCK ENGINE" Style="{StaticResource Label}" />
-                                        <TextBlock x:Name="ClockVersionText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                        <TextBlock x:Name="ClockVersionText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                         <TextBlock x:Name="ClockSourceText" Text="Source pending" Foreground="{DynamicResource MutedBrush}" />
                                     </StackPanel>
                                 </Border>
@@ -402,15 +402,15 @@
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                             <StackPanel>
                                                 <TextBlock Text="OFFSET TO SYSTEM CLOCK" Style="{StaticResource Label}" />
-                                                <TextBlock x:Name="OffsetText" Text="—" FontFamily="Segoe UI Semibold" FontSize="17" Margin="0,5,0,0" />
+                                                <TextBlock x:Name="OffsetText" Text="-" FontFamily="Segoe UI Semibold" FontSize="17" Margin="0,5,0,0" />
                                             </StackPanel>
                                             <StackPanel Grid.Column="1">
                                                 <TextBlock Text="SYSTEM UTC" Style="{StaticResource Label}" />
-                                                <TextBlock x:Name="SystemTimeText" Text="—" FontFamily="Segoe UI Semibold" FontSize="14" Margin="0,7,0,0" />
+                                                <TextBlock x:Name="SystemTimeText" Text="-" FontFamily="Segoe UI Semibold" FontSize="14" Margin="0,7,0,0" />
                                             </StackPanel>
                                             <StackPanel Grid.Column="2">
                                                 <TextBlock Text="SAMPLE WINDOW" Style="{StaticResource Label}" />
-                                                <TextBlock x:Name="SamplingWindowText" Text="—" FontFamily="Segoe UI Semibold" FontSize="17" Margin="0,5,0,0" />
+                                                <TextBlock x:Name="SamplingWindowText" Text="-" FontFamily="Segoe UI Semibold" FontSize="17" Margin="0,5,0,0" />
                                             </StackPanel>
                                         </Grid>
                                         <Grid Grid.Row="3" Margin="0,24,0,0">
@@ -508,7 +508,7 @@
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                             <Ellipse Width="9" Height="9" Fill="{DynamicResource AccentBrush}" VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="1" Text="Subsystem device tree" Margin="10,0" />
-                                            <TextBlock x:Name="HierarchyOverviewText" Grid.Column="2" Text="—" Foreground="{DynamicResource AccentBrush}" FontSize="10" />
+                                            <TextBlock x:Name="HierarchyOverviewText" Grid.Column="2" Text="-" Foreground="{DynamicResource AccentBrush}" FontSize="10" />
                                         </Grid>
                                     </StackPanel>
                                 </Border>
@@ -583,11 +583,11 @@
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                             <StackPanel>
                                                 <TextBlock Text="SYSTEM UTC MIDPOINT" Style="{StaticResource Label}" />
-                                                <TextBlock x:Name="ClockSystemTimeText" Text="—" FontFamily="Cascadia Mono, Consolas" FontSize="14" Margin="0,7,0,0" />
+                                                <TextBlock x:Name="ClockSystemTimeText" Text="-" FontFamily="Cascadia Mono, Consolas" FontSize="14" Margin="0,7,0,0" />
                                             </StackPanel>
                                             <StackPanel Grid.Column="1">
                                                 <TextBlock Text="MEASURED OFFSET" Style="{StaticResource Label}" />
-                                                <TextBlock x:Name="ClockOffsetText" Text="—" FontFamily="Segoe UI Semibold" FontSize="20" Margin="0,5,0,0" />
+                                                <TextBlock x:Name="ClockOffsetText" Text="-" FontFamily="Segoe UI Semibold" FontSize="20" Margin="0,5,0,0" />
                                             </StackPanel>
                                         </Grid>
                                         <Border Margin="0,22,0,0" Padding="14,12,14,10"
@@ -627,10 +627,10 @@
                                         <TextBlock Text="Synchronization" Style="{StaticResource SectionTitle}" />
                                         <TextBlock x:Name="ClockSyncText" Text="AWAITING STATUS" FontFamily="Segoe UI Semibold"
                                                    FontSize="24" Margin="0,20,0,8" />
-                                        <TextBlock x:Name="ClockStatusRawText" Text="Status register —" Foreground="{DynamicResource MutedBrush}" />
+                                        <TextBlock x:Name="ClockStatusRawText" Text="Status register -" Foreground="{DynamicResource MutedBrush}" />
                                         <Separator Background="{DynamicResource BorderBrush}" Margin="0,20" />
                                         <TextBlock Text="Sampling uncertainty" Style="{StaticResource Label}" />
-                                        <TextBlock x:Name="ClockSamplingText" Text="—" FontSize="18" FontFamily="Segoe UI Semibold" Margin="0,6,0,0" />
+                                        <TextBlock x:Name="ClockSamplingText" Text="-" FontSize="18" FontFamily="Segoe UI Semibold" Margin="0,6,0,0" />
                                         <Border Margin="0,18,0,0" Padding="14,12,14,10"
                                                 CornerRadius="12" Background="#091522"
                                                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
@@ -665,17 +665,17 @@
                             <UniformGrid Grid.Row="2" Columns="3">
                                 <Border Style="{StaticResource MetricPanel}">
                                     <StackPanel><TextBlock Text="CLOCK CORE" Style="{StaticResource Label}" />
-                                        <TextBlock x:Name="ClockVersionDetailText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                        <TextBlock x:Name="ClockVersionDetailText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                         <TextBlock Text="FPGA clock engine version" Foreground="{DynamicResource MutedBrush}" /></StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource MetricPanel}">
                                     <StackPanel><TextBlock Text="SELECTED SOURCE" Style="{StaticResource Label}" />
-                                        <TextBlock x:Name="ClockSourceDetailText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                        <TextBlock x:Name="ClockSourceDetailText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                         <TextBlock Text="Raw hardware source selector" Foreground="{DynamicResource MutedBrush}" /></StackPanel>
                                 </Border>
                                 <Border Style="{StaticResource Panel}">
                                     <StackPanel><TextBlock Text="REGISTER WINDOW" Style="{StaticResource Label}" />
-                                        <TextBlock x:Name="ClockOffsetAddressText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                        <TextBlock x:Name="ClockOffsetAddressText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                         <TextBlock Text="PHC BAR offset" Foreground="{DynamicResource MutedBrush}" /></StackPanel>
                                 </Border>
                             </UniformGrid>
@@ -729,16 +729,16 @@
                             </StackPanel>
                             <UniformGrid Grid.Row="1" Columns="4" Margin="0,26,0,22">
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="FIX TYPE" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="GnssFixText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="GnssFixText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="GnssFixValidityText" Text="Awaiting status" Foreground="{DynamicResource MutedBrush}" /></StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="SATELLITES SEEN" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="SatellitesSeenText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="SatellitesSeenText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="SatelliteValidityText" Text="Awaiting status" Foreground="{DynamicResource MutedBrush}" /></StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="SATELLITES LOCKED" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="SatellitesLockedText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="SatellitesLockedText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock Text="Used by timing solution" Foreground="{DynamicResource MutedBrush}" /></StackPanel></Border>
                                 <Border Style="{StaticResource Panel}"><StackPanel><TextBlock Text="UTC STATUS" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="UtcMetricText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="UtcMetricText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="LeapMetricText" Text="Leap data pending" Foreground="{DynamicResource MutedBrush}" /></StackPanel></Border>
                             </UniformGrid>
                             <Grid Grid.Row="2">
@@ -772,15 +772,15 @@
                                         <TextBlock Text="Useful when validating firmware revisions and receiver integration."
                                                    Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,20" TextWrapping="Wrap" />
                                         <Grid Margin="0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="GNSS status" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="GnssRawText" Grid.Column="1" Text="—" FontFamily="Consolas" /></Grid>
+                                            <TextBlock Text="GNSS status" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="GnssRawText" Grid.Column="1" Text="-" FontFamily="Consolas" /></Grid>
                                         <Grid Margin="0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Satellite count" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="SatelliteRawText" Grid.Column="1" Text="—" FontFamily="Consolas" /></Grid>
+                                            <TextBlock Text="Satellite count" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="SatelliteRawText" Grid.Column="1" Text="-" FontFamily="Consolas" /></Grid>
                                         <Grid Margin="0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="ToD status" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="TodRawText" Grid.Column="1" Text="—" FontFamily="Consolas" /></Grid>
+                                            <TextBlock Text="ToD status" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="TodRawText" Grid.Column="1" Text="-" FontFamily="Consolas" /></Grid>
                                         <Grid Margin="0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="UTC status" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="UtcRawText" Grid.Column="1" Text="—" FontFamily="Consolas" /></Grid>
+                                            <TextBlock Text="UTC status" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="UtcRawText" Grid.Column="1" Text="-" FontFamily="Consolas" /></Grid>
                                         <Grid Margin="0,7"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Leap register" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="LeapRawText" Grid.Column="1" Text="—" FontFamily="Consolas" /></Grid>
+                                            <TextBlock Text="Leap register" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="LeapRawText" Grid.Column="1" Text="-" FontFamily="Consolas" /></Grid>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -828,22 +828,22 @@
                             <UniformGrid Grid.Row="4" Columns="4" Margin="0,18,0,0">
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
                                     <TextBlock Text="UBX FIX" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="UbloxFixText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="UbloxFixText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="UbloxFixDetailText" Text="Awaiting UBX-NAV-PVT" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
                                     <TextBlock Text="SATELLITES" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="UbloxSatelliteText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="UbloxSatelliteText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="UbloxConstellationText" Text="Awaiting UBX-NAV-SAT" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
                                     <TextBlock Text="RECEIVER UTC" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="UbloxUtcText" Text="—" Style="{StaticResource MetricValue}" FontSize="19" Margin="0,12,0,8" />
+                                    <TextBlock x:Name="UbloxUtcText" Text="-" Style="{StaticResource MetricValue}" FontSize="19" Margin="0,12,0,8" />
                                     <TextBlock x:Name="UbloxTimeAccuracyText" Text="Time accuracy unavailable" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource Panel}"><StackPanel>
                                     <TextBlock Text="POSITION ACCURACY" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="UbloxAccuracyText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="UbloxAccuracyText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="UbloxPositionText" Text="Position unavailable" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                             </UniformGrid>
@@ -1084,22 +1084,22 @@
                             <UniformGrid Grid.Row="1" Columns="4" Margin="0,26,0,22">
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
                                     <TextBlock x:Name="AtomicLockLabelText" Text="PHYSICS LOCK" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="AtomicLockText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="AtomicLockText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="AtomicLockDetailText" Text="Awaiting SA53" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
                                     <TextBlock x:Name="AtomicTemperatureLabelText" Text="TEMPERATURE" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="AtomicTemperatureText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="AtomicTemperatureText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="AtomicTemperatureDetailText" Text="Baseplate must remain ≤ 75 °C" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
                                     <TextBlock x:Name="AtomicSupplyLabelText" Text="POWER SUPPLY" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="AtomicSupplyText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="AtomicSupplyText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="AtomicSupplyDetailText" Text="SA53 input telemetry" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource Panel}"><StackPanel>
                                     <TextBlock x:Name="AtomicAlarmLabelText" Text="ACTIVE ALARMS" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="AtomicAlarmText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="AtomicAlarmText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
                                     <TextBlock x:Name="AtomicAlarmDetailText" Text="Alarm word pending" Foreground="{DynamicResource MutedBrush}"
                                                TextTrimming="CharacterEllipsis" ToolTip="{Binding RelativeSource={RelativeSource Self}, Path=Text}" />
                                 </StackPanel></Border>
@@ -1112,15 +1112,15 @@
                                         <TextBlock Text="Clock identity" Style="{StaticResource SectionTitle}" />
                                         <TextBlock x:Name="AtomicIdentityProtocolText" Text="UART 2 · 57,600 baud · C3 protocol" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,17" />
                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Device" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicDeviceText" Grid.Column="1" Text="—" FontFamily="Segoe UI Semibold" /></Grid>
+                                            <TextBlock Text="Device" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicDeviceText" Grid.Column="1" Text="-" FontFamily="Segoe UI Semibold" /></Grid>
                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Part number" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicPartText" Grid.Column="1" Text="—" /></Grid>
+                                            <TextBlock Text="Part number" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicPartText" Grid.Column="1" Text="-" /></Grid>
                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Serial" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicSerialText" Grid.Column="1" Text="—" /></Grid>
+                                            <TextBlock Text="Serial" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicSerialText" Grid.Column="1" Text="-" /></Grid>
                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Firmware" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicFirmwareText" Grid.Column="1" Text="—" /></Grid>
+                                            <TextBlock Text="Firmware" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicFirmwareText" Grid.Column="1" Text="-" /></Grid>
                                         <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                            <TextBlock Text="Hardware" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicHardwareText" Grid.Column="1" Text="—" /></Grid>
+                                            <TextBlock Text="Hardware" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="AtomicHardwareText" Grid.Column="1" Text="-" /></Grid>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="1" Style="{StaticResource Panel}">
@@ -1128,14 +1128,14 @@
                                         <TextBlock Text="Oscillator &amp; discipline telemetry" Style="{StaticResource SectionTitle}" />
                                         <TextBlock x:Name="AtomicTelemetryDescriptionText" Text="Read-only operating values reported directly by the SA53." Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,15" />
                                         <UniformGrid Columns="2">
-                                            <StackPanel Margin="0,5,16,10"><TextBlock Text="TOTAL RUNTIME" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicRuntimeText" Text="—" Margin="0,5,0,0" /></StackPanel>
-                                            <StackPanel Margin="0,5,0,10"><TextBlock Text="TOTAL LOCK TIME" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicLocktimeText" Text="—" Margin="0,5,0,0" /></StackPanel>
-                                            <StackPanel Margin="0,5,16,10"><TextBlock Text="1PPS INPUT" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicPpsDetectedText" Text="—" Margin="0,5,0,0" /></StackPanel>
-                                            <StackPanel Margin="0,5,0,10"><TextBlock Text="DISCIPLINE STATE" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicDisciplineStateText" Text="—" Margin="0,5,0,0" /></StackPanel>
-                                            <StackPanel Margin="0,5,16,10"><TextBlock Text="MEASURED PHASE" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicPhaseText" Text="—" Margin="0,5,0,0" /></StackPanel>
-                                            <StackPanel Margin="0,5,0,10"><TextBlock Text="EFFECTIVE TUNING" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicEffectiveTuningText" Text="—" Margin="0,5,0,0" /></StackPanel>
-                                            <StackPanel Margin="0,5,16,0"><TextBlock Text="DISCIPLINE TUNING" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicDisciplineTuningText" Text="—" Margin="0,5,0,0" /></StackPanel>
-                                            <StackPanel Margin="0,5,0,0"><TextBlock Text="LAST CORRECTION" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicLastCorrectionText" Text="—" Margin="0,5,0,0" /></StackPanel>
+                                            <StackPanel Margin="0,5,16,10"><TextBlock Text="TOTAL RUNTIME" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicRuntimeText" Text="-" Margin="0,5,0,0" /></StackPanel>
+                                            <StackPanel Margin="0,5,0,10"><TextBlock Text="TOTAL LOCK TIME" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicLocktimeText" Text="-" Margin="0,5,0,0" /></StackPanel>
+                                            <StackPanel Margin="0,5,16,10"><TextBlock Text="1PPS INPUT" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicPpsDetectedText" Text="-" Margin="0,5,0,0" /></StackPanel>
+                                            <StackPanel Margin="0,5,0,10"><TextBlock Text="DISCIPLINE STATE" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicDisciplineStateText" Text="-" Margin="0,5,0,0" /></StackPanel>
+                                            <StackPanel Margin="0,5,16,10"><TextBlock Text="MEASURED PHASE" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicPhaseText" Text="-" Margin="0,5,0,0" /></StackPanel>
+                                            <StackPanel Margin="0,5,0,10"><TextBlock Text="EFFECTIVE TUNING" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicEffectiveTuningText" Text="-" Margin="0,5,0,0" /></StackPanel>
+                                            <StackPanel Margin="0,5,16,0"><TextBlock Text="DISCIPLINE TUNING" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicDisciplineTuningText" Text="-" Margin="0,5,0,0" /></StackPanel>
+                                            <StackPanel Margin="0,5,0,0"><TextBlock Text="LAST CORRECTION" Style="{StaticResource Label}" /><TextBlock x:Name="AtomicLastCorrectionText" Text="-" Margin="0,5,0,0" /></StackPanel>
                                         </UniformGrid>
                                     </StackPanel>
                                 </Border>
@@ -1318,15 +1318,15 @@
                                 <StackPanel>
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="2*" /></Grid.ColumnDefinitions>
-                                        <StackPanel Margin="0,0,18,0"><TextBlock Text="BOARD PROFILE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineBoardText" Text="—" FontFamily="Segoe UI Semibold" FontSize="16" Margin="0,6,0,0" /></StackPanel>
-                                        <StackPanel Grid.Column="1" Margin="0,0,18,0"><TextBlock Text="OSCILLATOR BACKEND" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineOscillatorText" Text="—" FontFamily="Segoe UI Semibold" FontSize="16" Margin="0,6,0,0" /></StackPanel>
+                                        <StackPanel Margin="0,0,18,0"><TextBlock Text="BOARD PROFILE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineBoardText" Text="-" FontFamily="Segoe UI Semibold" FontSize="16" Margin="0,6,0,0" /></StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="0,0,18,0"><TextBlock Text="OSCILLATOR BACKEND" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineOscillatorText" Text="-" FontFamily="Segoe UI Semibold" FontSize="16" Margin="0,6,0,0" /></StackPanel>
                                         <StackPanel Grid.Column="2"><TextBlock Text="DRIVER CAPABILITY" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineCapabilityText" Text="Install driver 1.39 / ABI 12 to detect native support." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0" /></StackPanel>
                                     </Grid>
                                     <UniformGrid Columns="5" Margin="0,20,0,18">
-                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="STATE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineStateText" Text="STOPPED" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock x:Name="NativeDisciplineClassText" Text="Clock class —" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
-                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="PHASE ERROR" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplinePhaseText" Text="—" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock x:Name="NativeDisciplineGnssText" Text="GNSS PPS waiting" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
-                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="MRO CONTROL" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineFineCoarseText" Text="—" Style="{StaticResource MetricValue}" FontSize="18" Margin="0,7,0,3" /><TextBlock Text="Fine / coarse" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
-                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="TEMPERATURE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineTemperatureText" Text="—" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock Text="mRO electronics" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
+                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="STATE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineStateText" Text="STOPPED" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock x:Name="NativeDisciplineClassText" Text="Clock class -" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
+                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="PHASE ERROR" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplinePhaseText" Text="-" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock x:Name="NativeDisciplineGnssText" Text="GNSS PPS waiting" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
+                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="MRO CONTROL" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineFineCoarseText" Text="-" Style="{StaticResource MetricValue}" FontSize="18" Margin="0,7,0,3" /><TextBlock Text="Fine / coarse" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
+                                        <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="TEMPERATURE" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineTemperatureText" Text="-" Style="{StaticResource MetricValue}" FontSize="20" Margin="0,7,0,3" /><TextBlock Text="mRO electronics" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
                                         <Border Style="{StaticResource MetricPanel}"><StackPanel><TextBlock Text="LAST ACTION" Style="{StaticResource Label}" /><TextBlock x:Name="NativeDisciplineActionText" Text="No action" FontFamily="Segoe UI Semibold" FontSize="14" TextWrapping="Wrap" Margin="0,7,0,3" /><TextBlock Text="Bounded by driver ABI" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel></Border>
                                     </UniformGrid>
                                     <Grid>
@@ -1421,22 +1421,22 @@
                             <UniformGrid Grid.Row="4" Columns="4" Margin="0,0,0,18">
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
                                     <TextBlock Text="DISCIPLINE STATE" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="OscillatordStateText" Text="—" Style="{StaticResource MetricValue}" FontSize="22" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="OscillatordStateText" Text="-" Style="{StaticResource MetricValue}" FontSize="22" Margin="0,8,0,5" />
                                     <TextBlock x:Name="OscillatordProgressText" Text="Awaiting service" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
                                     <TextBlock Text="PHASE OFFSET" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="OscillatordOffsetText" Text="—" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
-                                    <TextBlock x:Name="OscillatordClockClassText" Text="Clock class —" Foreground="{DynamicResource MutedBrush}" />
+                                    <TextBlock x:Name="OscillatordOffsetText" Text="-" Style="{StaticResource MetricValue}" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="OscillatordClockClassText" Text="Clock class -" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource MetricPanel}"><StackPanel>
                                     <TextBlock Text="OSCILLATOR" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="OscillatordOscillatorText" Text="—" Style="{StaticResource MetricValue}" FontSize="22" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="OscillatordOscillatorText" Text="-" Style="{StaticResource MetricValue}" FontSize="22" Margin="0,8,0,5" />
                                     <TextBlock x:Name="OscillatordLockText" Text="Lock unknown" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                                 <Border Style="{StaticResource Panel}"><StackPanel>
                                     <TextBlock Text="GNSS REFERENCE" Style="{StaticResource Label}" />
-                                    <TextBlock x:Name="OscillatordGnssText" Text="—" Style="{StaticResource MetricValue}" FontSize="22" Margin="0,8,0,5" />
+                                    <TextBlock x:Name="OscillatordGnssText" Text="-" Style="{StaticResource MetricValue}" FontSize="22" Margin="0,8,0,5" />
                                     <TextBlock x:Name="OscillatordGnssDetailText" Text="Awaiting GNSS" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel></Border>
                             </UniformGrid>
@@ -1448,11 +1448,11 @@
                                         <TextBlock Text="Oscillator &amp; phase" Style="{StaticResource SectionTitle}" />
                                         <TextBlock Text="Values come from the daemon's active oscillator backend and PHC phase meter."
                                                    Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,15" TextWrapping="Wrap" />
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Service" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordVersionText" Grid.Column="1" Text="—" /></Grid>
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Fine control" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordFineText" Grid.Column="1" Text="—" FontFamily="Cascadia Mono, Consolas" /></Grid>
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Coarse control" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordCoarseText" Grid.Column="1" Text="—" FontFamily="Cascadia Mono, Consolas" /></Grid>
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Temperature" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordTemperatureText" Grid.Column="1" Text="—" /></Grid>
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Holdover ready" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordHoldoverText" Grid.Column="1" Text="—" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Service" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordVersionText" Grid.Column="1" Text="-" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Fine control" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordFineText" Grid.Column="1" Text="-" FontFamily="Cascadia Mono, Consolas" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Coarse control" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordCoarseText" Grid.Column="1" Text="-" FontFamily="Cascadia Mono, Consolas" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Temperature" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordTemperatureText" Grid.Column="1" Text="-" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Holdover ready" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordHoldoverText" Grid.Column="1" Text="-" /></Grid>
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="1" Style="{StaticResource Panel}">
@@ -1460,11 +1460,11 @@
                                         <TextBlock Text="GNSS timing reference" Style="{StaticResource SectionTitle}" />
                                         <TextBlock Text="Fix, survey, leap-second, antenna, and time-accuracy state decoded by ubloxcfg."
                                                    Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,15" TextWrapping="Wrap" />
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Satellites" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordSatellitesText" Grid.Column="1" Text="—" /></Grid>
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Time accuracy" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordTimeAccuracyText" Grid.Column="1" Text="—" /></Grid>
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Survey error" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordSurveyText" Grid.Column="1" Text="—" /></Grid>
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Leap seconds" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordLeapText" Grid.Column="1" Text="—" /></Grid>
-                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Antenna" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordAntennaText" Grid.Column="1" Text="—" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Satellites" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordSatellitesText" Grid.Column="1" Text="-" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Time accuracy" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordTimeAccuracyText" Grid.Column="1" Text="-" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Survey error" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordSurveyText" Grid.Column="1" Text="-" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Leap seconds" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordLeapText" Grid.Column="1" Text="-" /></Grid>
+                                        <Grid Margin="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="145" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Antenna" Foreground="{DynamicResource MutedBrush}" /><TextBlock x:Name="OscillatordAntennaText" Grid.Column="1" Text="-" /></Grid>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -1603,7 +1603,7 @@
                                         <StackPanel><TextBlock Text="FPGA NMEA sentence generator" FontFamily="Segoe UI Semibold" />
                                             <TextBlock x:Name="NmeaStatusText" Text="NOT QUERIED · ABI 4" Foreground="{DynamicResource MutedBrush}" FontSize="11" /></StackPanel>
                                     </StackPanel>
-                                    <TextBlock x:Name="NmeaRegisterText" Text="Control — · Status — · Version —" Foreground="{DynamicResource MutedBrush}"
+                                    <TextBlock x:Name="NmeaRegisterText" Text="Control - · Status - · Version -" Foreground="{DynamicResource MutedBrush}"
                                                FontFamily="Cascadia Mono, Consolas" FontSize="10" Margin="0,8,0,0" />
                                     <TextBlock x:Name="NmeaDecoderStatusText" Text="NMEA decoder · waiting for sentence data"
                                                Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas"
@@ -1756,7 +1756,7 @@
                                                 <ComboBox x:Name="Sma1FunctionCombo" IsEnabled="False" /></StackPanel>
                                         </Grid>
                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <TextBlock x:Name="Sma1RawText" Text="Input — · Output —" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
+                                            <TextBlock x:Name="Sma1RawText" Text="Input - · Output -" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
                                             <Button x:Name="Sma1ApplyButton" Grid.Column="1" Tag="1" Content="Apply" Click="ApplySma_Click" Padding="16,7" IsEnabled="False" />
                                         </Grid>
                                     </StackPanel>
@@ -1779,7 +1779,7 @@
                                                 <ComboBox x:Name="Sma2FunctionCombo" IsEnabled="False" /></StackPanel>
                                         </Grid>
                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <TextBlock x:Name="Sma2RawText" Text="Input — · Output —" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
+                                            <TextBlock x:Name="Sma2RawText" Text="Input - · Output -" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
                                             <Button x:Name="Sma2ApplyButton" Grid.Column="1" Tag="2" Content="Apply" Click="ApplySma_Click" Padding="16,7" IsEnabled="False" />
                                         </Grid>
                                     </StackPanel>
@@ -1802,7 +1802,7 @@
                                                 <ComboBox x:Name="Sma3FunctionCombo" IsEnabled="False" /></StackPanel>
                                         </Grid>
                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <TextBlock x:Name="Sma3RawText" Text="Input — · Output —" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
+                                            <TextBlock x:Name="Sma3RawText" Text="Input - · Output -" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
                                             <Button x:Name="Sma3ApplyButton" Grid.Column="1" Tag="3" Content="Apply" Click="ApplySma_Click" Padding="16,7" IsEnabled="False" />
                                         </Grid>
                                     </StackPanel>
@@ -1825,7 +1825,7 @@
                                                 <ComboBox x:Name="Sma4FunctionCombo" IsEnabled="False" /></StackPanel>
                                         </Grid>
                                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                            <TextBlock x:Name="Sma4RawText" Text="Input — · Output —" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
+                                            <TextBlock x:Name="Sma4RawText" Text="Input - · Output -" Foreground="{DynamicResource MutedBrush}" FontFamily="Consolas" FontSize="11" VerticalAlignment="Center" />
                                             <Button x:Name="Sma4ApplyButton" Grid.Column="1" Tag="4" Content="Apply" Click="ApplySma_Click" Padding="16,7" IsEnabled="False" />
                                         </Grid>
                                     </StackPanel>
@@ -1890,7 +1890,7 @@
                                             <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                             <ComboBox x:Name="Generator1RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
                                             <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                                <TextBlock x:Name="Generator1DetailText" Text="Period — · Start —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <TextBlock x:Name="Generator1DetailText" Text="Period - · Start -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                 <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Generator1ClearButton" Tag="1" Content="Clear status" Click="ClearSignalGeneratorStatus_Click" Padding="12,7" Margin="0,0,8,0" IsEnabled="False" /><Button x:Name="Generator1ApplyButton" Tag="1" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" /></StackPanel>
                                             </Grid>
                                         </StackPanel>
@@ -1915,7 +1915,7 @@
                                             <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                             <ComboBox x:Name="Generator2RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
                                             <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                                <TextBlock x:Name="Generator2DetailText" Text="Period — · Start —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <TextBlock x:Name="Generator2DetailText" Text="Period - · Start -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                 <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Generator2ClearButton" Tag="2" Content="Clear status" Click="ClearSignalGeneratorStatus_Click" Padding="12,7" Margin="0,0,8,0" IsEnabled="False" /><Button x:Name="Generator2ApplyButton" Tag="2" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" /></StackPanel>
                                             </Grid>
                                         </StackPanel>
@@ -1940,7 +1940,7 @@
                                             <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                             <ComboBox x:Name="Generator3RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
                                             <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                                <TextBlock x:Name="Generator3DetailText" Text="Period — · Start —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <TextBlock x:Name="Generator3DetailText" Text="Period - · Start -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                 <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Generator3ClearButton" Tag="3" Content="Clear status" Click="ClearSignalGeneratorStatus_Click" Padding="12,7" Margin="0,0,8,0" IsEnabled="False" /><Button x:Name="Generator3ApplyButton" Tag="3" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" /></StackPanel>
                                             </Grid>
                                         </StackPanel>
@@ -1965,7 +1965,7 @@
                                             <TextBlock Text="ROUTE OUTPUT" Style="{StaticResource Label}" Margin="0,0,0,5" />
                                             <ComboBox x:Name="Generator4RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox>
                                             <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                                <TextBlock x:Name="Generator4DetailText" Text="Period — · Start —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
+                                                <TextBlock x:Name="Generator4DetailText" Text="Period - · Start -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap" />
                                                 <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Generator4ClearButton" Tag="4" Content="Clear status" Click="ClearSignalGeneratorStatus_Click" Padding="12,7" Margin="0,0,8,0" IsEnabled="False" /><Button x:Name="Generator4ApplyButton" Tag="4" Content="Apply" Click="ApplySignalGenerator_Click" Padding="16,7" IsEnabled="False" /></StackPanel>
                                             </Grid>
                                         </StackPanel>
@@ -1980,30 +1980,30 @@
                                 <UniformGrid Columns="2">
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="220">
                                         <StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Frequency 1" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Frequency1StatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></Grid>
-                                            <TextBlock x:Name="Frequency1ValueText" Text="— Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
+                                            <TextBlock x:Name="Frequency1ValueText" Text="- Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="INTEGRATION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Frequency1SecondsTextBox" Text="1" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="ROUTE INPUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Frequency1RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox></StackPanel></Grid>
-                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency1DetailText" Text="Control — · Status —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency1ApplyButton" Grid.Column="1" Tag="1" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency1DetailText" Text="Control - · Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency1ApplyButton" Grid.Column="1" Tag="1" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="220">
                                         <StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Frequency 2" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Frequency2StatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></Grid>
-                                            <TextBlock x:Name="Frequency2ValueText" Text="— Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
+                                            <TextBlock x:Name="Frequency2ValueText" Text="- Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="INTEGRATION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Frequency2SecondsTextBox" Text="1" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="ROUTE INPUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Frequency2RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox></StackPanel></Grid>
-                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency2DetailText" Text="Control — · Status —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency2ApplyButton" Grid.Column="1" Tag="2" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency2DetailText" Text="Control - · Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency2ApplyButton" Grid.Column="1" Tag="2" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="220">
                                         <StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Frequency 3" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Frequency3StatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></Grid>
-                                            <TextBlock x:Name="Frequency3ValueText" Text="— Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
+                                            <TextBlock x:Name="Frequency3ValueText" Text="- Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="INTEGRATION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Frequency3SecondsTextBox" Text="1" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="ROUTE INPUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Frequency3RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox></StackPanel></Grid>
-                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency3DetailText" Text="Control — · Status —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency3ApplyButton" Grid.Column="1" Tag="3" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency3DetailText" Text="Control - · Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency3ApplyButton" Grid.Column="1" Tag="3" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
                                         </StackPanel>
                                     </Border>
                                     <Border Style="{StaticResource SubsystemCard}" MinHeight="220">
                                         <StackPanel><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Frequency 4" Style="{StaticResource SectionTitle}" /><TextBlock x:Name="Frequency4StatusText" Grid.Column="1" Text="NOT QUERIED" Foreground="{DynamicResource MutedBrush}" FontSize="10" /></Grid>
-                                            <TextBlock x:Name="Frequency4ValueText" Text="— Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
+                                            <TextBlock x:Name="Frequency4ValueText" Text="- Hz" Style="{StaticResource MetricValue}" Margin="0,12,0,12" />
                                             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="0.8*" /><ColumnDefinition Width="1.2*" /></Grid.ColumnDefinitions><StackPanel Margin="0,0,10,0"><TextBlock Text="INTEGRATION (S)" Style="{StaticResource Label}" Margin="0,0,0,5" /><TextBox x:Name="Frequency4SecondsTextBox" Text="1" IsEnabled="False" /></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="ROUTE INPUT" Style="{StaticResource Label}" Margin="0,0,0,5" /><ComboBox x:Name="Frequency4RouteCombo" SelectedIndex="0" IsEnabled="False"><ComboBoxItem Tag="0">Keep current route</ComboBoxItem><ComboBoxItem Tag="1">SMA 1</ComboBoxItem><ComboBoxItem Tag="2">SMA 2</ComboBoxItem><ComboBoxItem Tag="3">SMA 3</ComboBoxItem><ComboBoxItem Tag="4">SMA 4</ComboBoxItem></ComboBox></StackPanel></Grid>
-                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency4DetailText" Text="Control — · Status —" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency4ApplyButton" Grid.Column="1" Tag="4" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
+                                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock x:Name="Frequency4DetailText" Text="Control - · Status -" Foreground="{DynamicResource MutedBrush}" FontSize="11" VerticalAlignment="Center" /><Button x:Name="Frequency4ApplyButton" Grid.Column="1" Tag="4" Content="Apply" Click="ApplyFrequencyCounter_Click" Padding="14,7" IsEnabled="False" /></Grid>
                                         </StackPanel>
                                     </Border>
                                 </UniformGrid>
@@ -2704,9 +2704,9 @@
                             </Border>
                             <UniformGrid Grid.Row="2" Columns="4" Margin="0,0,0,18">
                                 <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CONTROLLER" Style="{StaticResource Label}" /><TextBlock x:Name="FlashControllerText" Text="NOT QUERIED" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="JEDEC ID" Style="{StaticResource Label}" /><TextBlock x:Name="FlashJedecText" Text="—" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CAPACITY" Style="{StaticResource Label}" /><TextBlock x:Name="FlashCapacityText" Text="—" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="FPGA REGION" Style="{StaticResource Label}" /><TextBlock x:Name="FlashRegionText" Text="—" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="JEDEC ID" Style="{StaticResource Label}" /><TextBlock x:Name="FlashJedecText" Text="-" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="CAPACITY" Style="{StaticResource Label}" /><TextBlock x:Name="FlashCapacityText" Text="-" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource MetricCard}"><StackPanel><TextBlock Text="FPGA REGION" Style="{StaticResource Label}" /><TextBlock x:Name="FlashRegionText" Text="-" Style="{StaticResource MetricValue}" FontSize="17" Margin="0,8,0,0" /></StackPanel></Border>
                             </UniformGrid>
                             <Grid Grid.Row="3">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.05*" /><ColumnDefinition Width="0.95*" /></Grid.ColumnDefinitions>
@@ -2717,7 +2717,7 @@
                                         <Button x:Name="FlashChooseButton" Content="Choose firmware image…" Click="ChooseFirmware_Click" HorizontalAlignment="Left" />
                                         <TextBlock x:Name="FlashImagePathText" Text="No image selected" FontFamily="Segoe UI Semibold" TextWrapping="Wrap" Margin="0,16,0,5" />
                                         <TextBlock x:Name="FlashImageDetailText" Text="OCPC header and image bounds will be validated before writing." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
-                                        <TextBlock x:Name="FlashHashText" Text="SHA-256 —" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" TextWrapping="Wrap" Margin="0,11,0,0" />
+                                        <TextBlock x:Name="FlashHashText" Text="SHA-256 -" Foreground="{DynamicResource MutedBrush}" FontFamily="Cascadia Mono, Consolas" FontSize="11" TextWrapping="Wrap" Margin="0,11,0,0" />
                                     </StackPanel>
                                 </Border>
                                 <Border Grid.Column="1" Style="{StaticResource Panel}">
@@ -2751,9 +2751,9 @@
                                     <StackPanel><TextBlock Text="Device Manager hierarchy" Style="{StaticResource SectionTitle}" />
                                         <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
                                             <TextBlock Text="Runtime: " Foreground="{DynamicResource MutedBrush}" />
-                                            <TextBlock x:Name="HierarchyRuntimeText" Text="—" FontFamily="Segoe UI Semibold" />
+                                            <TextBlock x:Name="HierarchyRuntimeText" Text="-" FontFamily="Segoe UI Semibold" />
                                             <TextBlock Text="   Next start: " Foreground="{DynamicResource MutedBrush}" />
-                                            <TextBlock x:Name="HierarchyPersistedText" Text="—" FontFamily="Segoe UI Semibold" />
+                                            <TextBlock x:Name="HierarchyPersistedText" Text="-" FontFamily="Segoe UI Semibold" />
                                         </StackPanel></StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                         <Button Content="Enable now" Click="EnableHierarchy_Click" Margin="0,0,8,0" />
@@ -2764,7 +2764,7 @@
                             </Border>
                             <UniformGrid Grid.Row="2" Columns="4">
                                 <Border Style="{StaticResource SubsystemCard}"><StackPanel><Image Source="Assets/ocp-timecard-controller.png" Width="46" Height="46" HorizontalAlignment="Left" />
-                                    <TextBlock Text="OCP Time Card Controller" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
+                                    <TextBlock Text="Time Card Controller" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
                                     <TextBlock Text="LIVE CONTROL" Foreground="{DynamicResource AccentBrush}" FontSize="10" /></StackPanel></Border>
                                 <Border Style="{StaticResource SubsystemCard}"><StackPanel><Image Source="Assets/timecard-phc.png" Width="46" Height="46" HorizontalAlignment="Left" />
                                     <TextBlock Text="Precision Hardware Clock" FontFamily="Segoe UI Semibold" Margin="0,12,0,4" />
@@ -2863,7 +2863,7 @@
                                         <Grid>
                                             <StackPanel><TextBlock Text="PHC OFFSET" Style="{StaticResource Label}" />
                                                 <TextBlock Text="Time Card to Windows UTC" Style="{StaticResource SectionTitle}" Margin="0,4,0,0" /></StackPanel>
-                                            <TextBlock x:Name="ProductOffsetValueText" Text="—" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                            <TextBlock x:Name="ProductOffsetValueText" Text="-" HorizontalAlignment="Right" VerticalAlignment="Center"
                                                        Foreground="{DynamicResource CyanBrush}" FontFamily="Segoe UI Semibold" FontSize="17" />
                                         </Grid>
                                         <local:RollingTelemetryChart x:Name="ProductOffsetChart" Grid.Row="1" Margin="0,16,0,10"
@@ -2878,7 +2878,7 @@
                                         <Grid>
                                             <StackPanel><TextBlock Text="CROSS-TIMESTAMP" Style="{StaticResource Label}" />
                                                 <TextBlock Text="System sampling window" Style="{StaticResource SectionTitle}" Margin="0,4,0,0" /></StackPanel>
-                                            <TextBlock x:Name="ProductSamplingValueText" Text="—" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                            <TextBlock x:Name="ProductSamplingValueText" Text="-" HorizontalAlignment="Right" VerticalAlignment="Center"
                                                        Foreground="{DynamicResource GoldBrush}" FontFamily="Segoe UI Semibold" FontSize="17" />
                                         </Grid>
                                         <local:RollingTelemetryChart x:Name="ProductSamplingChart" Grid.Row="1" Margin="0,16,0,10"
@@ -2926,7 +2926,7 @@
                                         <Grid>
                                             <StackPanel><TextBlock Text="GNSS TRACKING" Style="{StaticResource Label}" />
                                                 <TextBlock Text="Satellites locked" Style="{StaticResource SectionTitle}" Margin="0,4,0,0" /></StackPanel>
-                                            <TextBlock x:Name="ProductSatelliteValueText" Text="—" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                            <TextBlock x:Name="ProductSatelliteValueText" Text="-" HorizontalAlignment="Right" VerticalAlignment="Center"
                                                        Foreground="{DynamicResource AccentBrush}" FontFamily="Segoe UI Semibold" FontSize="17" />
                                         </Grid>
                                         <local:RollingTelemetryChart x:Name="ProductSatelliteChart" Grid.Row="1" Margin="0,16,0,10"

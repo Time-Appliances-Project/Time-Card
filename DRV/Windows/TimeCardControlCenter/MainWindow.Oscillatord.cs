@@ -278,16 +278,16 @@ namespace TimeCardControlCenter
 
         private void ApplyNativeDisciplineStatus(NativeDisciplineStatus status)
         {
-            NativeDisciplineStateText.Text = status.State ?? "—";
+            NativeDisciplineStateText.Text = status.State ?? "-";
             NativeDisciplineClassText.Text = "Clock class " +
-                (status.ClockClass ?? "—");
+                (status.ClockClass ?? "-");
             NativeDisciplinePhaseText.Text =
                 FormatOscillatordNanoseconds(status.PhaseNanoseconds);
             NativeDisciplineFineCoarseText.Text = string.Format(
                 CultureInfo.InvariantCulture, "{0:N0} / {1:N0}",
                 status.Fine, status.Coarse);
             NativeDisciplineTemperatureText.Text =
-                status.TemperatureCelsius < -273.15 ? "—" :
+                status.TemperatureCelsius < -273.15 ? "-" :
                 status.TemperatureCelsius.ToString("F2",
                     CultureInfo.InvariantCulture) + " °C";
             NativeDisciplineGnssText.Text = status.GnssValid ?
@@ -540,26 +540,26 @@ namespace TimeCardControlCenter
 
         private void ResetOscillatordTelemetry(bool remote)
         {
-            OscillatordVersionText.Text = "—";
-            OscillatordStateText.Text = "—";
+            OscillatordVersionText.Text = "-";
+            OscillatordStateText.Text = "-";
             OscillatordProgressText.Text = "Awaiting service";
-            OscillatordOffsetText.Text = "—";
-            OscillatordClockClassText.Text = "Clock class —";
-            OscillatordOscillatorText.Text = "—";
+            OscillatordOffsetText.Text = "-";
+            OscillatordClockClassText.Text = "Clock class -";
+            OscillatordOscillatorText.Text = "-";
             OscillatordLockText.Text = "Lock unknown";
             OscillatordLockText.Foreground = (Brush)FindResource("MutedBrush");
-            OscillatordGnssText.Text = "—";
+            OscillatordGnssText.Text = "-";
             OscillatordGnssText.Foreground = (Brush)FindResource("MutedBrush");
             OscillatordGnssDetailText.Text = "Awaiting GNSS";
-            OscillatordFineText.Text = "—";
-            OscillatordCoarseText.Text = "—";
-            OscillatordTemperatureText.Text = "—";
-            OscillatordHoldoverText.Text = "—";
-            OscillatordSatellitesText.Text = "—";
-            OscillatordTimeAccuracyText.Text = "—";
-            OscillatordSurveyText.Text = "—";
-            OscillatordLeapText.Text = "—";
-            OscillatordAntennaText.Text = "—";
+            OscillatordFineText.Text = "-";
+            OscillatordCoarseText.Text = "-";
+            OscillatordTemperatureText.Text = "-";
+            OscillatordHoldoverText.Text = "-";
+            OscillatordSatellitesText.Text = "-";
+            OscillatordTimeAccuracyText.Text = "-";
+            OscillatordSurveyText.Text = "-";
+            OscillatordLeapText.Text = "-";
+            OscillatordAntennaText.Text = "-";
             OscillatordGuardedActionsPanel.IsEnabled = false;
             OscillatordControlPolicyText.Text = remote ?
                 "Connect to read the remote TCP control policy." :
@@ -606,54 +606,54 @@ namespace TimeCardControlCenter
             OscillatordGuardedActionsPanel.IsEnabled = controlAllowed;
 
             OscillatordDisciplining discipline = snapshot.Disciplining;
-            OscillatordStateText.Text = discipline == null ? "—" :
+            OscillatordStateText.Text = discipline == null ? "-" :
                 HumanizeOscillatordState(discipline.Status);
             OscillatordProgressText.Text = discipline == null ? "Discipline data unavailable" :
                 string.Format(CultureInfo.InvariantCulture,
                     "{0:F1}% · {1}/{2}", discipline.ConvergenceProgress,
                     discipline.CurrentConvergenceCount, discipline.ConvergenceThreshold);
-            OscillatordHoldoverText.Text = discipline == null ? "—" :
+            OscillatordHoldoverText.Text = discipline == null ? "-" :
                 (discipline.ReadyForHoldover ? "Ready" : "Not ready");
 
             OscillatordClock clock = snapshot.Clock;
-            OscillatordOffsetText.Text = clock == null ? "—" :
+            OscillatordOffsetText.Text = clock == null ? "-" :
                 FormatOscillatordNanoseconds(clock.OffsetNanoseconds);
-            OscillatordClockClassText.Text = clock == null ? "Clock class —" :
+            OscillatordClockClassText.Text = clock == null ? "Clock class -" :
                 "Clock class " + (clock.Class ?? "unknown");
 
             OscillatordOscillator oscillator = snapshot.Oscillator;
-            OscillatordOscillatorText.Text = oscillator == null ? "—" :
+            OscillatordOscillatorText.Text = oscillator == null ? "-" :
                 (oscillator.Model ?? "Unknown");
             OscillatordLockText.Text = oscillator == null ? "Lock unknown" :
                 (oscillator.Locked ? "Locked" : "Not locked");
             OscillatordLockText.Foreground = (Brush)FindResource(
                 oscillator != null && oscillator.Locked ? "AccentBrush" : "GoldBrush");
-            OscillatordFineText.Text = oscillator == null ? "—" :
+            OscillatordFineText.Text = oscillator == null ? "-" :
                 oscillator.FineControl.ToString("N0", CultureInfo.InvariantCulture);
-            OscillatordCoarseText.Text = oscillator == null ? "—" :
+            OscillatordCoarseText.Text = oscillator == null ? "-" :
                 oscillator.CoarseControl.ToString("N0", CultureInfo.InvariantCulture);
             OscillatordTemperatureText.Text = oscillator == null ||
-                oscillator.TemperatureCelsius < -273.15 ? "—" :
+                oscillator.TemperatureCelsius < -273.15 ? "-" :
                 oscillator.TemperatureCelsius.ToString("F2", CultureInfo.InvariantCulture) + " °C";
 
             OscillatordGnss gnss = snapshot.Gnss;
-            OscillatordGnssText.Text = gnss == null ? "—" :
+            OscillatordGnssText.Text = gnss == null ? "-" :
                 (gnss.FixOk ? "FIX VALID" : "NO FIX");
             OscillatordGnssText.Foreground = (Brush)FindResource(
                 gnss != null && gnss.FixOk ? "AccentBrush" : "GoldBrush");
             OscillatordGnssDetailText.Text = gnss == null ? "GNSS data unavailable" :
                 string.Format(CultureInfo.InvariantCulture, "Fix {0} · {1} satellites",
                     gnss.Fix, gnss.Satellites);
-            OscillatordSatellitesText.Text = gnss == null ? "—" :
+            OscillatordSatellitesText.Text = gnss == null ? "-" :
                 gnss.Satellites.ToString(CultureInfo.InvariantCulture);
             OscillatordTimeAccuracyText.Text = gnss == null || gnss.TimeAccuracyNanoseconds < 0 ?
-                "—" : FormatOscillatordNanoseconds(gnss.TimeAccuracyNanoseconds);
+                "-" : FormatOscillatordNanoseconds(gnss.TimeAccuracyNanoseconds);
             OscillatordSurveyText.Text = gnss == null || gnss.SurveyPositionErrorMeters < 0 ?
-                "—" : gnss.SurveyPositionErrorMeters.ToString("F2", CultureInfo.InvariantCulture) + " m";
-            OscillatordLeapText.Text = gnss == null || gnss.LeapSeconds < 0 ? "—" :
+                "-" : gnss.SurveyPositionErrorMeters.ToString("F2", CultureInfo.InvariantCulture) + " m";
+            OscillatordLeapText.Text = gnss == null || gnss.LeapSeconds < 0 ? "-" :
                 string.Format(CultureInfo.InvariantCulture, "{0} s · pending {1}",
                     gnss.LeapSeconds, gnss.LeapSecondChange);
-            OscillatordAntennaText.Text = gnss == null ? "—" :
+            OscillatordAntennaText.Text = gnss == null ? "-" :
                 string.Format(CultureInfo.InvariantCulture, "status {0} · power {1}",
                     gnss.AntennaStatus, gnss.AntennaPower);
         }
@@ -661,7 +661,7 @@ namespace TimeCardControlCenter
         private static string HumanizeOscillatordState(string value)
         {
             if (string.IsNullOrEmpty(value))
-                return "—";
+                return "-";
             if (string.Equals(value, "LOCK_HIGH_RESOLUTION", StringComparison.OrdinalIgnoreCase))
                 return "HIGH RES LOCK";
             if (string.Equals(value, "LOCK_LOW_RESOLUTION", StringComparison.OrdinalIgnoreCase))

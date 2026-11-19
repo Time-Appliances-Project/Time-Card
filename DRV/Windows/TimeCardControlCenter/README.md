@@ -1,7 +1,12 @@
-# OCP Time Card Control Center
+# TimeCardControlCenter
+
+Windows application author: Ahmad Byagowi
+
+Release 1.52.0 supports the Microsoft-signed Time Card 1.52 driver (ABI 15), including WiWi revision 02. Install the driver separately before connecting to hardware. The portable app is a qualification candidate; Microsoft Store publication is pending.
+
 
 The Time Card Control Center is a dependency-free Windows desktop dashboard
-for the OCP Time Card driver. It uses the public versioned IOCTL ABI directly;
+for the Time Card driver. It uses the public versioned IOCTL ABI directly;
 it does not shell out to `timecardctl` or scrape Device Manager.
 
 Driver 1.43 / ABI 15 recognizes the Meta/Facebook, Celestica, and Orolia/Safran
@@ -563,7 +568,7 @@ The lower half of the same workspace defaults explicitly to the protected local
 `OcpTimeCardOscillatord` Windows-service pipe. Local mode has no host, IP port,
 or shared-token setting, and no WSL or Linux daemon is needed. Selecting
 **Remote oscillatord** reveals the host, TCP port, and temporary control-token
-fields and forces a TCP request—even when the remote host is `127.0.0.1`—so the
+fields and forces a TCP request-even when the remote host is `127.0.0.1`-so the
 reported transport is never ambiguous. The same client remains wire-compatible
 with the integrated Linux
 [`oscillatord`](../../../Software/oscillatord) TCP monitoring protocol. It

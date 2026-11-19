@@ -632,7 +632,7 @@ namespace TimeCardControlCenter
 
         public override string ToString()
         {
-            return string.Format(CultureInfo.InvariantCulture, "{0,-8}  {1}  —  {2}",
+            return string.Format(CultureInfo.InvariantCulture, "{0,-8}  {1}  -  {2}",
                 Outcome.ToString().ToUpperInvariant(), Name, Detail);
         }
     }

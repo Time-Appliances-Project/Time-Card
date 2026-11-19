@@ -139,7 +139,7 @@ namespace TimeCardControlCenter
                 handle.Dispose();
                 handle = null;
                 throw new Win32Exception(error,
-                    "Unable to open the OCP Time Card driver at " + devicePath + ".");
+                    "Unable to open the Time Card driver at " + devicePath + ".");
             }
         }
 

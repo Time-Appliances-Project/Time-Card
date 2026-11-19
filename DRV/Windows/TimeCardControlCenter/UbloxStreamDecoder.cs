@@ -1110,7 +1110,7 @@ namespace TimeCardControlCenter
         private static string FormatNmeaTime(string value)
         {
             if (string.IsNullOrWhiteSpace(value) || value.Length < 6)
-                return "—";
+                return "-";
             return value.Substring(0, 2) + ":" + value.Substring(2, 2) +
                 ":" + value.Substring(4) + " UTC";
         }
@@ -1128,7 +1128,7 @@ namespace TimeCardControlCenter
 
         private static string EmptyAsDash(string value)
         {
-            return string.IsNullOrWhiteSpace(value) ? "—" : value;
+            return string.IsNullOrWhiteSpace(value) ? "-" : value;
         }
 
         private static int HexValue(char value)

@@ -1,7 +1,7 @@
 <Window x:Class="TimeCardControlCenter.SplashWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="OCP Time Card Control Center"
+        Title="TimeCardControlCenter"
         Width="760" Height="460"
         WindowStyle="None" ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"

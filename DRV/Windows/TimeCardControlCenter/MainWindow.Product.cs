@@ -217,7 +217,7 @@ namespace TimeCardControlCenter
             foreach (HealthNode node in lastHealthReport.Nodes.Where(item =>
                 item.Severity == HealthSeverity.Attention ||
                 item.Severity == HealthSeverity.Unavailable).Take(4))
-                HealthNeedsAttentionItems.Items.Add(node.Name + " — " + node.Status +
+                HealthNeedsAttentionItems.Items.Add(node.Name + " - " + node.Status +
                     "\n" + node.Detail);
             if (HealthNeedsAttentionItems.Items.Count == 0)
                 HealthNeedsAttentionItems.Items.Add("No active warnings. Live health checks are passing.");
@@ -307,7 +307,7 @@ namespace TimeCardControlCenter
             {
                 ConfigurationProfile current = await Task.Run(() => CaptureConfigurationCore("Current card"));
                 ProfileDiffText.Text = BuildProfileDiff(profile, current);
-                SetProfileBusy(false, "Preview ready — no hardware changes made.");
+                SetProfileBusy(false, "Preview ready - no hardware changes made.");
             }
             catch (Exception ex)
             {
@@ -1188,7 +1188,7 @@ namespace TimeCardControlCenter
         private void AddConfigurationHistory(string action, string profile, string detail)
         {
             string entry = string.Format(CultureInfo.InvariantCulture,
-                "{0:yyyy-MM-dd HH:mm:ss}  {1}  {2} — {3}", DateTime.Now,
+                "{0:yyyy-MM-dd HH:mm:ss}  {1}  {2} - {3}", DateTime.Now,
                 action, profile, detail);
             productSettings.ConfigurationHistory.Insert(0, entry);
             while (productSettings.ConfigurationHistory.Count > 100)
@@ -1469,7 +1469,7 @@ namespace TimeCardControlCenter
             SelfTestResultsList.Items.Clear();
             foreach (SelfTestResult result in lastSelfTestResults)
                 SelfTestResultsList.Items.Add(result);
-            SelfTestSummaryText.Text = "Demo report complete — all simulated checks passed.";
+            SelfTestSummaryText.Text = "Demo report complete - all simulated checks passed.";
         }
 
         private void ExportSelfTest_Click(object sender, RoutedEventArgs e)
@@ -1537,7 +1537,7 @@ namespace TimeCardControlCenter
         private string BuildSelfTestReport()
         {
             StringBuilder report = new StringBuilder();
-            report.AppendLine("OCP Time Card Control Center — Self-Test Report");
+            report.AppendLine("TimeCardControlCenter - Self-Test Report");
             report.AppendLine("Generated: " + DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
             report.AppendLine();
             if (lastSelfTestResults.Count == 0)
