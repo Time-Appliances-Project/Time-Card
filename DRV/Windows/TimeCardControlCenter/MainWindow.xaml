@@ -3112,12 +3112,12 @@
                                                FontFamily="Cascadia Mono, Consolas" FontSize="13" TextWrapping="Wrap" LineHeight="22" />
                                 </StackPanel></Border>
                                 <Border Grid.Column="1" Style="{StaticResource Panel}"><StackPanel>
-                                    <TextBlock Text="Capability roadmap" Style="{StaticResource SectionTitle}" />
-                                    <TextBlock Text="The GUI exposes ABI 7 clock-source, NMEA-generator, UART, hierarchy, SMA routing, signal-generator, frequency-counter, card identity, guarded I²C mux/LED operations, and FPGA flash operations. These controls still require explicit, reviewed kernel additions:"
+                                    <TextBlock Text="Hardware access and support" Style="{StaticResource SectionTitle}" />
+                                    <TextBlock Text="Live hardware access requires a supported PCIe Time Card and a separately installed compatible Time Card driver. Choose Restart as administrator and approve Windows UAC to access the protected hardware interfaces."
                                                Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,7,0,16" />
-                                    <TextBlock Text="• SMA polarity, termination, and cable-delay calibration" Margin="0,4" />
-                                    <TextBlock Text="• Validated I²C data-write and EEPROM-programming workflow" Margin="0,4" />
-                                    <TextBlock Text="• PTM counters and advanced clock-source selection" Margin="0,4" />
+                                    <TextBlock Text="• Features depend on the card, firmware, and connected peripherals." TextWrapping="Wrap" Margin="0,4" />
+                                    <TextBlock Text="• Demo mode uses synthetic data without a hardware connection." TextWrapping="Wrap" Margin="0,4" />
+                                    <TextBlock Text="• Review local reports for identifiers and position data before sharing." TextWrapping="Wrap" Margin="0,4" />
                                 </StackPanel></Border>
                             </Grid>
                             <Border Grid.Row="2" Style="{StaticResource Panel}" Padding="0" MinHeight="360">

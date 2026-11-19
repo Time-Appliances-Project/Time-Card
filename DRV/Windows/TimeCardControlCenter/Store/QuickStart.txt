@@ -1,8 +1,9 @@
 TimeCardControlCenter
 Author: Ahmad Byagowi
 
-Open the app normally to explore its interface and diagnostics. Enable Demo in
-the sidebar to view clearly labeled synthetic data without timing hardware.
+Open the app normally to explore its interface and diagnostics. Open Settings
+from the sidebar and enable Demo to view clearly labeled synthetic data
+without timing hardware.
 
 For live hardware, install a supported PCIe Time Card and its compatible
 Microsoft-signed Time Card driver separately. The app requires driver ABI 15.

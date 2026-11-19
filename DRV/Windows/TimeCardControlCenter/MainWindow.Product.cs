@@ -1671,11 +1671,30 @@ namespace TimeCardControlCenter
             SamplingHistoryChart.AddSample(now, window);
             OffsetHistoryValueText.Text = OffsetText.Text;
             SamplingHistoryValueText.Text = SamplingWindowText.Text;
+            ClockCardTimeText.Text = CardTimeText.Text;
+            ClockSystemTimeText.Text = SystemTimeText.Text;
+            ClockOffsetText.Text = OffsetText.Text;
+            ClockSyncText.Text = "SIMULATED · IN SYNC";
+            ClockSyncText.Foreground = healthy;
+            ClockStatusRawText.Text = "Synthetic demo, no hardware status read";
+            ClockSamplingText.Text = SamplingWindowText.Text;
+            ClockVersionDetailText.Text = "Simulated v1.4.0";
+            ClockSourceDetailText.Text = "Simulated Time-of-Day / GNSS";
+            ClockOffsetAddressText.Text = "Not read in demo mode";
+            ClockOffsetHistoryChart.AddSample(now, offset);
+            ClockSamplingHistoryChart.AddSample(now, window);
+            ClockOffsetHistoryValueText.Text = OffsetText.Text;
+            ClockSamplingHistoryValueText.Text = SamplingWindowText.Text;
+            ClockOffsetHistoryScaleText.Text = "SYNTHETIC DEMO SAMPLES";
+            ClockSamplingHistoryScaleText.Text = "SYNTHETIC DEMO SAMPLES";
+            ClockSourceApplyButton.IsEnabled = false;
+            ClockSourceApplyStatusText.Text = "Hardware changes are unavailable in demo mode";
+            DiagnosticsSummaryText.Text = "Demo mode\nSynthetic clock and telemetry samples.\nNo live hardware session or driver registers are read.";
             ClockChipText.Text = "SIMULATED · IN SYNC";
             FabricPhcText.Text = "SIMULATED";
             ClockChipText.Foreground = healthy;
             HierarchyOverviewText.Text = "DEMO";
-            SidebarDriverText.Text = "Demo data · ABI 12";
+            SidebarDriverText.Text = "Synthetic demo data";
             SidebarSerialText.Text = "DEMO-TIMECARD-0001";
             if (!telemetryPaused)
             {
