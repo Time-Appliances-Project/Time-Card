@@ -366,17 +366,6 @@ namespace TimeCardControlCenter
         {
             Log("TimeCardControlCenter started.");
             string capturePath = StartupArgumentValue(startupArguments, "--capture");
-            if (!productSettings.DemoMode && string.IsNullOrWhiteSpace(capturePath) && !HasAdministratorAccess())
-            {
-                MessageBoxResult elevationChoice = MessageBox.Show(this,
-                    "Time Card Control Center is running without administrator access. " +
-                    "Some hardware features may be unavailable.\n\n" +
-                    "Restart now with administrator access?",
-                    "Administrator access recommended", MessageBoxButton.YesNo,
-                    MessageBoxImage.Information, MessageBoxResult.Yes);
-                if (elevationChoice == MessageBoxResult.Yes && RestartAsAdministrator())
-                    return;
-            }
             refreshTimer.Start();
             if (productSettings.DemoMode)
             {
@@ -563,6 +552,7 @@ namespace TimeCardControlCenter
                 snapshot.IsClockSynchronized ? "SYNCHRONIZED" : "LIVE · UNLOCKED";
             ClockChipText.Foreground = snapshot.IsClockSynchronized ? healthyBrush : warningBrush;
             FabricTodText.Text = snapshot.TodTelemetryAvailable || snapshot.GnssTelemetryAvailable ? "LIVE" : "NOT EXPOSED";
+            FabricPhcText.Text = "ACTIVE";
             FabricTodText.Foreground = snapshot.TodTelemetryAvailable || snapshot.GnssTelemetryAvailable ? healthyBrush : (Brush)FindResource("MutedBrush");
             HierarchyOverviewText.Text = snapshot.HierarchyRuntimeEnabled ? "ENABLED" : "DISABLED";
 
@@ -704,9 +694,17 @@ namespace TimeCardControlCenter
         {
             ConnectionText.Text = text;
             ConnectionDot.Fill = (Brush)FindResource(connected ? "AccentBrush" : "DangerBrush");
-            ElevateButton.Visibility = showElevation ? Visibility.Visible : Visibility.Collapsed;
+            bool canRequestHardwareAccess = !connected &&
+                (productSettings == null || !productSettings.DemoMode) &&
+                !HasAdministratorAccess();
+            ElevateButton.Visibility = showElevation || canRequestHardwareAccess ?
+                Visibility.Visible : Visibility.Collapsed;
             if (!connected)
+            {
                 ResetClockHistory();
+                ClockChipText.Text = "WAITING";
+                FabricPhcText.Text = "NOT CONNECTED";
+            }
         }
 
         private async void Refresh_Click(object sender, RoutedEventArgs e)

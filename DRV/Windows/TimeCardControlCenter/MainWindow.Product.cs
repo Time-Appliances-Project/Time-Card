@@ -1132,6 +1132,7 @@ namespace TimeCardControlCenter
             {
                 Title = "Export Time Card profile",
                 Filter = "Time Card profile (*.xml)|*.xml",
+                InitialDirectory = ExistingDirectory(productSettings.LastExportDirectory),
                 FileName = SafeFileName(profile.Name) + ".xml"
             };
             if (dialog.ShowDialog(this) != true)
@@ -1484,6 +1485,7 @@ namespace TimeCardControlCenter
             {
                 Title = "Export Time Card self-test report",
                 Filter = "Text report (*.txt)|*.txt",
+                InitialDirectory = ExistingDirectory(productSettings.LastExportDirectory),
                 FileName = "timecard-self-test-" + DateTime.Now.ToString("yyyyMMdd-HHmmss",
                     CultureInfo.InvariantCulture) + ".txt"
             };
@@ -1500,6 +1502,7 @@ namespace TimeCardControlCenter
             {
                 Title = "Create Time Card support bundle",
                 Filter = "ZIP archive (*.zip)|*.zip",
+                InitialDirectory = ExistingDirectory(productSettings.LastExportDirectory),
                 FileName = "timecard-support-" + DateTime.Now.ToString("yyyyMMdd-HHmmss",
                     CultureInfo.InvariantCulture) + ".zip"
             };
@@ -1669,6 +1672,7 @@ namespace TimeCardControlCenter
             OffsetHistoryValueText.Text = OffsetText.Text;
             SamplingHistoryValueText.Text = SamplingWindowText.Text;
             ClockChipText.Text = "SIMULATED · IN SYNC";
+            FabricPhcText.Text = "SIMULATED";
             ClockChipText.Foreground = healthy;
             HierarchyOverviewText.Text = "DEMO";
             SidebarDriverText.Text = "Demo data · ABI 12";
@@ -1837,7 +1841,8 @@ namespace TimeCardControlCenter
 
         private static string ExistingDirectory(string path)
         {
-            return !string.IsNullOrWhiteSpace(path) && Directory.Exists(path) ? path : null;
+            return !string.IsNullOrWhiteSpace(path) && Directory.Exists(path) ?
+                path : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
         }
 
         private static string SafeFileName(string name)

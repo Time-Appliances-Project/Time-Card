@@ -1,5 +1,5 @@
 TimeCardControlCenter privacy policy
-Draft for publication, 19 November 2026
+Effective date: 19 November 2026
 Author and contact: Ahmad Byagowi, clk@wiwistamp.com
 
 TimeCardControlCenter displays and configures supported Time Card hardware on your Windows computer. The application does not contain an advertising service, an analytics service, or an automatic upload facility.

@@ -392,7 +392,7 @@
                                         <Grid>
                                             <TextBlock Text="Precision Hardware Clock" Style="{StaticResource SectionTitle}" />
                                             <Border Style="{StaticResource StatusChip}" HorizontalAlignment="Right">
-                                                <TextBlock x:Name="ClockChipText" Text="LIVE" Foreground="{DynamicResource AccentBrush}"
+                                                <TextBlock x:Name="ClockChipText" Text="WAITING" Foreground="{DynamicResource AccentBrush}"
                                                            FontFamily="Segoe UI Semibold" FontSize="10" />
                                             </Border>
                                         </Grid>
@@ -490,7 +490,7 @@
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                             <Ellipse Width="9" Height="9" Fill="{DynamicResource AccentBrush}" VerticalAlignment="Center" />
                                             <TextBlock Grid.Column="1" Text="PCIe controller + PHC" Margin="10,0" />
-                                            <TextBlock Grid.Column="2" Text="ACTIVE" Foreground="{DynamicResource AccentBrush}" FontSize="10" />
+                                            <TextBlock x:Name="FabricPhcText" Grid.Column="2" Text="NOT CONNECTED" Foreground="{DynamicResource AccentBrush}" FontSize="10" />
                                         </Grid>
                                         <Grid Margin="0,10">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

@@ -41,16 +41,16 @@ jobs:
         shell: powershell
         working-directory: DRV/Windows
         run: .\package-control-center.ps1 -SkipBuild
-      - name: Validate qualification MSIX
+      - name: Validate Store MSIX
         shell: powershell
         working-directory: DRV/Windows
-        run: .\package-control-center-store.ps1 -SkipBuild -QualificationPackage -IdentityName TimeCardControlCenter.Qualification -Publisher 'CN=TimeCardControlCenterQualification' -PublisherDisplayName 'Ahmad Byagowi'
+        run: .\package-control-center-store.ps1 -SkipBuild -IdentityName AhmadByagowi.TimeCardControlCenter -Publisher 'CN=7C3D5816-939C-4628-A3C7-1CD2D2957E6E' -PublisherDisplayName 'Ahmad Byagowi'
       - name: Upload Control Center package
         uses: actions/upload-artifact@v4
         with:
           name: TimeCardControlCenter-x64
           path: |
             DRV/Windows/out/TimeCardControlCenter-*-x64.zip
-            DRV/Windows/out/TimeCardControlCenter-*-qualification-unsigned.msix
-            DRV/Windows/out/TimeCardControlCenter-*-qualification-unsigned.msix.json
+            DRV/Windows/out/TimeCardControlCenter-*-store-unsigned.msix
+            DRV/Windows/out/TimeCardControlCenter-*-store-unsigned.msix.json
           if-no-files-found: error

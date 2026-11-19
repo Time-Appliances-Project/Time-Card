@@ -46,9 +46,12 @@ namespace TimeCardControlCenter
                 if (target == null)
                 {
                     bool hasPreference = HasPersistedDevicePreference();
-                    SetConnectionState(false, hasPreference ?
+                    bool needsAdministrator = !HasAdministratorAccess();
+                    SetConnectionState(false, needsAdministrator ?
+                        "Administrator required for hardware" : hasPreference ?
                         "Selected card unavailable" : "No Time Card found", false);
-                    SidebarDriverText.Text = hasPreference ?
+                    SidebarDriverText.Text = needsAdministrator ?
+                        "Use administrator access or demo mode" : hasPreference ?
                         "Waiting for the selected Time Card" :
                         "No supported Time Card is present";
                     return;
@@ -176,10 +179,12 @@ namespace TimeCardControlCenter
                 if (target == null)
                 {
                     CardSelector.SelectedIndex = -1;
-                    CardSelector.Text = hasPreference ?
+                    CardSelector.Text = !HasAdministratorAccess() ?
+                        "Elevate to discover hardware" : hasPreference ?
                         "Selected card is not present" :
                         "No Time Cards found";
-                    CardSelector.ToolTip = hasPreference ?
+                    CardSelector.ToolTip = !HasAdministratorAccess() ?
+                        "Use the administrator button for hardware access, or enable demo mode in Profiles & Self-Test." : hasPreference ?
                         "Reconnect the previously selected card, or select another present card." :
                         "No controller published the Time Card device interface.";
                 }
