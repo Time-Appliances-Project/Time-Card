@@ -32,7 +32,7 @@ $miniCodLicense = Join-Path $release 'MINICOD-LICENSE.txt'
 $projectReadme = Join-Path $windowsRoot 'TimeCardControlCenter\README.md'
 $projectLicense = Join-Path (Split-Path -Parent (Split-Path -Parent `
     $windowsRoot)) 'LICENSE.md'
-$inputs = @($executable, $notices, $miniCodLicense, $projectReadme,
+$inputs = @($executable, ($executable+'.config'), $notices, $miniCodLicense, $projectReadme,
     $projectLicense)
 foreach ($inputFile in $inputs) {
     if (-not (Test-Path -LiteralPath $inputFile -PathType Leaf)) {
@@ -74,7 +74,8 @@ try {
     $actual = @($archive.Entries | ForEach-Object { $_.FullName } |
         Sort-Object)
     $expected = @('LICENSE.md', 'MINICOD-LICENSE.txt', 'README.md',
-        'THIRD_PARTY_NOTICES.md', 'TimeCardControlCenter.exe') | Sort-Object
+        'THIRD_PARTY_NOTICES.md', 'TimeCardControlCenter.exe',
+        'TimeCardControlCenter.exe.config') | Sort-Object
     if (Compare-Object -ReferenceObject $expected -DifferenceObject $actual) {
         throw 'The Control Center archive has unexpected or missing files.'
     }

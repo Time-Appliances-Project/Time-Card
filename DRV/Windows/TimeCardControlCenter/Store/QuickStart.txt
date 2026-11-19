@@ -1,0 +1,29 @@
+TimeCardControlCenter
+Author: Ahmad Byagowi
+
+Open the app normally to explore its interface and diagnostics. Enable Demo in
+the sidebar to view clearly labeled synthetic data without timing hardware.
+
+For live hardware, install a supported PCIe Time Card and its compatible
+Microsoft-signed Time Card driver separately. The app requires driver ABI 15.
+Select Restart as administrator and approve Windows User Account Control,
+then select a detected card. Each card has its own workspace. Supported
+features depend on the board, firmware, peripherals, and driver capabilities.
+
+The app initially reads status. Clock adjustments, output routing, GNSS
+configuration, and firmware operations change hardware state. Review the
+selected card and the operation before applying a change. Firmware operations
+require their own explicit confirmation. A GNSS antenna and suitable reception
+are required for satellite synchronization.
+
+Diagnostic reports are exported only when requested. The default destination
+is Documents. Reports may contain device identifiers or GNSS position data;
+review them before sharing. PrivacyPolicy.txt describes local data handling
+and the optional user-configured oscillatord service connection.
+
+Support: clk@wiwistamp.com
+Documentation and source:
+https://github.com/Time-Appliances-Project/Time-Card/tree/windows/control-center-store/DRV/Windows/TimeCardControlCenter
+Issues: https://github.com/Time-Appliances-Project/Time-Card/issues
+
+Third-party notices and license files are included with the app.

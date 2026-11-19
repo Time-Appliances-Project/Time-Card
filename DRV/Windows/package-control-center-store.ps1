@@ -28,9 +28,9 @@ $out=Join-Path $PSScriptRoot 'out'
 $null=New-Item -ItemType Directory -Path $out -Force
 $stage=Join-Path $out ('msix-stage-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path (Join-Path $stage 'Assets') -Force
-Copy-Item $exe,(Join-Path $release 'THIRD_PARTY_NOTICES.md'),(Join-Path $release 'MINICOD-LICENSE.txt') $stage
+Copy-Item $exe,($exe+'.config'),(Join-Path $release 'THIRD_PARTY_NOTICES.md'),(Join-Path $release 'MINICOD-LICENSE.txt') $stage
 Copy-Item (Join-Path $PSScriptRoot '..\..\LICENSE.md') $stage
-Copy-Item (Join-Path $PSScriptRoot 'TimeCardControlCenter\README.md') $stage
+Copy-Item (Join-Path $PSScriptRoot 'TimeCardControlCenter\Store\QuickStart.txt') $stage
 Copy-Item (Join-Path $PSScriptRoot 'TimeCardControlCenter\Store\PrivacyPolicy.txt') $stage
 Add-Type -AssemblyName System.Drawing
 $source=[Drawing.Image]::FromFile((Join-Path $PSScriptRoot 'assets\timecard-app-icon.png'))
