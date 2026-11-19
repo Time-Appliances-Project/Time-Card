@@ -7,6 +7,7 @@ using System.IO;
 using System.IO.Ports;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
@@ -267,8 +268,8 @@ namespace TimeCardControlCenter
         public MainWindow()
         {
             InitializeComponent();
-            // Remote and software-only sessions use 2D visuals. WPF's 3D
-            // software rasterizer can stall native DLL loading after UAC.
+            // Keep remote and software-only sessions independent of the
+            // 3D software rasterizer for decorative and orientation previews.
             if (!use3DPreview)
             {
                 AnimatedTimeCardLogo.Visibility = Visibility.Collapsed;
@@ -7602,12 +7603,18 @@ namespace TimeCardControlCenter
             {
                 ProcessStartInfo startInfo = new ProcessStartInfo
                 {
-                    FileName = Assembly.GetEntryAssembly().Location,
+                    FileName = GetAdministratorLaunchPath(),
+                    WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
                     UseShellExecute = true,
                     Verb = "runas",
                     Arguments = string.Join(" ", startupArguments.Skip(1).Select(QuoteProcessArgument))
                 };
-                Process.Start(startInfo);
+                using (Process restarted = Process.Start(startInfo))
+                {
+                    if (restarted == null)
+                        throw new Win32Exception(2,
+                            "Windows did not start the administrator session.");
+                }
                 Application.Current.Shutdown();
                 return true;
             }
@@ -7617,6 +7624,38 @@ namespace TimeCardControlCenter
                 return false;
             }
         }
+
+        // Packaged apps must activate through their registered launch contract.
+        // Launching the WindowsApps payload directly can create an elevated
+        // process with an incomplete activation context and stall DLL loading.
+        private static string GetAdministratorLaunchPath()
+        {
+            uint length = 0;
+            int result = GetCurrentPackageFamilyName(ref length, null);
+            if (result == 15700) // APPMODEL_ERROR_NO_PACKAGE: portable build.
+                return Assembly.GetEntryAssembly().Location;
+            if (result != 122) // ERROR_INSUFFICIENT_BUFFER
+                throw new Win32Exception(result);
+            StringBuilder family = new StringBuilder(checked((int)length));
+            result = GetCurrentPackageFamilyName(ref length, family);
+            if (result != 0)
+                throw new Win32Exception(result);
+            // Use the package-specific alias, independent of PATH, other apps'
+            // aliases, and the user's choice of default command-line alias.
+            string alias = Path.Combine(Environment.GetFolderPath(
+                Environment.SpecialFolder.LocalApplicationData), "Microsoft",
+                "WindowsApps", family.ToString(), "TimeCardControlCenter.exe");
+            if (!File.Exists(alias))
+                throw new Win32Exception(2,
+                    "The app's Windows launch entry is missing. Reinstall " +
+                    "TimeCardControlCenter and try again.");
+            return alias;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        private static extern int GetCurrentPackageFamilyName(
+            ref uint packageFamilyNameLength, StringBuilder packageFamilyName);
 
         private static bool HasAdministratorAccess()
         {

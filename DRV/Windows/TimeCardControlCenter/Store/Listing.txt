@@ -17,6 +17,6 @@ Requirements
 Windows 10 version 2004 or later, x64; a supported Time Card PCIe device and a separately installed compatible driver for live hardware use. Administrator approval is required to access the hardware driver. GNSS reception requires an appropriate antenna and reception conditions. Demo mode does not require a card.
 
 Release notes
-Version 1.52.6 adds per-monitor display scaling, explicit hardware-access elevation, clear disconnected status, Time Card product naming and Ahmad Byagowi author metadata, retains WiWi ABI 15 support, and corrects capability and identity presentation for installed boards.
+Version 1.52.7 adds per-monitor display scaling, explicit hardware-access elevation, clear disconnected status, Time Card product naming and Ahmad Byagowi author metadata, retains WiWi ABI 15 support, and corrects capability and identity presentation for installed boards.
 
 Do not publish until the actual Partner Center identity, privacy-policy URL, support URL, screenshots, age rating, availability, and elevation-capability approval have been completed and the packaged application has passed installation, update, removal, standard-user, elevation, and Windows App Certification Kit checks.

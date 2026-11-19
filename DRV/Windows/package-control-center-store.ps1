@@ -53,12 +53,12 @@ $publisherXml=[Security.SecurityElement]::Escape($Publisher)
 $displayXml=[Security.SecurityElement]::Escape($PublisherDisplayName)
 $manifest=@"
 <?xml version="1.0" encoding="utf-8"?>
-<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" IgnorableNamespaces="uap rescap">
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3" xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10" IgnorableNamespaces="uap uap3 desktop rescap">
   <Identity Name="$identityXml" Publisher="$publisherXml" Version="$tag" ProcessorArchitecture="x64" />
   <Properties><DisplayName>TimeCardControlCenter</DisplayName><PublisherDisplayName>$displayXml</PublisherDisplayName><Description>Time Card hardware dashboard and diagnostics</Description><Logo>Assets\Logo50.png</Logo></Properties>
   <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26200.0" /></Dependencies>
   <Resources><Resource Language="en-us" /></Resources>
-  <Applications><Application Id="ControlCenter" Executable="TimeCardControlCenter.exe" EntryPoint="Windows.FullTrustApplication"><uap:VisualElements DisplayName="TimeCardControlCenter" Description="Time Card hardware dashboard and diagnostics" BackgroundColor="#081725" Square150x150Logo="Assets\Logo150.png" Square44x44Logo="Assets\Logo44.png" /></Application></Applications>
+  <Applications><Application Id="ControlCenter" Executable="TimeCardControlCenter.exe" EntryPoint="Windows.FullTrustApplication"><uap:VisualElements DisplayName="TimeCardControlCenter" Description="Time Card hardware dashboard and diagnostics" BackgroundColor="#081725" Square150x150Logo="Assets\Logo150.png" Square44x44Logo="Assets\Logo44.png" /><Extensions><uap3:Extension Category="windows.appExecutionAlias" Executable="TimeCardControlCenter.exe" EntryPoint="Windows.FullTrustApplication"><uap3:AppExecutionAlias><desktop:ExecutionAlias Alias="TimeCardControlCenter.exe" /></uap3:AppExecutionAlias></uap3:Extension></Extensions></Application></Applications>
   <Capabilities><rescap:Capability Name="runFullTrust" /><rescap:Capability Name="allowElevation" /></Capabilities>
 </Package>
 "@
