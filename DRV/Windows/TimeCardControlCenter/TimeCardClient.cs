@@ -224,6 +224,7 @@ namespace TimeCardControlCenter
                 string error = string.Empty;
                 uint abi = 0;
                 bool accessible = false;
+                bool supportsEuiIdentity = true;
                 try
                 {
                     using (TimeCardClient probe = new TimeCardClient(path))
@@ -235,11 +236,13 @@ namespace TimeCardControlCenter
                                 probe.GetCapabilities();
                             board = capabilities.BoardName;
                             abi = capabilities.AbiVersion;
+                            supportsEuiIdentity = capabilities.BoardProfile != 2u;
                         }
                         catch (Exception ex)
                         {
                             error = "Capability probe: " + ex.Message;
                         }
+                        if (supportsEuiIdentity)
                         try
                         {
                             TimeCardIdentity identity = probe.GetIdentity();

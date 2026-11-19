@@ -562,6 +562,8 @@ namespace TimeCardControlCenter
             ClockChipText.Text = !clockStatusAvailable ? "STATUS UNAVAILABLE" :
                 snapshot.IsClockSynchronized ? "SYNCHRONIZED" : "LIVE · UNLOCKED";
             ClockChipText.Foreground = snapshot.IsClockSynchronized ? healthyBrush : warningBrush;
+            FabricTodText.Text = snapshot.TodTelemetryAvailable || snapshot.GnssTelemetryAvailable ? "LIVE" : "NOT EXPOSED";
+            FabricTodText.Foreground = snapshot.TodTelemetryAvailable || snapshot.GnssTelemetryAvailable ? healthyBrush : (Brush)FindResource("MutedBrush");
             HierarchyOverviewText.Text = snapshot.HierarchyRuntimeEnabled ? "ENABLED" : "DISABLED";
 
             ClockCardTimeText.Text = cardTime;
@@ -5482,6 +5484,14 @@ namespace TimeCardControlCenter
                 SidebarSerialText.Text = "Driver 1.14 required";
                 I2cSerialNumberText.Text =
                     "Update to driver 1.14 to read the card identity";
+                return;
+            }
+
+            if (lastSnapshot.Layout == "Orolia ART")
+            {
+                SidebarSerialText.Text = "Use PCIe device identity";
+                I2cSerialNumberText.Text = "ART EEPROM is not a 24MAC402 EUI-48 identity device";
+                I2cSerialNumberText.Foreground = (Brush)FindResource("MutedBrush");
                 return;
             }
 

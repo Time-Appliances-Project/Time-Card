@@ -2,7 +2,7 @@
 
 Windows application author: Ahmad Byagowi
 
-Release 1.52.0 supports the Microsoft-signed Time Card 1.52 driver (ABI 15), including WiWi revision 02. Install the driver separately before connecting to hardware. The portable app is a qualification candidate; Microsoft Store publication is pending.
+Release 1.52.1 supports the Microsoft-signed Time Card 1.52 driver (ABI 15), including WiWi revision 02. Install the driver separately before connecting to hardware. The portable app is a qualification candidate; Microsoft Store publication is pending.
 
 
 The Time Card Control Center is a dependency-free Windows desktop dashboard

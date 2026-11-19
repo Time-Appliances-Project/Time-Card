@@ -1348,23 +1348,24 @@ namespace TimeCardControlCenter
             });
             RunCheck(results, "Clock synchronization", delegate
             {
+                if (first.ClockStatus == uint.MaxValue)
+                    return Skipped("Clock synchronization status is not exposed by this FPGA image");
                 return first.IsClockSynchronized ? Pass("PHC reports synchronized") :
                     Warning("PHC is live but not synchronized");
             });
             RunCheck(results, "GNSS / ToD", delegate
             {
-                if (first.Layout == "Orolia ART" &&
-                    !first.GnssTelemetryAvailable)
-                    return Skipped("GNSS/ToD summary registers are not exposed by this ART FPGA image");
+                if (!first.GnssTelemetryAvailable)
+                    return Skipped("GNSS/ToD summary registers are not exposed by this FPGA image");
                 return first.GnssFixOk ? Pass(first.GnssFix + ", " +
                     first.LockedSatellites + " satellites locked") :
                     Warning(first.GnssFix + "; antenna or sky view may need attention");
             });
             RunCheck(results, "Card identity", delegate
             {
-                TimeCardIdentity identity = client.GetIdentity();
-                if (first.Layout == "Orolia ART" && !identity.IsValid)
+                if (first.Layout == "Orolia ART")
                     return Skipped("ART EEPROM stores oscillator configuration, not an EUI-48 serial");
+                TimeCardIdentity identity = client.GetIdentity();
                 return identity.IsValid ? Pass(identity.SerialNumber) :
                     Warning("MAC EEPROM did not return a valid serial number");
             });
